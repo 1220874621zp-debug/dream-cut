@@ -233,7 +233,6 @@ set(
     GUI/layouthandler.cpp
     GUI/scenenavigatorbar.cpp
     GUI/projectpanel.cpp
-    GUI/switchpanel.cpp
     GUI/editortimelinewindow.cpp
     GUI/editortimelinewidget.cpp
     GUI/editortimelinesync.cpp

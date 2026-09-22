@@ -284,8 +284,6 @@ private:
     ProjectPanel *mProjectPanel = nullptr;
     QDockWidget *mTextAnimDock = nullptr;
     class TextAnimPresetPanel *mTextAnimPanel = nullptr;
-    QDockWidget *mSwitchPanelDock = nullptr;
-    class SwitchPanel *mSwitchPanel = nullptr;
     QDockWidget *mEditorTimelineDock = nullptr;
     EditorTimelineWindow *mEditorTimelineWindow = nullptr;
     EditorTimelineSync *mEditorTimelineSync = nullptr;

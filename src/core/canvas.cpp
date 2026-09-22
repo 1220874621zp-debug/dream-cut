@@ -2606,20 +2606,6 @@ void Canvas::addAdjustmentLayerAction() {
     if(Document::sInstance) Document::sInstance->actionFinished();
 }
 
-// Moho-style switch group: an empty group flagged as switch layer, the
-// user then drops the alternative layers into it
-void Canvas::addSwitchGroupAction() {
-    const auto group = enve::make_shared<ContainerBox>(
-                QObject::tr("切换组"), eBoxType::group);
-    mCurrentContainer ? mCurrentContainer->addContained(group) :
-                        addContained(group);
-    group->enableSwitchLayer();
-    group->planUpdate(UpdateReason::userChange);
-    clearBoxesSelection();
-    addBoxToSelection(group.get());
-    if(Document::sInstance) Document::sInstance->actionFinished();
-}
-
 // AE solid layer: flat-color plane the size of the canvas
 void Canvas::addSolidLayerAction() {
     const auto solid = enve::make_shared<SolidLayer>();
