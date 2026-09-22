@@ -666,14 +666,14 @@ void NleTimelineView::drawClip(QPainter &p,
         p.drawText(tagRect, Qt::AlignCenter, tag);
     }
 
-    // border: selected = accent, hovered = lighter
+    // border: selected = white (CapCut), hovered = lighter
     p.setBrush(Qt::NoBrush); // drawPath would otherwise fill with the leftover badge brush
     if (selected) {
-        p.setPen(QPen(cAccent, 2));
+        p.setPen(QPen(Qt::white, 2));
         p.drawPath(path);
         // trim handles
         p.setPen(Qt::NoPen);
-        p.setBrush(cAccent);
+        p.setBrush(Qt::white);
         p.drawRoundedRect(QRectF(r.left(), r.top(), 5, r.height()), 2, 2);
         p.drawRoundedRect(QRectF(r.right() - 5, r.top(), 5, r.height()), 2, 2);
     } else {

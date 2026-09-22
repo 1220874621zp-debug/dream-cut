@@ -113,6 +113,12 @@ namespace EvFormat {
         // the block and must skip it (positional)
         nleTrackSpecs = 52,
 
+        // main-track designation inside the track spec block (one
+        // extra qint32 per spec); the main lane is PERSISTENT and
+        // must not drift when lanes are added below it; older files
+        // carry no flag and designate the bottom video lane once
+        nleTrackMain = 53,
+
         nextVersion
     };
 

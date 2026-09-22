@@ -74,8 +74,16 @@ bool NleTimelineModel::trackLocked(const int trackId) const
 
 int NleTimelineModel::mainTrackId() const
 {
-    // the video group renders top-down with V1 at its bottom, so the
-    // LAST video entry in the panel order is the main track
+    // PERSISTENT designation (eTrackSpec.mMain): adding or removing
+    // lanes never moves the main track. An unflagged table (legacy
+    // project, first open) falls back to the bottom-most video lane
+    // until the refresh designates it once
+    const auto scene = mPanelScene.data();
+    if (scene) {
+        for (const auto &s : scene->getTrackSpecs()) {
+            if (!s.mAudio && s.mMain) { return s.mId; }
+        }
+    }
     for (int i = mTracks.size() - 1; i >= 0; --i) {
         if (!mTracks.at(i).audio) { return mTracks.at(i).id; }
     }
@@ -484,6 +492,9 @@ void NleTimelineModel::purgeEmptyTracks(const QHash<int, int> &members)
 {
     const auto scene = mPanelScene.data();
     if (!scene) { return; }
+    // the designated main lane is NEVER purged - it is the fixed
+    // primary track and also guarantees the video-type invariant
+    const int mainId = mainTrackId();
     const auto specs = scene->getTrackSpecs();
     for (int type = 0; type < 2; ++type) {
         const bool audio = type == 1;
@@ -496,7 +507,8 @@ void NleTimelineModel::purgeEmptyTracks(const QHash<int, int> &members)
         // one-lane-per-type invariant guards fresh projects)
         if (withMembers == 0) { continue; }
         for (const auto &s : specs) {
-            if (s.mAudio == audio && members.value(s.mId, 0) == 0) {
+            if (s.mAudio == audio && members.value(s.mId, 0) == 0 &&
+                    s.mId != mainId) {
                 scene->removeTrackSpec(s.mId);
             }
         }
@@ -1224,6 +1236,28 @@ void NleTimelineModel::refreshFromDocument()
         const auto undoBlock = scene->blockUndoRedo();
         specs = deriveTrackSpecs(scene, items);
         mInWriteback = false;
+    }
+    // main-track designation: PERSISTENT per spec table. Legacy or
+    // brand-new tables carry no flag - designate the bottom-most
+    // video lane ONCE; later lane adds (even below it) never move it
+    if (scene && !specs.isEmpty()) {
+        bool anyVideo = false;
+        bool anyMain = false;
+        for (const auto &s : specs) {
+            if (!s.mAudio) {
+                anyVideo = true;
+                if (s.mMain) { anyMain = true; }
+            }
+        }
+        if (anyVideo && !anyMain) {
+            for (int i = specs.size() - 1; i >= 0; --i) {
+                auto &s = specs[i];
+                if (s.mAudio) { continue; }
+                s.mMain = true;
+                scene->setTrackSpecMain(s.mId, true);
+                break;
+            }
+        }
     }
 
     QHash<int, int> laneById;

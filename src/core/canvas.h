@@ -94,6 +94,9 @@ struct eTrackSpec {
     QString mName;
     bool mLocked = false;
     int mHeight = 0;
+    // CapCut main track (the magnetic lane overlays follow). Set
+    // once, PERSISTENT: adding lanes below never moves it
+    bool mMain = false;
 };
 
 class CORE_EXPORT Canvas : public CanvasBase
@@ -370,6 +373,9 @@ public:
     void setTrackSpecName(const int id, const QString &name);
     void setTrackSpecLocked(const int id, const bool locked);
     void setTrackSpecHeight(const int id, const int height);
+    // main-track designation (plain UI-state property, deliberately
+    // not undoable - it survives lane adds/removes untouched)
+    void setTrackSpecMain(const int id, const bool main);
     // default lane height per type used when a spec carries none
     static int trackSpecDefaultHeight(const bool audio)
     { return audio ? 52 : 60; }
