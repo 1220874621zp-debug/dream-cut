@@ -69,6 +69,10 @@ public:
     const Track *track(const int trackId) const;
     QList<int> clipIdsOnTrack(const int trackId) const; // start order
     bool trackLocked(const int trackId) const;
+    // CapCut main track: the bottom-most video lane (V1) - magnetic
+    // rearranging/compaction applies to it alone, overlay tracks
+    // above keep their layout and ride the main blocks they sit on
+    int mainTrackId() const;
     qreal fps() const { return mFps; }
     // shortest legal clip in frames (frame-grid equivalent of the old
     // 0.2s minimum)
@@ -210,8 +214,10 @@ private:
     void connectPanelScene(Canvas * const scene);
     void connectChildren(Canvas * const scene);
     // CapCut track lifecycle: every commit drops tracks that lost
-    // their last clip (one lane of each type always survives)
-    void purgeEmptyTracks();
+    // their last clip (one lane of each type always survives);
+    // membership is passed in RESOLVED form (the caller's clip
+    // table), parking layers count for their displayed lane
+    void purgeEmptyTracks(const QHash<int, int> &members);
     // one-time legacy migration: freeze the pre-P0 derived lane
     // layout into the scene's persistent track table
     QList<eTrackSpec> deriveTrackSpecs(

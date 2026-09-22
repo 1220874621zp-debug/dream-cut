@@ -363,6 +363,19 @@ void NleTimelineView::drawTrackHeaders(QPainter &p)
         p.drawRoundedRect(badge, 4, 4);
         p.setPen(QColor(0xe8, 0xe8, 0xe8));
         p.drawText(badge, Qt::AlignCenter, icon);
+        // CapCut main track: the bottom video lane carries the badge
+        // and drives the magnetic layout + overlay following
+        if (!tracks[i].audio && tracks[i].id == mModel->mainTrackId()) {
+            QFont mf = font();
+            mf.setPixelSize(9);
+            p.setFont(mf);
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(0xff, 0xd1, 0x54));
+            const QRect mb(34, top + (h - 22) / 2, 14, 22);
+            p.drawRoundedRect(mb, 3, 3);
+            p.setPen(QColor(0x33, 0x28, 0x08));
+            p.drawText(mb, Qt::AlignCenter, QStringLiteral("主"));
+        }
 
         p.setPen(tracks[i].muted ? cTextDim : cText);
         p.drawText(QRect(38, top, headerWidth() - 68, h),
@@ -994,7 +1007,7 @@ void NleTimelineView::mousePressEvent(QMouseEvent *e)
     // corner square (+V / +A track buttons)
     if (e->pos().x() < headerWidth() && e->pos().y() <= rulerHeight()) {
         if (addTrackRect(false).contains(e->pos())) {
-            mModel->requestTrackAdd(false);
+            mModel->requestTrackAdd(false, true);
         } else if (addTrackRect(true).contains(e->pos())) {
             mModel->requestTrackAdd(true);
         }
@@ -1287,7 +1300,11 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
         const int trId = newLaneZone ? kGhostTrackId
                 : (laneOk ? mModel->tracks().at(trIdx).id : c->trackId);
 
-        if (mModel->magnetic()) {
+        // CapCut main-track magnetic: the rearrange applies to the
+        // MAIN track alone (V1, the bottom video lane); drops onto
+        // any other lane use the classic snap-and-refuse semantics
+        if (mModel->magnetic() && trId != kGhostTrackId &&
+                trId == mModel->mainTrackId()) {
             // kdenlive 方案A: the clip follows the mouse 1:1 on the
             // frame grid - no edge snapping, no refusals - and the
             // whole track rearranges around the drop live (left pack
@@ -1443,6 +1460,7 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
         // mode: extending a clip into its neighbour moves the
         // neighbour, it must not pin the edge at the current out)
         const bool follow = mModel->magnetic() &&
+                c->trackId == mModel->mainTrackId() &&
                 !(e->modifiers() & Qt::AltModifier);
         if (!follow) {
             // neighbor edge: the right handle cannot cross the next
@@ -1997,7 +2015,7 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
         QAction *del = menu.addAction(tr("删除轨道（仅空轨可删）"));
         QAction *rename = menu.addAction(tr("重命名轨道"));
         QAction *act = menu.exec(e->globalPos());
-        if (act == add) { mModel->requestTrackAdd(track.audio); }
+        if (act == add) { mModel->requestTrackAdd(track.audio, !track.audio); }
         else if (act == del) { mModel->requestTrackRemove(track.id); }
         else if (act == rename) { renameTrackDialog(lane); }
         return;

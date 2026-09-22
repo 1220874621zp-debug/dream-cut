@@ -72,6 +72,16 @@ bool NleTimelineModel::trackLocked(const int trackId) const
     return t ? t->locked : false;
 }
 
+int NleTimelineModel::mainTrackId() const
+{
+    // the video group renders top-down with V1 at its bottom, so the
+    // LAST video entry in the panel order is the main track
+    for (int i = mTracks.size() - 1; i >= 0; --i) {
+        if (!mTracks.at(i).audio) { return mTracks.at(i).id; }
+    }
+    return -1;
+}
+
 int NleTimelineModel::minClipFrames() const
 {
     return qMax(1, qRound(0.2 * mFps));
@@ -173,11 +183,14 @@ QVector<NleTimelineModel::Move> NleTimelineModel::insertShiftPlan(
 
 QVector<NleTimelineModel::Move> NleTimelineModel::compactGapsPlan() const
 {
-    // per track, in start order: a clip that begins after the previous
-    // one ends slides left onto that out point; overlaps (merged
-    // layouts) are kept as-is, so only genuine gaps close
+    // MAIN TRACK ONLY (CapCut): per start order a clip that begins
+    // after the previous one ends slides left onto that out point;
+    // overlays keep their positions. Overlaps (merged layouts) are
+    // kept as-is, so only genuine gaps close
+    const int mainId = mainTrackId();
     QVector<Move> moves;
     for (const auto &t : mTracks) {
+        if (t.id != mainId) { continue; }
         QList<QPair<int, int>> order; // start, clipId
         for (const auto &c : mClips) {
             if (c.trackId == t.id) { order.append({c.start, c.clipId}); }
@@ -316,8 +329,11 @@ bool NleTimelineModel::commitMoves(const QVector<Move> &moves,
     for (const auto &m : all) { anyKnown = applyToWork(m) || anyKnown; }
     if (!anyKnown) { return false; }
     if (compactAfter && mMagnetic) {
-        // compactGapsPlan over the working table
+        // compactGapsPlan over the working table - MAIN TRACK ONLY
+        // (CapCut): overlays never get sucked in
+        const int mainId = mainTrackId();
         for (const auto &t : mTracks) {
+            if (t.id != mainId) { continue; }
             QList<QPair<int, const Clip*>> order;
             for (const auto &c : work) {
                 if (c.trackId == t.id) { order.append({c.start, &c}); }
@@ -343,6 +359,52 @@ bool NleTimelineModel::commitMoves(const QVector<Move> &moves,
         }
     }
 
+    // CapCut overlay following: clips on non-main video tracks ride
+    // the main-track block their head sits on (anchor resolved in the
+    // OLD layout, delta from this move set). Computed BEFORE any
+    // write so the table is still pristine
+    {
+        const int mainId = mainTrackId();
+        if (mainId >= 0) {
+            QHash<int, int> deltas; // main clipId -> delta
+            QSet<int> movingIds;
+            for (const auto &m : all) {
+                movingIds.insert(m.clipId);
+                const auto oc = clip(m.clipId);
+                if (oc && oc->trackId == mainId) {
+                    deltas.insert(m.clipId, m.start - oc->start);
+                }
+            }
+            if (!deltas.isEmpty()) {
+                QVector<Move> rides;
+                for (const auto &o : mClips) {
+                    if (o.audio || o.trackId == mainId) { continue; }
+                    if (movingIds.contains(o.clipId)) { continue; }
+                    if (!o.layer) { continue; }
+                    const Clip *anchor = nullptr;
+                    for (const auto &mc : mClips) {
+                        if (mc.trackId != mainId) { continue; }
+                        if (mc.start <= o.start &&
+                                o.start < mc.start + mc.duration) {
+                            anchor = &mc;
+                            break;
+                        }
+                    }
+                    if (!anchor) { continue; }
+                    const int delta = deltas.value(anchor->clipId, 0);
+                    if (delta == 0) { continue; }
+                    const int ns = qMax(0, o.start + delta);
+                    if (ns != o.start) {
+                        rides.append({o.clipId, o.trackId, ns, o.duration});
+                    }
+                }
+                all += rides;
+            }
+        }
+    }
+
+    for (const auto &m : all) {
+    }
     mInWriteback = true;
     for (const auto &m : all) {
         const auto orig = clip(m.clipId);
@@ -357,8 +419,14 @@ bool NleTimelineModel::commitMoves(const QVector<Move> &moves,
     // the row reorder must stay inside the writeback guard: its
     // movedObject signal would refresh mid-commit
     stabilizeRowOrder();
-    // CapCut track lifecycle: a lane that lost its last clip goes away
-    purgeEmptyTracks();
+    // CapCut track lifecycle: a lane that lost its last clip goes
+    // away. Membership comes from the RESOLVED table (parking
+    // included): freshly imported layers carry trackId -1 and only
+    // PARK on a lane - raw-id counting would call their lane empty
+    // and delete it out from under them
+    QHash<int, int> members;
+    for (const auto &wc : work) { members[wc.trackId]++; }
+    purgeEmptyTracks(members);
     mInWriteback = false;
 
     finishAction();
@@ -412,15 +480,10 @@ void NleTimelineModel::stabilizeRowOrder()
     }
 }
 
-void NleTimelineModel::purgeEmptyTracks()
+void NleTimelineModel::purgeEmptyTracks(const QHash<int, int> &members)
 {
     const auto scene = mPanelScene.data();
     if (!scene) { return; }
-    // members per spec id
-    QHash<int, int> members;
-    for (const auto &c : scene->getContained()) {
-        if (c) { members[c->trackId()]++; }
-    }
     const auto specs = scene->getTrackSpecs();
     for (int type = 0; type < 2; ++type) {
         const bool audio = type == 1;
@@ -645,12 +708,37 @@ bool NleTimelineModel::requestDelete(const QSet<int> &clipIds,
                 if (removedBefore > 0) { shiftLayer(c.layer.data(), -removedBefore); }
             }
         }
+        // CapCut overlay following: clips on NON-main video tracks
+        // slide by the MAIN-track victims removed before them (their
+        // anchors are gone; everything after closes up)
+        const int mainId = mainTrackId();
+        if (mainId >= 0) {
+            for (const auto &o : mClips) {
+                if (o.audio || o.trackId == mainId) { continue; }
+                if (victimIds.contains(o.clipId) || !o.layer) { continue; }
+                int removedBefore = 0;
+                for (const int vid : victimIds) {
+                    const auto v = clip(vid);
+                    if (v && !v->audio && v->trackId == mainId &&
+                            v->start < o.start) {
+                        removedBefore += v->duration;
+                    }
+                }
+                if (removedBefore > 0) { shiftLayer(o.layer.data(), -removedBefore); }
+            }
+        }
     }
 
     mInWriteback = true;
     for (auto *layer : victims) { layer->removeFromParent_k(); }
     // CapCut track lifecycle: lanes emptied by the deletion go away
-    purgeEmptyTracks();
+    // (membership = resolved clip table minus the victims, parking
+    // layers count for the lane they are displayed on)
+    QHash<int, int> members;
+    for (const auto &c : mClips) {
+        if (!victimIds.contains(c.clipId)) { members[c.trackId]++; }
+    }
+    purgeEmptyTracks(members);
     mInWriteback = false;
     finishAction();
     return true;
@@ -1152,22 +1240,36 @@ void NleTimelineModel::refreshFromDocument()
         mTracks.append({s.mId, s.mName, true, s.mLocked, false, s.mHeight});
     }
 
-    // lane membership: the layer's trackId; unknown ids (fresh layers)
-    // park on the topmost track of their type until the next commit
-    // materializes the id - the refresh itself never mutates the doc
+    // lane membership: the layer's trackId; unknown ids (fresh
+    // imports, scene-born layers) adopt their display lane RIGHT
+    // HERE - a persistent -1 would re-park on whatever lane is
+    // topmost on every later refresh and starve the purge counting
+    // (one-time write, no undo entry, same pattern as the migration)
     const int trackCount = mTracks.size();
     QVector<int> lane(items.size(), 0);
     QVector<QList<eBoxOrSound*>> laneMembers(trackCount);
+    QList<QPair<eBoxOrSound*, int>> adoptions; // layer, laneIdx
     for (int i = 0; i < items.size(); ++i) {
         int laneIdx = laneById.value(items[i].first->trackId(), -1);
         if (laneIdx < 0) {
             for (int t = 0; t < trackCount; ++t) {
                 if (mTracks.at(t).audio == items[i].second) { laneIdx = t; break; }
             }
+            if (laneIdx >= 0) { adoptions.append({items[i].first, laneIdx}); }
         }
         if (laneIdx < 0) { laneIdx = 0; }
         lane[i] = laneIdx;
         laneMembers[laneIdx].append(items[i].first);
+    }
+    if (!adoptions.isEmpty() && scene) {
+        mInWriteback = true;
+        {
+            const auto undoBlock = scene->blockUndoRedo();
+            for (const auto &a : adoptions) {
+                a.first->setTrackId(mTracks.value(a.second).id);
+            }
+        }
+        mInWriteback = false;
     }
     // mute mirror + default numbering for unnamed specs
     for (int t = 0; t < trackCount; ++t) {
@@ -1228,6 +1330,13 @@ void NleTimelineModel::refreshFromDocument()
         if (selectionIds.contains(c.clipId)) { mSelected.insert(c.clipId); }
     }
 
+    {
+        QString ts, cs;
+        for (const auto &t : mTracks) {
+            ts += QString("[%1%2] ").arg(t.audio ? 'A' : 'V').arg(t.id); }
+        for (const auto &c : mClips) {
+            cs += QString("{c%1 tr%2} ").arg(c.clipId).arg(c.trackId); }
+    }
     qDebug("[NLE] refresh scene=%s items=%d tracks=%d clips=%d",
            scene ? scene->prp_getName().toUtf8().constData() : "-",
            items.size(), trackCount, mClips.size());
