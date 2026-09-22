@@ -41,6 +41,7 @@
 #include <QSvgRenderer>
 #include <QFile>
 #include <QApplication>
+#include <QActionGroup>
 
 #include <functional>
 
@@ -170,6 +171,70 @@ QPixmap nleMagneticPixmap(const QColor &color, const int base = 24)
     pm.fill(Qt::transparent);
     const QString svg = QString(kNleMagneticSvg).arg(color.name());
     QSvgRenderer renderer(svg.toUtf8());
+    if (renderer.isValid()) {
+        QPainter p(&pm);
+        p.setRenderHint(QPainter::Antialiasing);
+        renderer.render(&p, QRectF(0, 0, base * dpr, base * dpr));
+        p.end();
+    }
+    pm.setDevicePixelRatio(dpr);
+    return pm;
+}
+
+// ---- NLE editing-tool glyphs (inline SVG, %1 = glyph color) ----
+// select tool: classic cursor arrow
+const char* kNleToolSelectSvg =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
+        "<path fill=\"%1\" d=\"M6 3 L18.2 13.4 L12.6 13.9 L15.6 20.1"
+        " L12.9 21.3 L9.9 15.1 L6 18.4 Z\"/></svg>";
+// razor tool: scissors (two rings + crossing blades)
+const char* kNleToolRazorSvg =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
+        "<circle cx=\"6\" cy=\"6.2\" r=\"2.3\" fill=\"none\" stroke=\"%1\" stroke-width=\"1.7\"/>"
+        "<circle cx=\"6\" cy=\"17.8\" r=\"2.3\" fill=\"none\" stroke=\"%1\" stroke-width=\"1.7\"/>"
+        "<path fill=\"none\" stroke=\"%1\" stroke-width=\"1.7\""
+        " d=\"M7.9 7.7 L20 18.2 M7.9 16.3 L20 5.8\"/></svg>";
+// track select backward: double chevron pointing left
+const char* kNleToolBackSvg =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
+        "<path fill=\"none\" stroke=\"%1\" stroke-width=\"2.2\""
+        " stroke-linecap=\"round\" stroke-linejoin=\"round\""
+        " d=\"M11.5 6 L5.5 12 L11.5 18 M18.5 6 L12.5 12 L18.5 18\"/></svg>";
+// track select forward: mirrored
+const char* kNleToolFwdSvg =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
+        "<path fill=\"none\" stroke=\"%1\" stroke-width=\"2.2\""
+        " stroke-linecap=\"round\" stroke-linejoin=\"round\""
+        " d=\"M12.5 6 L18.5 12 L12.5 18 M5.5 6 L11.5 12 L5.5 18\"/></svg>";
+// split at playhead: two half blocks cut by a dashed line
+const char* kNleSplitSvg =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
+        "<path fill=\"none\" stroke=\"%1\" stroke-width=\"1.9\""
+        " stroke-dasharray=\"2.6 2\" d=\"M12 2.5 V21.5\"/>"
+        "<path fill=\"none\" stroke=\"%1\" stroke-width=\"1.9\""
+        " d=\"M2.5 8 H9 V16 H2.5 Z M15 8 H21.5 V16 H15 Z\"/></svg>";
+// undo / redo: curved arrows
+const char* kNleUndoSvg =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
+        "<path fill=\"none\" stroke=\"%1\" stroke-width=\"2\""
+        " stroke-linecap=\"round\" stroke-linejoin=\"round\""
+        " d=\"M8.5 13.5 L3.5 8.5 L8.5 3.5 M3.5 8.5 H13"
+        " A6.5 6.5 0 0 1 19.5 15 V20\"/></svg>";
+const char* kNleRedoSvg =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
+        "<path fill=\"none\" stroke=\"%1\" stroke-width=\"2\""
+        " stroke-linecap=\"round\" stroke-linejoin=\"round\""
+        " d=\"M15.5 13.5 L20.5 8.5 L15.5 3.5 M20.5 8.5 H11"
+        " A6.5 6.5 0 0 0 4.5 15 V20\"/></svg>";
+
+QPixmap nleGlyphPixmap(const char *svg, const QColor &color,
+                       const int base = 24)
+{
+    const qreal dpr = qApp ? qApp->devicePixelRatio() : 1.;
+    QPixmap pm(QSize(base, base) * dpr);
+    pm.fill(Qt::transparent);
+    const QString str = QString::fromUtf8(svg).arg(color.name());
+    QSvgRenderer renderer(str.toUtf8());
     if (renderer.isValid()) {
         QPainter p(&pm);
         p.setRenderHint(QPainter::Antialiasing);
@@ -845,20 +910,136 @@ void TimelineDockWidget::setupNleActions()
     else { mToolBar->addAction(mNleModeAct); }
     mMainWindow->cmdAddAction(mNleModeAct);
 
-    // NLE editing group
-    mNleDeleteAct = mToolBar->addAction(tr("删除块"));
+    // ---- editing tool cluster, right of the mode toggle: the tool
+    // decides what a plain click on a clip does (PR toolbox style) ----
+    QAction *anchor = first; // fixed anchor: sequential inserts keep order
+    const auto insertAct = [this, anchor](QAction * const a) {
+        if (anchor) { mToolBar->insertAction(anchor, a); }
+        else { mToolBar->addAction(a); }
+    };
+    const auto insertSep = [this, anchor]() {
+        if (anchor) { return mToolBar->insertSeparator(anchor); }
+        mToolBar->addSeparator();
+        return static_cast<QAction*>(nullptr);
+    };
+    mNleToolSeps[0] = insertSep();
+
+    mToolGroup = new QActionGroup(this);
+    mToolGroup->setExclusive(true);
+    using ET = EditorTimelineWidget::EditTool;
+    const auto addToolAct = [this, &insertAct](
+            const QString &text, const char * const svg,
+            const ET tool, const int slot) {
+        auto * const a = new QAction(
+                    QIcon(nleGlyphPixmap(svg, QColor(0xc8, 0xc8, 0xc8))),
+                    text, this);
+        a->setCheckable(true);
+        a->setChecked(tool == ET::Select);
+        a->setToolTip(text);
+        a->setData(text);
+        mToolGroup->addAction(a);
+        insertAct(a);
+        mMainWindow->cmdAddAction(a);
+        connect(a, &QAction::toggled, this,
+                [this, a, svg, tool](const bool on) {
+            const QColor accent = ThemeSupport::getThemeHighlightColor();
+            QColor onGlyph(0xff, 0xff, 0xff);
+            if (accent.lightness() > 150) {
+                onGlyph = ThemeSupport::getThemeHighlightDarkerColor().darker(160);
+            }
+            a->setIcon(QIcon(nleGlyphPixmap(
+                        svg, on ? onGlyph : QColor(0xc8, 0xc8, 0xc8))));
+            if (on && mEditorTimeline) { mEditorTimeline->setTool(tool); }
+        });
+        if (slot >= 0 && slot < 4) { mToolActs[slot] = a; }
+        return a;
+    };
+    addToolAct(tr("选择工具 (V)"), kNleToolSelectSvg, ET::Select,
+               static_cast<int>(ET::Select));
+    addToolAct(tr("剪刀工具 (B)"), kNleToolRazorSvg, ET::Razor,
+               static_cast<int>(ET::Razor));
+    addToolAct(tr("向后选择工具 (Shift+A)"), kNleToolBackSvg, ET::TrackBackward,
+               static_cast<int>(ET::TrackBackward));
+    addToolAct(tr("向前选择工具 (A)"), kNleToolFwdSvg, ET::TrackForward,
+               static_cast<int>(ET::TrackForward));
+    // keyboard tool switches stay in sync with the buttons (setTool
+    // no-ops on the same tool, so the re-check cannot loop)
+    connect(mEditorTimeline, &EditorTimelineWidget::toolChanged, this,
+            [this](const int tool) {
+        if (tool < 0 || tool > 3) { return; }
+        auto * const a = mToolActs[tool];
+        if (a && !a->isChecked()) { a->setChecked(true); }
+    });
+    mNleToolSeps[1] = insertSep();
+
+    // split at the playhead (CapCut 分割): selected clips, or every
+    // unlocked-lane clip under the playhead when nothing is selected
+    mNleSplitAtAct = new QAction(
+                QIcon(nleGlyphPixmap(kNleSplitSvg, QColor(0xc8, 0xc8, 0xc8))),
+                tr("分割"), this);
+    mNleSplitAtAct->setToolTip(
+                tr("在播放头分割选中块；未选中时分割播放头下所有块（S）"));
+    mNleSplitAtAct->setData(mNleSplitAtAct->toolTip());
+    connect(mNleSplitAtAct, &QAction::triggered, this, [this]() {
+        if (mEditorTimeline) { mEditorTimeline->requestSplitAtPlayhead(); }
+    });
+    insertAct(mNleSplitAtAct);
+    mMainWindow->cmdAddAction(mNleSplitAtAct);
+
+    // undo / redo right on the timeline toolbar (CapCut layout)
+    mNleUndoAct = new QAction(
+                QIcon(nleGlyphPixmap(kNleUndoSvg, QColor(0xc8, 0xc8, 0xc8))),
+                tr("撤销"), this);
+    mNleUndoAct->setToolTip(tr("撤销上一步（Ctrl+Z）"));
+    mNleUndoAct->setData(mNleUndoAct->toolTip());
+    connect(mNleUndoAct, &QAction::triggered, this, [this]() {
+        const auto scene = *mDocument.fActiveScene;
+        if (!scene) { return; }
+        scene->undo();
+        if (Document::sInstance) { Document::sInstance->actionFinished(); }
+        if (mEditorSync) { mEditorSync->rebuild(); }
+    });
+    insertAct(mNleUndoAct);
+    mMainWindow->cmdAddAction(mNleUndoAct);
+
+    mNleRedoAct = new QAction(
+                QIcon(nleGlyphPixmap(kNleRedoSvg, QColor(0xc8, 0xc8, 0xc8))),
+                tr("重做"), this);
+    mNleRedoAct->setToolTip(tr("重做下一步（Ctrl+Shift+Z）"));
+    mNleRedoAct->setData(mNleRedoAct->toolTip());
+    connect(mNleRedoAct, &QAction::triggered, this, [this]() {
+        const auto scene = *mDocument.fActiveScene;
+        if (!scene) { return; }
+        scene->redo();
+        if (Document::sInstance) { Document::sInstance->actionFinished(); }
+        if (mEditorSync) { mEditorSync->rebuild(); }
+    });
+    insertAct(mNleRedoAct);
+    mMainWindow->cmdAddAction(mNleRedoAct);
+    mNleToolSeps[2] = insertSep();
+
+    // NLE editing group (joins the tool cluster at the left; CapCut
+    // keeps every editing control in one contiguous toolbar block)
+    mNleDeleteAct = new QAction(tr("删除块"), this);
     mNleDeleteAct->setToolTip(tr("删除选中的块（Delete）；Shift=波纹删除，后续块左移补洞"));
+    mNleDeleteAct->setData(mNleDeleteAct->toolTip());
     connect(mNleDeleteAct, &QAction::triggered, mEditorTimeline, [this]() {
         if (mEditorTimeline) { mEditorTimeline->requestDelete(false); }
     });
-    mNleRippleAct = mToolBar->addAction(tr("波纹删除"));
+    insertAct(mNleDeleteAct);
+    mMainWindow->cmdAddAction(mNleDeleteAct);
+
+    mNleRippleAct = new QAction(tr("波纹删除"), this);
     mNleRippleAct->setToolTip(tr("删除选中的块并让同轨后续块左移补洞（Shift+Delete）"));
+    mNleRippleAct->setData(mNleRippleAct->toolTip());
     connect(mNleRippleAct, &QAction::triggered, mEditorTimeline, [this]() {
         if (mEditorTimeline) { mEditorTimeline->requestDelete(true); }
     });
+    insertAct(mNleRippleAct);
+    mMainWindow->cmdAddAction(mNleRippleAct);
 
-    mMagneticAct = mToolBar->addAction(
-                QIcon(nleMagneticPixmap(QColor(0xc8, 0xc8, 0xc8))), QString());
+    mMagneticAct = new QAction(
+                QIcon(nleMagneticPixmap(QColor(0xc8, 0xc8, 0xc8))), QString(), this);
     mMagneticAct->setCheckable(true);
     mMagneticAct->setChecked(false);
     mMagneticAct->setToolTip(tr("磁吸：开启后同轨块贴紧无间隙"));
@@ -873,10 +1054,16 @@ void TimelineDockWidget::setupNleActions()
                         on ? onGlyph : QColor(0xc8, 0xc8, 0xc8))));
         if (mEditorTimeline) { mEditorTimeline->setMagnetic(on); }
     });
+    insertAct(mMagneticAct);
+    mMainWindow->cmdAddAction(mMagneticAct);
 
-    mNleZoomFitAct = mToolBar->addAction(tr("适配"));
+    mNleZoomFitAct = new QAction(tr("适配"), this);
+    mNleZoomFitAct->setToolTip(tr("时间轴缩放适配窗口宽度"));
+    mNleZoomFitAct->setData(mNleZoomFitAct->toolTip());
     connect(mNleZoomFitAct, &QAction::triggered,
             mEditorTimeline, &EditorTimelineWidget::zoomFit);
+    insertAct(mNleZoomFitAct);
+    mMainWindow->cmdAddAction(mNleZoomFitAct);
 }
 
 void TimelineDockWidget::setNleMode(const bool nle)
@@ -888,8 +1075,14 @@ void TimelineDockWidget::setNleMode(const bool nle)
         mNleModeAct->setChecked(nle);
         mNleModeAct->setText(nle ? tr("剪辑时间轴") : tr("关键帧视图"));
     }
-    const auto nleActs = QList<QAction*>{ mNleDeleteAct, mNleRippleAct,
-                                          mMagneticAct, mNleZoomFitAct };
+    const auto nleActs = QList<QAction*>{ mNleSplitAtAct, mNleUndoAct,
+                                          mNleRedoAct, mNleDeleteAct,
+                                          mNleRippleAct, mMagneticAct,
+                                          mNleZoomFitAct,
+                                          mToolActs[0], mToolActs[1],
+                                          mToolActs[2], mToolActs[3],
+                                          mNleToolSeps[0], mNleToolSeps[1],
+                                          mNleToolSeps[2] };
     for (auto *a : nleActs) { if (a) { a->setVisible(nle); } }
     if (nle && mEditorSync) { mEditorSync->rebuild(); }
 }

@@ -83,6 +83,10 @@ EditorTimelineSync::EditorTimelineSync(Document &document,
                 this, [this](const bool ripple) { deleteSelectedClips(ripple); });
         connect(mWidget, &EditorTimelineWidget::splitAtPlayheadRequested,
                 this, &EditorTimelineSync::splitAtPlayhead);
+        connect(mWidget, &EditorTimelineWidget::razorCutRequested,
+                this, [this](const QList<int> &ids, const double sec) {
+            razorCut(ids, sec);
+        });
         connect(mWidget, &EditorTimelineWidget::trackMuteToggleRequested,
                 this, &EditorTimelineSync::toggleTrackMute);
         connect(mWidget, &EditorTimelineWidget::trackRenameRequested,
@@ -721,6 +725,19 @@ void EditorTimelineSync::deleteSelectedClips(const bool ripple)
     rebuild();
 }
 
+// shared doc-side split: select the boxes, cut at the frame, finish
+void EditorTimelineSync::splitBoxes(const QList<BoundingBox*> &boxes,
+                                    const int frame)
+{
+    const auto scene = mPanelScene.data();
+    if (!scene || boxes.isEmpty()) { return; }
+    scene->clearBoxesSelection();
+    for (auto *b : boxes) { scene->addBoxToSelection(b); }
+    scene->splitBoxesAtFrame(frame);
+    if (Document::sInstance) { Document::sInstance->actionFinished(); }
+    rebuild();
+}
+
 void EditorTimelineSync::splitAtPlayhead()
 {
     if (!mWidget || mInWriteback || mDragging) { return; }
@@ -729,6 +746,10 @@ void EditorTimelineSync::splitAtPlayhead()
     // the split operates at the scene's current frame: sync the panel
     // playhead first so the visual position is what gets split
     syncPlayheadToDoc();
+    const qreal fps = scene->getFps();
+    if (fps <= 0.) { return; }
+    const int frame = scene->anim_getCurrentAbsFrame();
+
     QList<BoundingBox*> boxes;
     const auto ids = mWidget->selectedClipIds();
     for (const int id : ids) {
@@ -737,12 +758,58 @@ void EditorTimelineSync::splitAtPlayhead()
         const auto box = enve_cast<BoundingBox*>(layer);
         if (box) { boxes << box; }
     }
+    // CapCut-style fallback: no selection cuts EVERY unlocked-lane clip
+    // under the playhead in one press
+    if (boxes.isEmpty()) {
+        const double ph = mWidget->playheadTime();
+        const auto clips = mWidget->allClips();
+        for (const auto &c : clips) {
+            if (!(c.start <= ph + 1e-9 && ph < c.start + c.length - 1e-9)) { continue; }
+            if (mWidget->isTrackLocked(c.track)) { continue; }
+            const auto layer = mClipToLayer.value(c.id).data();
+            if (!layer) { continue; }
+            const auto box = enve_cast<BoundingBox*>(layer);
+            if (box) { boxes << box; }
+        }
+    }
     if (boxes.isEmpty()) { return; }
-    scene->clearBoxesSelection();
-    for (auto *b : boxes) { scene->addBoxToSelection(b); }
-    scene->splitAction();
-    if (Document::sInstance) { Document::sInstance->actionFinished(); }
-    rebuild();
+    splitBoxes(boxes, frame);
+}
+
+void EditorTimelineSync::razorCut(const QList<int> &clipIds, const double sec)
+{
+    if (!mWidget || mInWriteback || mDragging) { return; }
+    const auto scene = mPanelScene.data();
+    if (!scene) { return; }
+    const qreal fps = scene->getFps();
+    if (fps <= 0.) { return; }
+    const int frame = qRound(sec * fps);
+
+    QList<BoundingBox*> boxes;
+    int skippedSounds = 0;
+    int skippedEdges = 0;
+    for (const int id : clipIds) {
+        const auto layer = mClipToLayer.value(id).data();
+        if (!layer) { continue; }
+        const auto box = enve_cast<BoundingBox*>(layer);
+        if (!box) { ++skippedSounds; continue; }
+        const auto dur = box->getDurationRectangle();
+        if (!dur) { continue; }
+        // the cut must leave at least one frame on both sides
+        if (!(dur->getMinAbsFrame() < frame && frame < dur->getMaxAbsFrame())) {
+            ++skippedEdges;
+            continue;
+        }
+        boxes << box;
+    }
+    if (skippedSounds > 0) {
+        qDebug("[ETL] razor: skipped %d sound clip(s) (unsupported)", skippedSounds);
+    }
+    if (skippedEdges > 0) {
+        qDebug("[ETL] razor: skipped %d clip(s) hit at an edge", skippedEdges);
+    }
+    if (boxes.isEmpty()) { return; }
+    splitBoxes(boxes, frame);
 }
 
 void EditorTimelineSync::toggleTrackMute(const int trackIdx)

@@ -1726,12 +1726,17 @@ void Canvas::cutAction()
 
 void Canvas::splitAction()
 {
+    splitBoxesAtFrame(getCurrentFrame());
+}
+
+// frame-parameterized split so the NLE razor tool can cut at an
+// arbitrary position without moving the playhead first
+void Canvas::splitBoxesAtFrame(const int frame)
+{
     if (mSelectedBoxes.isEmpty()) { return; }
 
-    const auto frame = getCurrentFrame();
-
     // AE-style multi split: every selected layer with a duration bar
-    // covering the playhead is split in place; per-layer copies go into
+    // covering the frame is split in place; per-layer copies go into
     // each layer's own group so nested selections split correctly
     QList<BoundingBox*> toSplit;
     for (const auto& box : mSelectedBoxes) {

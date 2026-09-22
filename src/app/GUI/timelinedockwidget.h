@@ -200,6 +200,14 @@ private:
 
     // NLE mode toolbar group
     QAction *mNleModeAct = nullptr;
+    // PR/CapCut-style editing tools (checkable, exclusive): order
+    // matches EditorTimelineWidget::EditTool
+    class QActionGroup *mToolGroup = nullptr;
+    QAction *mToolActs[4] = { nullptr, nullptr, nullptr, nullptr };
+    QAction *mNleToolSeps[3] = { nullptr, nullptr, nullptr };
+    QAction *mNleSplitAtAct = nullptr;
+    QAction *mNleUndoAct = nullptr;
+    QAction *mNleRedoAct = nullptr;
     QAction *mMagneticAct = nullptr;
     QAction *mNleDeleteAct = nullptr;
     QAction *mNleRippleAct = nullptr;

@@ -13,6 +13,7 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QCursor>
+#include <QApplication>
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QSet>
@@ -31,39 +32,29 @@ EditorTimelineWidget::EditorTimelineWidget(QWidget *parent)
     setFocusPolicy(Qt::StrongFocus);
     setMinimumHeight(320);
 
-    // tracks: two video + one audio (like the reference screenshot)
-    m_tracks = {
-        {QStringLiteral("V2"), 60, ClipType::Video},
-        {QStringLiteral("V1"), 60, ClipType::Video},
-        {QStringLiteral("A1"), 52, ClipType::Audio},
-    };
-
-    // seed some demo clips
+    // procedural blade cursor for the razor tool (PR-style): a red
+    // blade with a grey handle, hotspot on the blade tip
     {
-        struct S { const char *n; ClipType t; int tr; double s; double l; };
-        const S demo[] = {
-            {"jimeng-2026-08-23-6464", ClipType::Video, 0, 0.0, 5.0},
-            {"shot_002_take1",         ClipType::Video, 0, 5.0, 3.2},
-            {"shot_003_closeup",       ClipType::Video, 0, 8.2, 6.5},
-            {"b-roll street",          ClipType::Video, 1, 2.0, 4.0},
-            {"title card",             ClipType::Video, 1, 10.0, 3.0},
-            {"8.21 voiceover.mp3",     ClipType::Audio, 2, 0.0, 8.0},
-            {"bgm_lofi.mp3",           ClipType::Audio, 2, 9.0, 6.0},
-        };
-        for (const S &d : demo) {
-            Clip c;
-            c.id = m_nextId++;
-            c.name = QString::fromUtf8(d.n);
-            c.type = d.t;
-            c.track = d.tr;
-            c.start = d.s;
-            c.length = d.l;
-            c.hueSeed = c.id * 37;
-            m_clips.push_back(c);
-        }
+        const qreal dpr = devicePixelRatioF();
+        QPixmap pm(QSize(24, 24) * dpr);
+        pm.fill(Qt::transparent);
+        QPainter p(&pm);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.scale(dpr, dpr); // painter works in physical pixels
+        p.setPen(QPen(QColor(0xe8, 0x4c, 0x4c), 2, Qt::SolidLine, Qt::RoundCap));
+        p.drawLine(QPointF(5, 19), QPointF(14, 10));
+        p.setPen(QPen(QColor(0xc8, 0xc8, 0xc8), 3, Qt::SolidLine, Qt::RoundCap));
+        p.drawLine(QPointF(14, 10), QPointF(20, 4));
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(0xe8, 0x4c, 0x4c));
+        p.drawEllipse(QPointF(7.5, 16.5), 1.6, 1.6);
+        p.end();
+        pm.setDevicePixelRatio(dpr);
+        m_razorCursor = QCursor(pm, 5, 19);
     }
 
-    emitLog(QStringLiteral("timeline ready, %1 clips").arg(m_clips.size()));
+    // content (tracks + clips) is filled by the sync-driven rebuild
+    emitLog(QStringLiteral("timeline ready"));
 }
 
 void EditorTimelineWidget::setScrollBar(QScrollBar *bar)
@@ -163,6 +154,15 @@ void EditorTimelineWidget::paintEvent(QPaintEvent *)
             p.setBrush(QColor(cAccent.red(), cAccent.green(), cAccent.blue(), 30));
             p.drawRect(band);
         }
+    }
+
+    // razor guide: dashed cut preview under the cursor across the
+    // whole content area (matches the playhead red)
+    if (m_tool == EditTool::Razor && m_drag == DragMode::None &&
+            m_hoverPos.x() >= headerWidth() && m_hoverPos.y() > rulerHeight()) {
+        const int rx = m_hoverPos.x();
+        p.setPen(QPen(cPlayhead, 1, Qt::DashLine));
+        p.drawLine(rx, rulerHeight(), rx, height());
     }
 
     drawPlayhead(p);
@@ -553,6 +553,117 @@ bool EditorTimelineWidget::overlapsOnTrack(int track, double start, double len, 
 
 // ---------------------------------------------------------------- events
 
+// ---- editing tools ----
+
+void EditorTimelineWidget::setTool(const EditTool tool)
+{
+    if (m_tool == tool) { return; }
+    m_tool = tool;
+    // a started gesture keeps running under the tool it began with
+    // (only the hover cursor changes; the release finishes normally)
+    m_rubber = false;
+    applyToolCursor(mapFromGlobal(QCursor::pos()));
+    update();
+    emit toolChanged(static_cast<int>(tool));
+}
+
+bool EditorTimelineWidget::isTrackLocked(const int trackIdx) const
+{
+    return m_tracks.value(trackIdx).locked;
+}
+
+void EditorTimelineWidget::requestSplitAtPlayhead()
+{
+    emit splitAtPlayheadRequested();
+}
+
+void EditorTimelineWidget::applyToolCursor(const QPoint &pos)
+{
+    if (m_tool == EditTool::Razor) {
+        setCursor(m_razorCursor);
+        return;
+    }
+    if (m_tool != EditTool::Select) {
+        // track-select tools point at the clips they will collect
+        QRectF r;
+        setCursor(clipAt(pos, &r) >= 0 ? Qt::PointingHandCursor
+                                       : Qt::ArrowCursor);
+        return;
+    }
+    // select tool: trim edges / ruler hand / default
+    QRectF r;
+    const int idx = clipAt(pos, &r);
+    if (idx >= 0 &&
+        (qAbs(pos.x() - r.left()) <= TRIM_PX || qAbs(pos.x() - r.right()) <= TRIM_PX))
+        setCursor(Qt::SizeHorCursor);
+    else if (pos.y() <= rulerHeight())
+        setCursor(Qt::PointingHandCursor);
+    else
+        unsetCursor();
+}
+
+// razor cut at the cursor/frame position: one clip for a plain click,
+// every unlocked-lane clip under the time column for Shift (PR:
+// shift-razor cuts all tracks). The cut is executed on the document
+// side by EditorTimelineSync
+void EditorTimelineWidget::razorCutAt(const QPoint &pos, const int idx,
+                                      const bool allTracks)
+{
+    if (idx < 0 || idx >= m_clips.size()) { return; }
+    if (isTrackLocked(m_clips[idx].track)) {
+        emitLog(QStringLiteral("轨道已锁定，剪刀无效"));
+        return;
+    }
+    // frame-quantized cut time (the timeline lives on the frame grid)
+    const double sec = qRound(xToTime(pos.x()) * m_fps) / m_fps;
+    QList<int> ids;
+    for (int i = 0; i < m_clips.size(); ++i) {
+        const Clip &c = m_clips[i];
+        if (allTracks) {
+            if (isTrackLocked(c.track)) { continue; }
+            if (!(c.start < sec + 1e-9 && sec < c.start + c.length - 1e-9)) { continue; }
+        } else if (i != idx) { continue; }
+        ids << c.id;
+    }
+    if (ids.isEmpty()) { return; }
+    // selection-neutral: drop the selection so the sync rebuild after
+    // the cut does not resurrect both halves by name
+    m_selectedIds.clear();
+    emitSelectionSummary();
+    emit razorCutRequested(ids, sec);
+}
+
+// PR track select: click collects the clicked clip plus every clip on
+// the track in the tool direction from the click time; Shift widens to
+// every track, Ctrl adds to the existing selection
+void EditorTimelineWidget::trackSelectAt(const QPoint &pos, const int idx,
+                                         const bool backward)
+{
+    if (idx < 0 || idx >= m_clips.size()) { return; }
+    const double div = xToTime(pos.x());
+    const int track = m_clips[idx].track;
+    const bool allTracks = QApplication::keyboardModifiers() & Qt::ShiftModifier;
+    QSet<int> picked;
+    for (const Clip &c : m_clips) {
+        const bool inDir = backward ? (c.start <= div + 1e-9)
+                                    : (c.start + c.length > div + 1e-9);
+        if (!inDir) { continue; }
+        if (!allTracks && c.track != track) { continue; }
+        picked.insert(c.id);
+    }
+    if (QApplication::keyboardModifiers() & Qt::ControlModifier) {
+        m_selectedIds.unite(picked);
+    } else {
+        m_selectedIds = picked;
+    }
+    emitSelectionSummary();
+    emitLog(QStringLiteral("%1 %2 块（%3）")
+            .arg(backward ? QStringLiteral("向左选择") : QStringLiteral("向右选择"))
+            .arg(picked.size())
+            .arg(allTracks ? QStringLiteral("全部轨道")
+                           : m_tracks.value(track).name));
+}
+
 void EditorTimelineWidget::mousePressEvent(QMouseEvent *e)
 {
     setFocus();
@@ -611,6 +722,17 @@ void EditorTimelineWidget::mousePressEvent(QMouseEvent *e)
         return;
     }
 
+    if (idx >= 0 && m_tool != EditTool::Select) {
+        // editing tools replace the plain-click clip interaction
+        if (m_tool == EditTool::Razor) {
+            razorCutAt(e->pos(), idx, e->modifiers() & Qt::ShiftModifier);
+        } else {
+            trackSelectAt(e->pos(), idx, m_tool == EditTool::TrackBackward);
+        }
+        update();
+        return;
+    }
+
     if (idx >= 0) {
         const Clip &c = m_clips[idx];
         // multi-select: ctrl toggles membership; a plain press on an
@@ -665,14 +787,18 @@ void EditorTimelineWidget::mousePressEvent(QMouseEvent *e)
             }
         }
     } else if (e->pos().x() >= headerWidth()) {
-        // empty content area: rubber band selection
+        // empty content area
         if (!(e->modifiers() & Qt::ControlModifier)) {
             m_selectedIds.clear();
             emitSelectionSummary();
         }
-        m_rubber = true;
-        m_rubberStart = e->pos();
-        m_drag = DragMode::None;
+        // rubber band is a selection-tool gesture; with razor or track
+        // tools a plain empty click just clears the selection
+        if (m_tool == EditTool::Select) {
+            m_rubber = true;
+            m_rubberStart = e->pos();
+            m_drag = DragMode::None;
+        }
     }
     update();
 }
@@ -696,14 +822,11 @@ void EditorTimelineWidget::mouseMoveEvent(QMouseEvent *e)
         // hover + cursor feedback
         QRectF r;
         int idx = clipAt(e->pos(), &r);
-        if (idx != m_hover) { m_hover = idx; update(); }
-        if (idx >= 0 &&
-            (qAbs(e->pos().x() - r.left()) <= TRIM_PX || qAbs(e->pos().x() - r.right()) <= TRIM_PX))
-            setCursor(Qt::SizeHorCursor);
-        else if (e->pos().y() <= rulerHeight())
-            setCursor(Qt::PointingHandCursor);
-        else
-            unsetCursor();
+        const bool hoverChanged = idx != m_hover;
+        m_hover = idx;
+        m_hoverPos = e->pos();
+        applyToolCursor(e->pos());
+        if (hoverChanged || m_tool == EditTool::Razor) { update(); }
         return;
     }
 
@@ -879,8 +1002,9 @@ void EditorTimelineWidget::keyPressEvent(QKeyEvent *e)
         requestDelete(e->modifiers() & Qt::ShiftModifier);
         return;
     }
-    if ((e->key() == Qt::Key_S || e->key() == Qt::Key_Slash)
-            && !m_selectedIds.isEmpty()) {
+    if (e->key() == Qt::Key_S || e->key() == Qt::Key_Slash) {
+        // no-selection press still splits: the sync falls back to every
+        // unlocked-lane clip under the playhead (CapCut 分割 semantics)
         emit splitAtPlayheadRequested();
         return;
     }
@@ -891,12 +1015,32 @@ void EditorTimelineWidget::keyPressEvent(QKeyEvent *e)
         update();
         return;
     }
+    // PR-style tool keys: V select, B razor, A track-select forward,
+    // Shift+A track-select backward
+    if (e->key() == Qt::Key_V && e->modifiers() == Qt::NoModifier) {
+        setTool(EditTool::Select);
+        return;
+    }
+    if (e->key() == Qt::Key_B && e->modifiers() == Qt::NoModifier) {
+        setTool(EditTool::Razor);
+        return;
+    }
+    if (e->key() == Qt::Key_A && e->modifiers() == Qt::NoModifier) {
+        setTool(EditTool::TrackForward);
+        return;
+    }
+    if (e->key() == Qt::Key_A && e->modifiers() == Qt::ShiftModifier) {
+        setTool(EditTool::TrackBackward);
+        return;
+    }
     QWidget::keyPressEvent(e);
 }
 
 void EditorTimelineWidget::leaveEvent(QEvent *)
 {
-    if (m_hover != -1) { m_hover = -1; update(); }
+    if (m_hover != -1) { m_hover = -1; }
+    m_hoverPos = QPoint(-1, -1);
+    update();
 }
 
 void EditorTimelineWidget::hideEvent(QHideEvent *)
@@ -1110,22 +1254,62 @@ void EditorTimelineWidget::contextMenuEvent(QContextMenuEvent *e)
         emitSelectionSummary();
         update();
     }
-    const Clip &c = m_clips[idx];
+    const Clip c = m_clips.value(idx);
     const int src = c.track;
     const bool upOk = src > 0 && m_tracks[src - 1].type == c.type;
     const bool downOk = src + 1 < m_tracks.size()
             && m_tracks[src + 1].type == c.type;
-    if (!upOk && !downOk) { QWidget::contextMenuEvent(e); return; }
 
     QMenu menu(this);
-    QAction *up = menu.addAction(tr("合并到上一轨"));
-    up->setEnabled(upOk);
-    QAction *down = menu.addAction(tr("合并到下一轨"));
-    down->setEnabled(downOk);
+    // NLE editing section (always available)
+    QAction *splitHere = menu.addAction(tr("在此处分割"));
+    QAction *del = menu.addAction(tr("删除"));
+    QAction *rippleDel = menu.addAction(tr("波纹删除"));
+    menu.addSeparator();
+    QAction *back = menu.addAction(tr("向左选择本轨"));
+    QAction *backAll = menu.addAction(tr("向左选择全部轨道"));
+    QAction *fwd = menu.addAction(tr("向右选择本轨"));
+    QAction *fwdAll = menu.addAction(tr("向右选择全部轨道"));
+    QAction *up = nullptr;
+    QAction *down = nullptr;
+    if (upOk || downOk) {
+        menu.addSeparator();
+        up = menu.addAction(tr("合并到上一轨"));
+        up->setEnabled(upOk);
+        down = menu.addAction(tr("合并到下一轨"));
+        down->setEnabled(downOk);
+    }
 
     QAction *act = menu.exec(e->globalPos());
-    if (act == up && upOk) mergeTrackInto(src, src - 1);
+    if (act == splitHere) { razorCutAt(e->pos(), idx, false); }
+    else if (act == del) { requestDelete(false); }
+    else if (act == rippleDel) { requestDelete(true); }
+    else if (act == back) { trackSelectAt(e->pos(), idx, true); }
+    else if (act == backAll) { trackSelectAll(e->pos(), true); }
+    else if (act == fwd) { trackSelectAt(e->pos(), idx, false); }
+    else if (act == fwdAll) { trackSelectAll(e->pos(), false); }
+    else if (act == up && upOk) mergeTrackInto(src, src - 1);
     else if (act == down && downOk) mergeTrackInto(src, src + 1);
+    update();
+}
+
+// direction-only variant for the context menu (no clip hit needed):
+// every clip on every track before/after the click time
+void EditorTimelineWidget::trackSelectAll(const QPoint &pos,
+                                          const bool backward)
+{
+    const double div = xToTime(pos.x());
+    QSet<int> picked;
+    for (const Clip &c : m_clips) {
+        const bool inDir = backward ? (c.start <= div + 1e-9)
+                                    : (c.start + c.length > div + 1e-9);
+        if (inDir) { picked.insert(c.id); }
+    }
+    m_selectedIds = picked;
+    emitSelectionSummary();
+    emitLog(QStringLiteral("%1 %2 块（全部轨道）")
+            .arg(backward ? QStringLiteral("向左选择") : QStringLiteral("向右选择"))
+            .arg(picked.size()));
 }
 
 void EditorTimelineWidget::mergeTrackInto(const int src, const int dst)

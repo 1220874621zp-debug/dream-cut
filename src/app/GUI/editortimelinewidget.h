@@ -37,20 +37,39 @@ public:
     int trackCount() const { return m_tracks.size(); }
     // document ops go through the sync bridge (undoable on the doc side)
     void requestDelete(const bool ripple = false);
-    // header badge rects (mute / lock), shared by paint + hit test
+    // header badge rects (mute / lock), shared by paint & hit test
     QRect muteBadgeRect(const int trackIdx) const;
     QRect lockBadgeRect(const int trackIdx) const;
+    // lane lock state (sync needs it to skip locked lanes when a razor
+    // cut or the playhead split falls back to "every clip under it")
+    bool isTrackLocked(const int trackIdx) const;
+
+    // ---- editing tools (PR/CapCut style): select, razor,
+    // track-select backward/forward. The tool changes what a plain
+    // left click on a clip does; Select keeps the classic
+    // move/trim/rubber-band interactions
+    enum class EditTool { Select, Razor, TrackBackward, TrackForward };
+    void setTool(const EditTool tool);
+    EditTool tool() const { return m_tool; }
 
 public slots:
     void removeSelectedClip();
     void zoomIn();
     void zoomOut();
     void zoomFit();
+    void requestSplitAtPlayhead();
 
 signals:
     // document-side operation requests (implemented by EditorTimelineSync)
     void deleteRequested(const bool ripple);
     void splitAtPlayheadRequested();
+    // razor cut at an arbitrary position: the ids of the clips to cut
+    // (one for a plain click, every unlocked-lane clip under the cursor
+    // time for a Shift click) + the frame-quantized cut time
+    void razorCutRequested(const QList<int> &clipIds, double sec);
+    // active editing tool changed (int = EditTool); the dock keeps its
+    // checkable toolbar actions in sync with keyboard switches
+    void toolChanged(int tool);
     void trackMuteToggleRequested(const int trackIdx);
     void trackRenameRequested(const int trackIdx, const QString &name);
     void markerAddRequested(const int frame);
@@ -134,6 +153,18 @@ private:
     QSet<int> m_selectedIds;    // selected clip ids (multi-select)
     QSet<QString> m_keepSelNames; // selection survives rebuilds by name
     int m_hover = -1;
+    QPoint m_hoverPos;          // live cursor pos for the razor guide line
+
+    // ---- editing tools ----
+    EditTool m_tool = EditTool::Select;
+    QCursor m_razorCursor;      // procedural blade cursor, built once
+    void applyToolCursor(const QPoint &pos);
+    // plain-click actions of the non-select tools (also reused by the
+    // clip context menu); idx = clipAt() hit, may go stale after the
+    // sync rebuild so both take a snapshot-free path
+    void razorCutAt(const QPoint &pos, const int idx, const bool allTracks);
+    void trackSelectAt(const QPoint &pos, const int idx, const bool backward);
+    void trackSelectAll(const QPoint &pos, const bool backward);
 
     DragMode m_drag = DragMode::None;
     int m_dragClip = -1;

@@ -724,6 +724,7 @@ public:
     void pasteAction();
     void cutAction();
     void splitAction();
+    void splitBoxesAtFrame(const int frame);
     void duplicateAction();
     void selectAllAction();
     void clearSelectionAction();

@@ -14,6 +14,7 @@ class Canvas;
 class Document;
 class EditorTimelineWidget;
 class eBoxOrSound;
+class BoundingBox;
 
 // Edit-timeline semantic bridge. The panel mirrors the native timeline:
 // EVERY child layer of the ACTIVE scene shows here - sound layers become
@@ -52,8 +53,14 @@ public:
     // ripple=false: plain remove; ripple=true: later clips on the same
     // lane slide left to close the gap left by the removed ones
     void deleteSelectedClips(const bool ripple);
-    // split every selected visual clip at the playhead frame
+    // split every selected visual clip at the playhead frame; with no
+    // selection it falls back to every unlocked-lane clip under the
+    // playhead (CapCut 分割 semantics)
     void splitAtPlayhead();
+    // razor tool: cut the given clips at an arbitrary time (strictly
+    // inside each clip, at least one frame on both sides); sounds are
+    // skipped (the doc-side split only supports visual layers)
+    void razorCut(const QList<int> &clipIds, const double sec);
     // toggle the lane's layer visibility (mute)
     void toggleTrackMute(const int trackIdx);
     // lane name overrides, survive rebuilds ("v1"/"a2" keyed)
@@ -69,6 +76,9 @@ private:
     void connectPanelScene(Canvas * const scene);
     void connectChildren(Canvas * const scene);
     void syncPlayheadToDoc();
+    // select the boxes on the canvas and run the frame-parameterized
+    // split (one undo set, one rebuild)
+    void splitBoxes(const QList<BoundingBox*> &boxes, const int frame);
     void applyWriteback();
     // translate the panel lane layout into the native track model:
     // panel row order -> contained order, shared lanes -> shared trackId,
