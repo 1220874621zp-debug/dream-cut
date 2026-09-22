@@ -1158,3 +1158,9 @@ void EditorTimelineWidget::refreshThemeColors()
     if (cAccent != accent) { cAccent = accent; }
     if (cVideoBar != accentDark) { cVideoBar = accentDark; }
 }
+
+int EditorTimelineWidget::selectedClipId() const
+{
+    if (m_selected < 0 || m_selected >= m_clips.size()) { return -1; }
+    return m_clips.at(m_selected).id;
+}

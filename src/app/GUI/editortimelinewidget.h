@@ -22,6 +22,10 @@ public:
     void setScrollBar(QScrollBar *bar);
     double playheadTime() const { return m_playhead; }
 
+public:
+    // semantic bridge: stable id of the (single) selected clip, -1 none
+    int selectedClipId() const;
+
 public slots:
     void addVideoClip();
     void addAudioClip();

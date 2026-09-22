@@ -63,6 +63,8 @@ class Canvas;
 class Document;
 class LayoutHandler;
 class BrushContexedWrapper;
+class EditorTimelineWidget;
+class EditorTimelineSync;
 
 enum class CanvasMode : short;
 
@@ -149,9 +151,19 @@ private:
     void addSpacer();
     void addBlankAction();
 
+    // dual-mode content: index 0 = NLE editing timeline (default),
+    // index 1 = the classic per-scene keyframe stack
+    void setNleMode(const bool nle);
+    bool isNleMode() const;
+    void setupNleActions();
+
     Document& mDocument;
     MainWindow* const mMainWindow;
     QStackedWidget* const mTimelineLayout;
+    QStackedWidget *mModeStack = nullptr;
+    QWidget *mNlePage = nullptr;
+    EditorTimelineWidget *mEditorTimeline = nullptr;
+    EditorTimelineSync *mEditorSync = nullptr;
 
     QToolBar *mToolBar;
 
@@ -183,6 +195,12 @@ private:
     QAction *mCurrentFrameSpinAct;
     FrameSpinBox *mCurrentFrameSpin;
     QSlider *mZoomSlider = nullptr;
+
+    // NLE mode toolbar group
+    QAction *mNleModeAct = nullptr;
+    QAction *mMagneticAct = nullptr;
+    QAction *mNleDeleteAct = nullptr;
+    QAction *mNleZoomFitAct = nullptr;
 
     QAction *mRenderProgressAct;
     QProgressBar *mRenderProgress;

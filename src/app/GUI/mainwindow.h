@@ -84,8 +84,6 @@ class ProjectPanel;
 class EffectsPresetsPanel;
 class QuickEffectSearchDialog;
 class DockDropTuner;
-class EditorTimelineWindow;
-class EditorTimelineSync;
 
 class MainWindow : public QMainWindow
 {
@@ -284,9 +282,6 @@ private:
     ProjectPanel *mProjectPanel = nullptr;
     QDockWidget *mTextAnimDock = nullptr;
     class TextAnimPresetPanel *mTextAnimPanel = nullptr;
-    QDockWidget *mEditorTimelineDock = nullptr;
-    EditorTimelineWindow *mEditorTimelineWindow = nullptr;
-    EditorTimelineSync *mEditorTimelineSync = nullptr;
     EffectsPresetsPanel *mEffectsPresetsPanel = nullptr;
     QuickEffectSearchDialog *mQuickEffectSearch = nullptr;
     // JS plugin system (Scripts menu + console dock)

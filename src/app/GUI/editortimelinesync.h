@@ -42,6 +42,12 @@ public:
 
     bool eventFilter(QObject * const obj, QEvent * const ev) override;
 
+    // selection bridge: reflect the panel's clip selection into the
+    // canvas box selection so property panels follow the NLE pick
+    // (one-way for now; empty selections are ignored so rebuilds never
+    // clear a user's canvas selection)
+    void pushSelectionToCanvas();
+
 public slots:
     void rebuild();
     void updatePlayheadFromDoc();

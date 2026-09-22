@@ -43,6 +43,12 @@ EditorTimelineSync::EditorTimelineSync(Document &document,
     connect(&mDocument, &Document::activeSceneSet,
             this, &EditorTimelineSync::rebuild);
 
+    // selection bridge: panel clip pick drives the canvas selection
+    if (mWidget) {
+        connect(mWidget, &EditorTimelineWidget::selectionChanged,
+                this, [this](const QString&) { pushSelectionToCanvas(); });
+    }
+
     rebuild();
 }
 
@@ -457,4 +463,21 @@ bool EditorTimelineSync::eventFilter(QObject * const obj, QEvent * const ev)
         }
     }
     return QObject::eventFilter(obj, ev);
+}
+
+void EditorTimelineSync::pushSelectionToCanvas()
+{
+    if (!mWidget || mInWriteback || mDragging) { return; }
+    const int id = mWidget->selectedClipId();
+    if (id < 0) { return; }
+    const auto it = mClipToLayer.constFind(id);
+    if (it == mClipToLayer.constEnd() || !it.value()) { return; }
+    const auto scene = mPanelScene.data();
+    if (!scene) { return; }
+    const auto box = enve_cast<BoundingBox*>(it.value().data());
+    if (!box) { return; }
+    if (scene->getSelectedBoxesList().count() == 1 &&
+        scene->getSelectedBoxesList().first() == box) { return; }
+    scene->clearBoxesSelection();
+    scene->addBoxToSelection(box);
 }

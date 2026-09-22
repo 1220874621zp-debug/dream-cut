@@ -73,6 +73,8 @@
 #include "layouthandler.h"
 #include "memoryhandler.h"
 #include "appsupport.h"
+#include "editortimelinewidget.h"
+#include "editortimelinesync.h"
 
 namespace {
 // recursively gather every keyed QrealAnimator under prop (property
@@ -135,6 +137,41 @@ QPixmap svgToolbarPixmap(const QString& qrcPath, const int inset = 4)
         const qreal o = inset * dpr;
         const qreal s = (base - 2 * inset) * dpr;
         renderer.render(&p, QRectF(o, o, s, s));
+        p.end();
+    }
+    pm.setDevicePixelRatio(dpr);
+    return pm;
+}
+
+// user-supplied magnet glyph; the fill is swapped per state
+const char* kNleMagneticSvg =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1024 1024\">"
+        "<path fill=\"%1\" d=\"M827.968 145.792a361.088 361.088 0 0 1 61.632 493.44"
+        "l-11.328 14.72L648.32 934.4l-4.8 5.312a70.72 70.72 0 0 1-94.592 4.48"
+        "l-134.016-109.888-6.4-6.4a44.992 44.992 0 0 1-4.864-49.216l5.056-7.488"
+        " 246.08-300.288 4.416-5.952a72.32 72.32 0 0 0-14.464-95.744L638.848 364.8"
+        "a72.32 72.32 0 0 0-90.752 8.96l-4.992 5.504-246.08 300.288a44.928 44.928"
+        " 0 0 1-63.232 6.272L99.84 575.936a70.592 70.592 0 0 1-14.208-93.44"
+        "l4.224-5.888 229.888-280.384 12.16-14.08a361.088 361.088 0 0 1 481.344"
+        "-47.68l14.72 11.328zM218.56 420.544l-79.168 96.64a6.592 6.592 0 0 0"
+        " 0.96 9.28l119.296 97.728 84.48-103.104-125.568-100.48z m610.176 192.832"
+        "A297.088 297.088 0 0 0 369.28 236.8L259.2 371.072l125.632 100.48"
+        " 108.8-132.864a136.32 136.32 0 0 1 210.816 172.8l-94.08 114.816"
+        " 125.504 100.48 92.928-113.408z m-259.136 62.528"
+        "l-99.2 121.024 119.232 97.792c2.816 2.24 6.912 1.92 9.216-0.896l96.32-117.504"
+        "L569.6 675.84z\"/></svg>";
+
+QPixmap nleMagneticPixmap(const QColor &color, const int base = 24)
+{
+    const qreal dpr = qApp ? qApp->devicePixelRatio() : 1.;
+    QPixmap pm(QSize(base, base) * dpr);
+    pm.fill(Qt::transparent);
+    const QString svg = QString(kNleMagneticSvg).arg(color.name());
+    QSvgRenderer renderer(svg.toUtf8());
+    if (renderer.isValid()) {
+        QPainter p(&pm);
+        p.setRenderHint(QPainter::Antialiasing);
+        renderer.render(&p, QRectF(0, 0, base * dpr, base * dpr));
         p.end();
     }
     pm.setDevicePixelRatio(dpr);
@@ -735,7 +772,34 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
         mStopButton->setEnabled(scene);
     });
 
-    mMainLayout->addWidget(mTimelineLayout);
+    // dual-mode content stack: 0 = NLE editing timeline (default),
+    // 1 = classic per-scene keyframe stack (reparented; the LayoutHandler
+    // pointer stays valid, only the QObject parent moves)
+    mNlePage = new QWidget(this);
+    {
+        auto nleLay = new QVBoxLayout(mNlePage);
+        nleLay->setContentsMargins(0, 0, 0, 0);
+        nleLay->setSpacing(0);
+        mEditorTimeline = new EditorTimelineWidget(mNlePage);
+        auto hbar = new QScrollBar(Qt::Horizontal, mNlePage);
+        hbar->setFixedHeight(12);
+        mEditorTimeline->setScrollBar(hbar);
+        nleLay->addWidget(mEditorTimeline, 1);
+        nleLay->addWidget(hbar, 0);
+    }
+    mModeStack = new QStackedWidget(this);
+    mModeStack->addWidget(mNlePage);
+    mModeStack->addWidget(mTimelineLayout);
+    mMainLayout->addWidget(mModeStack);
+
+    mEditorSync = new EditorTimelineSync(mDocument, mEditorTimeline, this);
+
+    // NLE toolbar group must be created after the timeline widget
+    setupNleActions();
+
+    setNleMode(AppSupport::getSettings(
+                   QStringLiteral("ui"), QStringLiteral("timelineNle"),
+                   true).toBool());
 
     previewFinished();
 
@@ -746,6 +810,74 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
             this, &TimelineDockWidget::stepPreview);
 
     setupPropertyShortcuts();
+}
+
+void TimelineDockWidget::setupNleActions()
+{
+    if (!mToolBar || !mEditorTimeline) { return; }
+
+    // mode toggle: leftmost, drives the whole content stack
+    mNleModeAct = new QAction(tr("剪辑时间轴"), this);
+    mNleModeAct->setCheckable(true);
+    mNleModeAct->setChecked(true);
+    mNleModeAct->setToolTip(tr("剪辑 / 关键帧视图切换（NLE 模式显示块、缩略图与波形）"));
+    connect(mNleModeAct, &QAction::toggled,
+            this, [this](const bool on) {
+        setNleMode(on);
+        AppSupport::setSettings(QStringLiteral("ui"),
+                                QStringLiteral("timelineNle"), on);
+    });
+    const auto first = mToolBar->actions().isEmpty() ?
+                nullptr : mToolBar->actions().constFirst();
+    if (first) { mToolBar->insertAction(first, mNleModeAct); }
+    else { mToolBar->addAction(mNleModeAct); }
+    mMainWindow->cmdAddAction(mNleModeAct);
+
+    // NLE editing group
+    mNleDeleteAct = mToolBar->addAction(tr("删除块"));
+    connect(mNleDeleteAct, &QAction::triggered,
+            mEditorTimeline, &EditorTimelineWidget::removeSelectedClip);
+
+    mMagneticAct = mToolBar->addAction(
+                QIcon(nleMagneticPixmap(QColor(0xc8, 0xc8, 0xc8))), QString());
+    mMagneticAct->setCheckable(true);
+    mMagneticAct->setChecked(false);
+    mMagneticAct->setToolTip(tr("磁吸：开启后同轨块贴紧无间隙"));
+    connect(mMagneticAct, &QAction::toggled, this, [this](const bool on) {
+        if (!mMagneticAct) { return; }
+        const QColor accent = ThemeSupport::getThemeHighlightColor();
+        QColor onGlyph(0xff, 0xff, 0xff);
+        if (accent.lightness() > 150) {
+            onGlyph = ThemeSupport::getThemeHighlightDarkerColor().darker(160);
+        }
+        mMagneticAct->setIcon(QIcon(nleMagneticPixmap(
+                        on ? onGlyph : QColor(0xc8, 0xc8, 0xc8))));
+        if (mEditorTimeline) { mEditorTimeline->setMagnetic(on); }
+    });
+
+    mNleZoomFitAct = mToolBar->addAction(tr("适配"));
+    connect(mNleZoomFitAct, &QAction::triggered,
+            mEditorTimeline, &EditorTimelineWidget::zoomFit);
+}
+
+void TimelineDockWidget::setNleMode(const bool nle)
+{
+    if (!mModeStack) { return; }
+    mModeStack->setCurrentIndex(nle ? 0 : 1);
+    if (mNleModeAct) {
+        QSignalBlocker block(mNleModeAct);
+        mNleModeAct->setChecked(nle);
+        mNleModeAct->setText(nle ? tr("剪辑时间轴") : tr("关键帧视图"));
+    }
+    const auto nleActs = QList<QAction*>{ mNleDeleteAct, mMagneticAct,
+                                          mNleZoomFitAct };
+    for (auto *a : nleActs) { if (a) { a->setVisible(nle); } }
+    if (nle && mEditorSync) { mEditorSync->rebuild(); }
+}
+
+bool TimelineDockWidget::isNleMode() const
+{
+    return mModeStack ? mModeStack->currentIndex() == 0 : true;
 }
 
 void TimelineDockWidget::updateFrameRange(const FrameRange &range)
