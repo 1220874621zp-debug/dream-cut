@@ -2,6 +2,9 @@
 #include "editortimelinewidget.h"
 
 #include "Private/document.h"
+#include "GUI/timelinethumbprovider.h"
+#include "Boxes/animationbox.h"
+#include "Sound/esoundobjectbase.h"
 #include "canvas.h"
 #include "Boxes/containerbox.h"
 #include "Boxes/boundingbox.h"
@@ -42,6 +45,26 @@ EditorTimelineSync::EditorTimelineSync(Document &document,
             this, &EditorTimelineSync::rebuild);
     connect(&mDocument, &Document::activeSceneSet,
             this, &EditorTimelineSync::rebuild);
+
+    mThumbProvider = new TimelineThumbProvider(this);
+    connect(mThumbProvider, &TimelineThumbProvider::frameThumbReady,
+            this, [this](const QString &key, const int animFrame,
+                         const QImage &img) {
+        const auto &routes = mFilmRoutes.value(
+                    QStringLiteral("%1:%2").arg(key).arg(animFrame));
+        for (const auto &r : routes) {
+            mWidget->setClipThumbFrame(r.first, r.second, img);
+        }
+    });
+    connect(mThumbProvider, &TimelineThumbProvider::wavePeaksReady,
+            this, [this](const QString &key, const int relSecond,
+                         const QVector<qreal> &peaks) {
+        const auto &routes = mWaveRoutes.value(
+                    QStringLiteral("%1:%2").arg(key).arg(relSecond));
+        for (const auto &r : routes) {
+            mWidget->setClipWave(r.first, r.second, peaks);
+        }
+    });
 
     // selection bridge: panel clip pick drives the canvas selection
     if (mWidget) {
@@ -251,7 +274,7 @@ void EditorTimelineSync::rebuild()
                                            start, len, it.audio, track);
         mClipToLayer.insert(id, it.layer);
     }
-    requestThumbnails();
+    requestMedia();
     updatePlayheadFromDoc();
 }
 
@@ -399,22 +422,84 @@ void EditorTimelineSync::applyWriteback()
     mInWriteback = false;
 }
 
-void EditorTimelineSync::requestThumbnails()
+void EditorTimelineSync::requestMedia()
 {
     const auto scene = mPanelScene.data();
     if (!mWidget || !scene) { return; }
-    if (mThumbDone.size() > 128) { mThumbDone.clear(); }
+    const qreal fps = scene->getFps();
+    if (fps <= 0.) { return; }
+    if (!mThumbProvider) { return; }
+
+    const double viewA = mWidget->viewStartSec();
+    const double viewB = mWidget->viewEndSec();
+    // filmstrip tile width in px at the current zoom (16:9 of a ~40px
+    // strip body) drives the sampling interval: one decoded frame per
+    // tile width, so the strip density follows the zoom level
+    const int bodyH = 40;
+    const double tileWpx = qMax(48., bodyH * 16. / 9.);
+    const int intervalFrames = qMax(1, qRound(tileWpx / mWidget->pxPerSec() * fps));
+
+    mFilmRoutes.clear();
+    mWaveRoutes.clear();
+
     for (auto it = mClipToLayer.begin(); it != mClipToLayer.end(); ++it) {
         const int clipId = it.key();
-        // every visual layer renders (scene links, vectors, images,
-        // text, groups) - not just scene links
-        const auto box = enve_cast<BoundingBox*>(it.value().data());
-        if (!box) { continue; } // audio blocks draw their waveform
-        const auto dur = box->getDurationRectangle();
+        const auto layer = it.value().data();
+        if (!layer) { continue; }
+        const auto dur = layer->getDurationRectangle();
         if (!dur) { continue; }
-        // one real frame per block: the middle of its range (stable
+
+        const auto soundObj = enve_cast<eSoundObjectBase*>(layer);
+        if (soundObj) {
+            // real waveform: peak columns for every visible second
+            const int sec0 = qMax(0, int(viewA));
+            const int sec1 = int(viewB) + 1;
+            const int minSec = dur->getMinAbsFrame() / fps;
+            const int maxSec = dur->getMaxAbsFrame() / fps + 1;
+            const QString soundKey = QStringLiteral("%1")
+                    .arg(reinterpret_cast<qulonglong>(soundObj), 0, 16);
+            for (int absSec = sec0; absSec <= sec1; ++absSec) {
+                if (absSec < minSec || absSec > maxSec) { continue; }
+                const auto relRange = soundObj->absSecondToRelSeconds(absSec);
+                if (!relRange.isValid()) { continue; }
+                mWaveRoutes[
+                        QStringLiteral("%1:%2").arg(soundKey).arg(relRange.fMin)
+                        ].append({clipId, absSec});
+                mThumbProvider->requestWavePeaks(soundKey, relRange.fMin,
+                                                 soundObj);
+            }
+            continue;
+        }
+
+        const auto box = enve_cast<BoundingBox*>(layer);
+        if (!box) { continue; }
+
+        // video family (VideoBox / image sequences): decoded filmstrip
+        const auto animBox = dynamic_cast<AnimationBox*>(box);
+        if (animBox) {
+            const auto handler = animBox->getAnimationFramesHandler();
+            if (!handler) { continue; }
+            const QString hKey = QStringLiteral("%1")
+                    .arg(reinterpret_cast<qulonglong>(handler), 0, 16);
+            const int f0 = qMax(dur->getMinAbsFrame(), qRound(viewA * fps));
+            const int f1 = qMin(dur->getMaxAbsFrame(), qRound(viewB * fps));
+            for (int f = f0; f <= f1; f += intervalFrames) {
+                const qreal relFrame = box->prp_absFrameToRelFrameF(f);
+                const int animFrame = animBox->getAnimationFrameForRelFrame(relFrame);
+                mFilmRoutes[
+                        QStringLiteral("%1:%2").arg(hKey).arg(animFrame)
+                        ].append({clipId, f});
+                mThumbProvider->requestFrameThumb(hKey, animFrame,
+                                                  handler, bodyH);
+            }
+            continue; // no midpoint render for filmstrip clips
+        }
+
+        // other visual layers (images, vectors, text, groups): one real
+        // WYSIWYG frame per block - the middle of its range (stable
         // across rebuilds; only a re-trim that moves the midpoint
         // re-renders)
+        if (mThumbDone.size() > 128) { mThumbDone.clear(); }
         const int absMid = (dur->getMinAbsFrame() + dur->getMaxAbsFrame()) / 2;
         const qreal relFrame = box->prp_absFrameToRelFrameF(absMid);
         const QString key = QStringLiteral("%1:%2")
@@ -426,9 +511,9 @@ void EditorTimelineSync::requestThumbnails()
             continue;
         }
         if (mThumbPending.contains(key)) { continue; }
-        // async offscreen render of the linked scene composition (same
-        // path the switch panel uses); result marshalled back to the GUI
-        // thread, stale deliveries dropped by clip id
+        // async offscreen render of the layer composition; result
+        // marshalled back to the GUI thread, stale deliveries dropped
+        // by clip id
         auto task = box->queExternalRender(relFrame, true);
         if (!task) { continue; }
         mThumbPending.insert(key);

@@ -74,10 +74,15 @@ private:
     // panel row order -> contained order, shared lanes -> shared trackId,
     // solo lanes -> independent rows
     void applyTrackWriteback();
-    // async offscreen render of one mid-clip frame per video block
-    // (real content thumbnails), delivered through setClipThumbnail
-    void requestThumbnails();
+    // media for the panel: decoded filmstrip tiles for video-family
+    // clips (provider LRU), WYSIWYG midpoint renders for other visual
+    // blocks, real waveform peaks for audio clips
+    void requestMedia();
     void deliverThumbnail(const QString &key, const QImage &img);
+    class TimelineThumbProvider *mThumbProvider = nullptr;
+    // delivery routing: provider key -> (clip id, abs frame/second)
+    QHash<QString, QVector<QPair<int, int>>> mFilmRoutes;
+    QHash<QString, QVector<QPair<int, int>>> mWaveRoutes;
 
     Document &mDocument;
     QPointer<EditorTimelineWidget> mWidget;

@@ -62,6 +62,8 @@ public:
     void afterUpdate();
     void beforeAddingScheduler();
     int getAnimationFrameForRelFrame(const qreal relFrame);
+    AnimationFrameHandler* getAnimationFramesHandler() const
+    { return mSrcFramesCache.get(); }
 
     void enableFrameRemappingAction();
     void disableFrameRemappingAction();

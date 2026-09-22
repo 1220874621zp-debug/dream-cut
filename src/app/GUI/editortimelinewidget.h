@@ -160,6 +160,10 @@ private:
     // placeholder tiles stay in m_thumbCache and are only used as fallback
     QHash<int, QImage> m_realThumbs;
     QHash<int, QPixmap> m_realScaled;
+    // clipId -> (abs frame -> decoded frame image) filmstrip tiles
+    QHash<int, QMap<int, QImage>> m_film;
+    // clipId -> (abs second -> peak columns) real waveforms
+    QHash<int, QHash<int, QVector<qreal>>> m_waves;
 
     // theme
     QColor cBg       {0x1b,0x1b,0x1b};
@@ -199,6 +203,18 @@ public:
     // the linked scene, delivered by EditorTimelineSync); clips without
     // one keep the procedural placeholder tile
     void setClipThumbnail(const int clipId, const QImage &image);
+    // filmstrip: one real decoded frame keyed by its ABS frame; painted
+    // at its own time position (survives clip drags, shared frames
+    // across split clips dedupe on the provider side)
+    void setClipThumbFrame(const int clipId, const int absFrame,
+                           const QImage &image);
+    // real waveform peaks for one absolute second of an audio clip
+    void setClipWave(const int clipId, const int absSecond,
+                     const QVector<qreal> &peaks);
+    // viewport in seconds (for provider request culling)
+    double viewStartSec() const;
+    double viewEndSec() const;
+    double pxPerSec() const { return m_pxPerSec; }
     // CapCut-style magnetic mode. While on, tracks hold no gaps: turning
     // it on compacts every track right away, and every drag/trim release
     // re-compacts (later clips slide left onto the previous clip's out

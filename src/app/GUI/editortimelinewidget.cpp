@@ -385,11 +385,30 @@ void EditorTimelineWidget::drawClip(QPainter &p, int index, bool ghost)
         if (body.height() > 4) {
             p.save();
             p.setClipRect(body, Qt::IntersectClip);
-            QPixmap tile = thumbnailTile(c, int(body.height()));
-            for (double x = body.left(); x < body.right(); x += tile.width()) {
-                p.drawPixmap(QPointF(x, body.top()), tile);
-                p.setPen(QColor(0, 0, 0, 120));
-                p.drawLine(QPointF(x, body.top()), QPointF(x, body.bottom()));
+            // real filmstrip first: decoded frames pinned to their own
+            // time position (frame -> x through the scene fps)
+            const auto stripIt = m_film.constFind(c.id);
+            const bool hasFilm = stripIt != m_film.constEnd() && !stripIt.value().isEmpty();
+            if (hasFilm) {
+                for (auto it = stripIt.value().constBegin();
+                     it != stripIt.value().constEnd(); ++it) {
+                    const double t = it.key() / m_fps;
+                    const double x = timeToX(t);
+                    const int w = qMax(2, int(it.value().width()
+                                       * body.height() / it.value().height()));
+                    if (x + w < body.left() || x > body.right()) { continue; }
+                    p.drawImage(QRectF(x, body.top(), w, body.height()),
+                                it.value());
+                    p.setPen(QColor(0, 0, 0, 120));
+                    p.drawLine(QPointF(x, body.top()), QPointF(x, body.bottom()));
+                }
+            } else {
+                QPixmap tile = thumbnailTile(c, int(body.height()));
+                for (double x = body.left(); x < body.right(); x += tile.width()) {
+                    p.drawPixmap(QPointF(x, body.top()), tile);
+                    p.setPen(QColor(0, 0, 0, 120));
+                    p.drawLine(QPointF(x, body.top()), QPointF(x, body.bottom()));
+                }
             }
             p.restore();
         }
@@ -404,16 +423,33 @@ void EditorTimelineWidget::drawClip(QPainter &p, int index, bool ghost)
         p.fillPath(path, cAudioBody);
         QRectF body = r.adjusted(2, nameBarH + 2, -2, -3);
         if (body.width() > 4 && body.height() > 4) {
-            // deterministic pseudo waveform (vertical bars)
             p.setPen(QPen(cAudioWave, 1));
-            double mid = body.center().y();
-            int n = int(body.width());
+            const double mid = body.center().y();
+            const auto waveIt = m_waves.constFind(c.id);
+            const bool hasWave = waveIt != m_waves.constEnd() && !waveIt.value().isEmpty();
+            const int n = int(body.width());
             for (int i = 0; i <= n; ++i) {
-                quint32 hsh = quint32(c.id * 2654435761u) ^ quint32(i * 40503u);
-                hsh ^= hsh >> 13; hsh *= 0x5bd1e995u; hsh ^= hsh >> 15;
-                double amp = (hsh % 1000) / 1000.0;
-                amp = 0.15 + 0.85 * amp * (0.55 + 0.45 * qSin(i * 0.05));
-                double x = body.left() + i;
+                double amp = 0.;
+                if (hasWave) {
+                    // real peaks: column time -> second + bucket lookup
+                    const double t = xToTime(int(body.left()) + i);
+                    const int sec = int(t);
+                    const auto peaks = waveIt.value().constFind(sec);
+                    if (peaks != waveIt.value().constEnd() && !peaks.value().isEmpty()) {
+                        const qreal frac = t - sec;
+                        const int bucket = qBound(
+                                    0, int(frac * peaks.value().size()),
+                                    peaks.value().size() - 1);
+                        amp = peaks.value().at(bucket);
+                    }
+                } else {
+                    // deterministic pseudo waveform until the real one lands
+                    quint32 hsh = quint32(c.id * 2654435761u) ^ quint32(i * 40503u);
+                    hsh ^= hsh >> 13; hsh *= 0x5bd1e995u; hsh ^= hsh >> 15;
+                    amp = (hsh % 1000) / 1000.0;
+                    amp = 0.15 + 0.85 * amp * (0.55 + 0.45 * qSin(i * 0.05));
+                }
+                const double x = body.left() + i;
                 p.drawLine(QPointF(x, mid - amp * body.height() / 2),
                            QPointF(x, mid + amp * body.height() / 2));
             }
@@ -1023,6 +1059,8 @@ void EditorTimelineWidget::clearAllClips()
     m_thumbCache.clear();
     m_realThumbs.clear();
     m_realScaled.clear();
+    m_film.clear();
+    m_waves.clear();
     emit selectionChanged(QString());
     updateScrollBar();
     update();
@@ -1374,6 +1412,38 @@ void EditorTimelineWidget::setTrackName(const int trackIdx, const QString &name)
     if (m_tracks[trackIdx].name == name) { return; }
     m_tracks[trackIdx].name = name;
     update();
+}
+
+void EditorTimelineWidget::setClipThumbFrame(const int clipId,
+                                             const int absFrame,
+                                             const QImage &image)
+{
+    if (image.isNull()) { return; }
+    auto &strip = m_film[clipId];
+    strip.insert(absFrame, image);
+    update();
+}
+
+void EditorTimelineWidget::setClipWave(const int clipId, const int absSecond,
+                                       const QVector<qreal> &peaks)
+{
+    if (peaks.isEmpty()) { return; }
+    auto &wave = m_waves[clipId];
+    if (wave.contains(absSecond) && wave.value(absSecond).size() == peaks.size()) {
+        return; // unchanged: no repaint storm on every rebuild
+    }
+    wave.insert(absSecond, peaks);
+    update();
+}
+
+double EditorTimelineWidget::viewStartSec() const
+{
+    return xToTime(headerWidth() + 1);
+}
+
+double EditorTimelineWidget::viewEndSec() const
+{
+    return xToTime(width() - 1);
 }
 
 QRect EditorTimelineWidget::muteBadgeRect(const int trackIdx) const

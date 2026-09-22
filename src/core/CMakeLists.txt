@@ -298,6 +298,7 @@ set(
     Sound/evideosound.cpp
     Sound/soundcomposition.cpp
     Sound/soundmerger.cpp
+    Sound/soundpeaks.cpp
     Tasks/domeletask.cpp
     Tasks/etask.cpp
     Tasks/etaskbase.cpp
@@ -676,6 +677,7 @@ set(
     Sound/evideosound.h
     Sound/soundcomposition.h
     Sound/soundmerger.h
+    Sound/soundpeaks.h
     Tasks/domeletask.h
     Tasks/etask.h
     Tasks/etaskbase.h
