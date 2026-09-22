@@ -15,6 +15,7 @@
 #include "smartPointers/ememory.h"
 
 #include <QMouseEvent>
+#include <QTimer>
 #include <QSet>
 #include <QDebug>
 #include <climits>
@@ -66,6 +67,14 @@ EditorTimelineSync::EditorTimelineSync(Document &document,
         }
     });
 
+    // viewport changes (zoom / scroll / resize) re-request media for
+    // the newly visible range; debounced so a zoom gesture is one pass
+    mMediaTimer = new QTimer(this);
+    mMediaTimer->setSingleShot(true);
+    mMediaTimer->setInterval(250);
+    connect(mMediaTimer, &QTimer::timeout,
+            this, &EditorTimelineSync::requestMedia);
+
     // selection bridge: panel clip pick drives the canvas selection
     if (mWidget) {
         connect(mWidget, &EditorTimelineWidget::selectionChanged,
@@ -87,6 +96,10 @@ EditorTimelineSync::EditorTimelineSync(Document &document,
                 this, [this](const int frame) {
             const auto scene = mPanelScene.data();
             if (scene) { scene->setMarker(frame); rebuild(); }
+        });
+        connect(mWidget, &EditorTimelineWidget::viewChanged,
+                this, [this]() {
+            if (!mDragging && mMediaTimer) { mMediaTimer->start(); }
         });
         connect(mWidget, &EditorTimelineWidget::markerRemoveRequested,
                 this, [this](const int frame) {

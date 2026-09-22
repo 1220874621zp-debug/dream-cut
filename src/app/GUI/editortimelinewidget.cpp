@@ -915,68 +915,10 @@ void EditorTimelineWidget::hideEvent(QHideEvent *)
 void EditorTimelineWidget::resizeEvent(QResizeEvent *)
 {
     updateScrollBar();
+    emit viewChanged();
 }
 
 // ---------------------------------------------------------------- public ops
-
-void EditorTimelineWidget::addVideoClip()
-{
-    int track = 1; // V1
-    double len = 4.0;
-    double s = m_playhead;
-    while (overlapsOnTrack(track, s, len, -1) && s < 1e6) {
-        // jump past the blocking clip
-        double next = s + len;
-        for (const Clip &o : m_clips)
-            if (o.track == track && s < o.start + o.length && o.start < s + len)
-                next = qMax(next, o.start + o.length);
-        if (next <= s) break;
-        s = next;
-    }
-    Clip c;
-    c.id = m_nextId++;
-    c.name = QStringLiteral("clip_%1.mp4").arg(c.id, 3, 10, QLatin1Char('0'));
-    c.type = ClipType::Video;
-    c.track = track;
-    c.start = s;
-    c.length = len;
-    c.hueSeed = c.id * 37;
-    m_clips.push_back(c);
-    m_selectedIds.clear();
-    m_selectedIds.insert(c.id);
-    emitLog(QStringLiteral("add video clip \"%1\" at %2").arg(c.name, timecode(s)));
-    updateScrollBar();
-    update();
-}
-
-void EditorTimelineWidget::addAudioClip()
-{
-    int track = m_tracks.size() - 1; // last = audio
-    double len = 5.0;
-    double s = m_playhead;
-    while (overlapsOnTrack(track, s, len, -1) && s < 1e6) {
-        double next = s + len;
-        for (const Clip &o : m_clips)
-            if (o.track == track && s < o.start + o.length && o.start < s + len)
-                next = qMax(next, o.start + o.length);
-        if (next <= s) break;
-        s = next;
-    }
-    Clip c;
-    c.id = m_nextId++;
-    c.name = QStringLiteral("audio_%1.mp3").arg(c.id, 3, 10, QLatin1Char('0'));
-    c.type = ClipType::Audio;
-    c.track = track;
-    c.start = s;
-    c.length = len;
-    c.hueSeed = c.id * 37;
-    m_clips.push_back(c);
-    m_selectedIds.clear();
-    m_selectedIds.insert(c.id);
-    emitLog(QStringLiteral("add audio clip \"%1\" at %2").arg(c.name, timecode(s)));
-    updateScrollBar();
-    update();
-}
 
 void EditorTimelineWidget::removeSelectedClip()
 {
@@ -997,6 +939,7 @@ void EditorTimelineWidget::applyZoom(double factor, int anchorX)
     }
     clampView();
     updateScrollBar();
+    emit viewChanged();
     update();
 }
 
@@ -1024,6 +967,7 @@ void EditorTimelineWidget::updateScrollBar()
 {
     if (!m_scrollBar) return;
     clampView();
+    emit viewChanged();
     double content = contentDuration();
     double page = (width() - headerWidth()) / m_pxPerSec;
     m_scrollBar->setRange(0, int(qMax(0.0, content - page) * 100));

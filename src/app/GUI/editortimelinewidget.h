@@ -42,8 +42,6 @@ public:
     QRect lockBadgeRect(const int trackIdx) const;
 
 public slots:
-    void addVideoClip();
-    void addAudioClip();
     void removeSelectedClip();
     void zoomIn();
     void zoomOut();
@@ -57,6 +55,9 @@ signals:
     void trackRenameRequested(const int trackIdx, const QString &name);
     void markerAddRequested(const int frame);
     void markerRemoveRequested(const int frame);
+    // zoom / scroll / resize changed the visible range: the sync
+    // re-requests media for the new viewport (debounced there)
+    void viewChanged();
     void logMessage(const QString &msg);
     void selectionChanged(const QString &info);
     void trackLayoutChanged();

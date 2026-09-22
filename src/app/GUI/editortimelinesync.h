@@ -84,6 +84,7 @@ private:
     QHash<QString, QVector<QPair<int, int>>> mFilmRoutes;
     QHash<QString, QVector<QPair<int, int>>> mWaveRoutes;
 
+    class QTimer *mMediaTimer = nullptr;
     Document &mDocument;
     QPointer<EditorTimelineWidget> mWidget;
     // scene whose children the panel shows: the active scene, or the
