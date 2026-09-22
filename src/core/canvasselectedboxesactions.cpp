@@ -541,7 +541,6 @@ void Canvas::setCurrentBox(BoundingBox* const box) {
     emit currentBoxChanged(box);
 }
 
-//#include "Boxes/paintbox.h"
 void Canvas::addBoxToSelection(BoundingBox * const box)
 {
     if (box->isSelected() || box->isLocked()) { return; }
@@ -576,12 +575,6 @@ void Canvas::addBoxToSelection(BoundingBox * const box)
     sortSelectedBoxesDesc();
     //setCurrentFillStrokeSettingsFromBox(box);
     setCurrentBox(box);
-
-    /*if(mCurrentMode == CanvasMode::paint) {
-        if(const auto pBox = enve_cast<PaintBox*>(box)) {
-            mPaintTarget.setPaintBox(pBox);
-        }
-    }*/
     emit selectedPaintSettingsChanged();
     emit objectSelectionChanged();
 }
@@ -592,7 +585,6 @@ void Canvas::removeBoxFromSelection(BoundingBox * const box) {
     mSelectionOrderList.removeAll(box);
     box->setSelected(false);
     schedulePivotUpdate();
-    //if(mCurrentMode == CanvasMode::paint) updatePaintBox();
     if (mSelectedBoxes.isEmpty()) { setCurrentBox(nullptr); }
     else { setCurrentBox(mSelectedBoxes.last()); }
     emit selectedPaintSettingsChanged();
@@ -630,8 +622,6 @@ void Canvas::setSelectionDirection(const bool bottomUp)
 }
 
 void Canvas::clearBoxesSelectionList() {
-    //if(mCurrentMode == CanvasMode::paint)
-        //mPaintTarget.setPaintBox(nullptr);
     mSelectedBoxes.clear();
     mSelectionOrderList.clear();
     mSelectionBottomUp = false;
@@ -827,7 +817,7 @@ MovablePoint *Canvas::getPointAtAbsPos(const QPointF &absPos,
         }
     }
     if(mode == CanvasMode::pointTransform || mode == CanvasMode::pathCreate ||
-       mode == CanvasMode::drawPath || mode == CanvasMode::boxTransform) {
+       mode == CanvasMode::boxTransform) {
         for(const auto &box : mSelectedBoxes) {
             const auto pointAtPos = box->getPointAtAbsPos(absPos, mode, invScale);
             if(pointAtPos) return pointAtPos;

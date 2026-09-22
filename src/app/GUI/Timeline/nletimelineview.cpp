@@ -21,6 +21,8 @@
 #include <climits>
 
 #include "themesupport.h"
+#include <QSvgRenderer>
+#include <QHash>
 #include "Boxes/videobox.h"
 #include "Sound/evideosound.h"
 
@@ -343,6 +345,71 @@ void NleTimelineView::drawRuler(QPainter &p)
     }
 }
 
+// 剪映同款轨道头线性图标：16x16 视图框，颜色烤进 SVG 后按 key+色缓存
+static QPixmap nleHeaderGlyph(const QString &key, const QByteArray &svgBody,
+                              const QColor &color, const int size) {
+    static QHash<QString, QPixmap> cache;
+    const QString cacheKey = key + QLatin1Char('|') + color.name()
+            + QLatin1Char('|') + QString::number(size);
+    const auto hit = cache.constFind(cacheKey);
+    if (hit != cache.constEnd()) { return hit.value(); }
+    const QByteArray svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" "
+            "viewBox=\"0 0 16 16\">" + svgBody + "</svg>";
+    QPixmap pm(size, size);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing);
+    QSvgRenderer renderer(svg);
+    renderer.render(&p, QRectF(0, 0, size, size));
+    p.end();
+    cache.insert(cacheKey, pm);
+    return pm;
+}
+
+static QByteArray nleGlyphBody(const QString &key, const bool off,
+                               const QColor &c) {
+    const QString col = c.name();
+    QByteArray body;
+    QByteArray strokeCol = QString("stroke=\"%1\" stroke-width=\"1.4\" "
+                                   "stroke-linecap=\"round\" "
+                                   "stroke-linejoin=\"round\" fill=\"none\"")
+                                   .arg(col).toUtf8();
+    if (key == "video") {
+        // 视频轨：圆角片框 + 播放三角
+        body = "<rect x=\"1.7\" y=\"3.2\" width=\"12.6\" height=\"9.6\" "
+               "rx=\"1.8\" " + strokeCol + "/>"
+               "<path d=\"M6.7 5.9 L10.4 8 L6.7 10.1 Z\" fill=\"" + col.toUtf8() + "\"/>";
+    } else if (key == "music") {
+        // 音频轨：音符
+        body = "<circle cx=\"6\" cy=\"11.2\" r=\"2\" fill=\"" + col.toUtf8() + "\"/>"
+               "<path d=\"M8 11.2 V3.9 C 8.6 5.8 10.3 6.3 11.6 5.9\" " + strokeCol + "/>";
+    } else if (key == "eye") {
+        body = "<path d=\"M1.8 8 C 3.5 4.9 5.6 3.4 8 3.4 C 10.4 3.4 12.5 4.9 14.2 8 "
+               "C 12.5 11.1 10.4 12.6 8 12.6 C 5.6 12.6 3.5 11.1 1.8 8 Z\" " + strokeCol + "/>"
+               "<circle cx=\"8\" cy=\"8\" r=\"1.9\" fill=\"" + col.toUtf8() + "\"/>";
+        if (off) { body += "<path d=\"M2.6 13.4 L13.4 2.6\" stroke=\"" + col.toUtf8() +
+                           "\" stroke-width=\"1.5\" stroke-linecap=\"round\"/>";
+        }
+    } else if (key == "speaker") {
+        body = "<path d=\"M2.2 6.2 H4.6 L7.6 3.6 V12.4 L4.6 9.8 H2.2 Z\" fill=\"" +
+               col.toUtf8() + "\"/>";
+        if (!off) {
+            body += "<path d=\"M10 5.8 A 3.1 3.1 0 0 1 10 10.2\" " + strokeCol + "/>"
+                    "<path d=\"M12.1 4.2 A 5.4 5.4 0 0 1 12.1 11.8\" " + strokeCol + "/>";
+        } else {
+            body += "<path d=\"M2.6 13.4 L13.4 2.6\" stroke=\"" + col.toUtf8() +
+                    "\" stroke-width=\"1.5\" stroke-linecap=\"round\"/>";
+        }
+    } else if (key == "lock") {
+        body = "<rect x=\"3.6\" y=\"7.2\" width=\"8.8\" height=\"6\" rx=\"1.5\" " +
+               strokeCol + "/>";
+        body += off
+            ? "<path d=\"M5.6 7.2 V5.4 A 2.4 2.4 0 0 1 10.4 5.4\" " + strokeCol + "/>"
+            : "<path d=\"M5.6 7.2 V5.4 A 2.4 2.4 0 0 1 10.4 5.4 V7.2\" " + strokeCol + "/>";
+    }
+    return body;
+}
+
 void NleTimelineView::drawTrackHeaders(QPainter &p)
 {
     const auto &tracks = mModel->tracks();
@@ -354,51 +421,53 @@ void NleTimelineView::drawTrackHeaders(QPainter &p)
         p.drawLine(0, top + h - 1, headerWidth(), top + h - 1);
         p.drawLine(headerWidth() - 1, top, headerWidth() - 1, top + h);
 
-        // text-icon per track type
-        const QString icon = tracks[i].audio ? QStringLiteral("A") : QStringLiteral("V");
-        const QColor ic = tracks[i].audio ? cAudioWave : cAccent;
-        const QRect badge(10, top + (h - 22) / 2, 22, 22);
-        p.setPen(Qt::NoPen);
-        p.setBrush(ic.darker(130));
-        p.drawRoundedRect(badge, 4, 4);
-        p.setPen(QColor(0xe8, 0xe8, 0xe8));
-        p.drawText(badge, Qt::AlignCenter, icon);
+        // 剪映同款：轨道类型线性图标（视频=片框播放 / 音频=音符）
+        const bool audio = tracks[i].audio;
+        const QString typeKey = audio ? QStringLiteral("music")
+                                      : QStringLiteral("video");
+        p.drawPixmap(10, top + (h - 18) / 2,
+                     nleHeaderGlyph(typeKey,
+                                    nleGlyphBody(typeKey, false, cText),
+                                    cText, 18));
         // CapCut main track: the bottom video lane carries the badge
         // and drives the magnetic layout + overlay following
-        if (!tracks[i].audio && tracks[i].id == mModel->mainTrackId()) {
+        if (!audio && tracks[i].id == mModel->mainTrackId()) {
             QFont mf = font();
             mf.setPixelSize(9);
             p.setFont(mf);
             p.setPen(Qt::NoPen);
             p.setBrush(QColor(0xff, 0xd1, 0x54));
-            const QRect mb(34, top + (h - 22) / 2, 14, 22);
+            const QRect mb(34, top + (h - 16) / 2, 14, 16);
             p.drawRoundedRect(mb, 3, 3);
             p.setPen(QColor(0x33, 0x28, 0x08));
             p.drawText(mb, Qt::AlignCenter, QStringLiteral("主"));
         }
 
         p.setPen(tracks[i].muted ? cTextDim : cText);
-        p.drawText(QRect(38, top, headerWidth() - 68, h),
+        p.drawText(QRect(38, top, headerWidth() - 108, h),
                    Qt::AlignVCenter, tracks[i].name);
 
-        // mute badge: video lane hides the picture, audio lane mutes
-        // the sound (one visibility op, glyph says which)
+        // 剪映顺序：锁在左，眼(视频)/喇叭(音频)在右
+        const QRect lb = lockBadgeRect(i);
+        {
+            const bool locked = tracks[i].locked;
+            const QColor lc = locked ? QColor(0xff, 0xd1, 0x54) : cTextDim;
+            p.drawPixmap(lb.topLeft(),
+                         nleHeaderGlyph(QStringLiteral("lock"),
+                                        nleGlyphBody(QStringLiteral("lock"),
+                                                     !locked, lc),
+                                        lc, lb.width()));
+        }
+
         const QRect mb = muteBadgeRect(i);
         const bool laneMuted = tracks[i].muted;
-        p.setPen(QPen(laneMuted ? QColor(0xe8, 0x4c, 0x4c) : cGridLine, 1));
-        p.setBrush(Qt::NoBrush);
-        p.drawRoundedRect(mb, 4, 4);
-        p.setPen(laneMuted ? QColor(0xe8, 0x4c, 0x4c) : cTextDim);
-        p.drawText(mb, Qt::AlignCenter,
-                   tracks[i].audio ? QStringLiteral("静") : QStringLiteral("隐"));
-
-        // lock badge (L): dim when off, amber when the lane is locked
-        const QRect lb = lockBadgeRect(i);
-        p.setPen(QPen(tracks[i].locked ? QColor(0xff, 0xd1, 0x54) : cGridLine, 1));
-        p.setBrush(Qt::NoBrush);
-        p.drawRoundedRect(lb, 4, 4);
-        p.setPen(tracks[i].locked ? QColor(0xff, 0xd1, 0x54) : cTextDim);
-        p.drawText(lb, Qt::AlignCenter, QStringLiteral("L"));
+        const QString ctrlKey = audio ? QStringLiteral("speaker")
+                                      : QStringLiteral("eye");
+        const QColor mc = laneMuted ? QColor(0xe8, 0x4c, 0x4c) : cText;
+        p.drawPixmap(mb.topLeft(),
+                     nleHeaderGlyph(ctrlKey,
+                                    nleGlyphBody(ctrlKey, laneMuted, mc),
+                                    mc, mb.width()));
     }
 }
 
@@ -937,23 +1006,6 @@ void NleTimelineView::trackSelectAt(const QPoint &pos, const int clipId,
             .arg(picked.size())
             .arg(allTracks ? QStringLiteral("全部轨道")
                            : (tr ? tr->name : QString())));
-}
-
-// direction-only variant for the context menu: every clip on every
-// track before/after the click time
-void NleTimelineView::trackSelectAll(const QPoint &pos, const bool backward)
-{
-    const int div = xToFrame(pos.x());
-    QSet<int> picked;
-    for (const auto &o : mModel->clips()) {
-        const bool inDir = backward ? (o.start <= div)
-                                    : (o.start + o.duration > div);
-        if (inDir) { picked.insert(o.clipId); }
-    }
-    mModel->setSelection(picked);
-    emit logMessage(QStringLiteral("%1 %2 块（全部轨道）")
-            .arg(backward ? QStringLiteral("向左选择") : QStringLiteral("向右选择"))
-            .arg(picked.size()));
 }
 
 void NleTimelineView::mousePressEvent(QMouseEvent *e)
@@ -1940,14 +1992,14 @@ QRect NleTimelineView::muteBadgeRect(const int trackIdx) const
 {
     const int top = trackY(trackIdx);
     const int h = trackHeight(trackIdx);
-    return QRect(headerWidth() - 58, top + (h - 20) / 2, 20, 20);
+    return QRect(headerWidth() - 32, top + (h - 20) / 2, 20, 20);
 }
 
 QRect NleTimelineView::lockBadgeRect(const int trackIdx) const
 {
     const int top = trackY(trackIdx);
     const int h = trackHeight(trackIdx);
-    return QRect(headerWidth() - 32, top + (h - 20) / 2, 20, 20);
+    return QRect(headerWidth() - 58, top + (h - 20) / 2, 20, 20);
 }
 
 // nearest lane of the requested type for a y position (free drags
@@ -2010,13 +2062,11 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
         if (lane < 0) { QWidget::contextMenuEvent(e); return; }
         const auto &track = mModel->tracks().at(lane);
         QMenu menu(this);
-        QAction *add = menu.addAction(track.audio ? tr("添加音频轨")
-                                                  : tr("添加视频轨"));
+        // 加轨走角部 +V/+A 按钮，这里只留无快捷入口的生命周期操作
         QAction *del = menu.addAction(tr("删除轨道（仅空轨可删）"));
         QAction *rename = menu.addAction(tr("重命名轨道"));
         QAction *act = menu.exec(e->globalPos());
-        if (act == add) { mModel->requestTrackAdd(track.audio, !track.audio); }
-        else if (act == del) { mModel->requestTrackRemove(track.id); }
+        if (act == del) { mModel->requestTrackRemove(track.id); }
         else if (act == rename) { renameTrackDialog(lane); }
         return;
     }
@@ -2035,10 +2085,8 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
             mModel->tracks().at(srcIdx + 1).audio == c->audio;
 
     QMenu menu(this);
-    // NLE editing section (always available)
+    // 删除/波纹删除/向左向右选择都有工具栏快捷按钮，不再进菜单
     QAction *splitHere = menu.addAction(tr("在此处分割"));
-    QAction *del = menu.addAction(tr("删除"));
-    QAction *rippleDel = menu.addAction(tr("波纹删除"));
     QAction *freeze = menu.addAction(tr("从此处定格到块尾"));
     QAction *speed = menu.addAction(tr("变速…"));
     // kdenlive detach-audio: only video-family clips with a live
@@ -2047,11 +2095,6 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
     const auto embeddedSound = vidBox ? vidBox->sound() : nullptr;
     QAction *detach = menu.addAction(tr("分离音频"));
     detach->setEnabled(embeddedSound && embeddedSound->isVisible());
-    menu.addSeparator();
-    QAction *back = menu.addAction(tr("向左选择本轨"));
-    QAction *backAll = menu.addAction(tr("向左选择全部轨道"));
-    QAction *fwd = menu.addAction(tr("向右选择本轨"));
-    QAction *fwdAll = menu.addAction(tr("向右选择全部轨道"));
     QAction *up = nullptr;
     QAction *down = nullptr;
     if (upOk || downOk) {
@@ -2066,9 +2109,7 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
     if (act == splitHere) {
         mModel->clearSelection();
         mModel->requestRazorCut({clipId}, xToFrame(e->pos().x()));
-    } else if (act == del) { requestDelete(false); }
-    else if (act == rippleDel) { requestDelete(true); }
-    else if (act == freeze) {
+    } else if (act == freeze) {
         // CapCut 定格: cut here + freeze everything from the cut to
         // the clip's end on the cut frame
         mModel->requestFreeze({clipId}, xToFrame(e->pos().x()));
@@ -2080,11 +2121,7 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
                     this, tr("变速"), tr("播放速率（倍速，1=原速）"),
                     1.0, 0.1, 10.0, 2, &ok);
         if (ok && rate > 0.01) { mModel->requestSpeed(clipId, rate); }
-    } else if (act == back) { trackSelectAt(e->pos(), clipId, true); }
-    else if (act == backAll) { trackSelectAll(e->pos(), true); }
-    else if (act == fwd) { trackSelectAt(e->pos(), clipId, false); }
-    else if (act == fwdAll) { trackSelectAll(e->pos(), false); }
-    else if (act == up && upOk) {
+    } else if (act == up && upOk) {
         mModel->requestMoveClipToTrack(
                     clipId, mModel->tracks().at(srcIdx - 1).id);
     } else if (act == down && downOk) {

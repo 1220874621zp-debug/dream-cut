@@ -91,7 +91,6 @@ private:
 
     void moveAlphaWidgetToTab(const int tabId);
 
-    void startColorPicking();
 
     void setAlpha(const qreal val);
 
@@ -219,7 +218,6 @@ private:
     QLabel *mHexLabel;
 
     QHBoxLayout *mColorLabelLayout = new QHBoxLayout();
-    QPushButton *mPickingButton;
 
     ColorLabel *mColorLabel = nullptr;
 

@@ -231,15 +231,6 @@ void CanvasWindow::setCurrentCanvas(Canvas * const canvas)
     emit currentSceneChanged(canvas);
 }
 
-void CanvasWindow::updatePaintModeCursor()
-{
-    /*mValidPaintTarget = mCurrentCanvas && mCurrentCanvas->hasValidPaintTarget();
-    if(mValidPaintTarget) {
-        setCursor(QCursor(QPixmap(":/cursors/cursor_crosshair_precise_open.png")));
-    } else {
-        setCursor(QCursor(QPixmap(":/cursors/cursor_crosshair_open.png")));
-    }*/
-}
 
 void CanvasWindow::setCanvasMode(const CanvasMode mode)
 {
@@ -247,10 +238,6 @@ void CanvasWindow::setCanvasMode(const CanvasMode mode)
     case CanvasMode::boxTransform:
     case CanvasMode::pointTransform:
         setCursor(Qt::ArrowCursor);
-        break;
-    case CanvasMode::pickFillStroke:
-    case CanvasMode::pickFillStrokeEvent:
-        setCursor(Qt::PointingHandCursor);
         break;
     case CanvasMode::circleCreate:
     case CanvasMode::rectCreate:
@@ -500,16 +487,6 @@ void CanvasWindow::drawRulersOverlay(SkCanvas * const canvas) {
 void CanvasWindow::tabletEvent(QTabletEvent *e)
 {
     Q_UNUSED(e)
-    /*if(!mCurrentCanvas) return;
-    const auto canvasMode = mDocument.fCanvasMode;
-    const QPoint globalPos = mapToGlobal(QPoint(0, 0));
-    const qreal x = e->hiResGlobalX() - globalPos.x();
-    const qreal y = e->hiResGlobalY() - globalPos.y();
-    mCurrentCanvas->tabletEvent(e, mapToCanvasCoord({x, y}));
-    if(canvasMode == CanvasMode::paint) {
-        if(!mValidPaintTarget) updatePaintModeCursor();
-        update();
-    }*/
 }
 
 void CanvasWindow::mousePressEvent(QMouseEvent *event)
@@ -577,10 +554,6 @@ void CanvasWindow::mousePressEvent(QMouseEvent *event)
     mPrevMousePos = pos;
     if (button == Qt::LeftButton) {
         mPrevPressPos = pos;
-        //const auto mode = mDocument.fCanvasMode;
-        /*if(mode == CanvasMode::paint && !mValidPaintTarget) {
-            updatePaintModeCursor();
-        }*/
     }
 }
 
@@ -677,8 +650,7 @@ void CanvasWindow::mouseMoveEvent(QMouseEvent *event)
                                                [this]() { grabMouse(); },
                                                this));
 
-    if (mDocument.fCanvasMode == CanvasMode::paint) { update(); }
-    else if (isMouseGrabber()) { queTasksAndUpdate(); }
+    if (isMouseGrabber()) { queTasksAndUpdate(); }
     else { update(); }
     mPrevMousePos = pos;
 }
@@ -1071,24 +1043,7 @@ bool CanvasWindow::KFT_keyPressEvent(QKeyEvent *event)
     if (handleSelectAllKeyPress(event)) { return true; }
     //if(handleShiftKeysKeyPress(event)) return true; // does nothing, see func
 
-    const auto canvasMode = mDocument.fCanvasMode;
-    /*if (e.fKey == Qt::Key_I && !isMouseGrabber()) {
-        //mActions.invertSelectionAction();
-    } else if(e.fKey == Qt::Key_W) {
-        if(canvasMode == CanvasMode::paint) mDocument.incBrushRadius();
-    } else if(e.fKey == Qt::Key_Q) {
-        if(canvasMode == CanvasMode::paint) mDocument.decBrushRadius();
-    } else if(e.fKey == Qt::Key_E) {
-        if(canvasMode == CanvasMode::paint) mDocument.setPaintMode(PaintMode::erase);
-    } else if(e.fKey == Qt::Key_B) {
-        if(canvasMode == CanvasMode::paint) mDocument.setPaintMode(PaintMode::normal);
-    } else*/ if ((e.fKey == Qt::Key_Enter || e.fKey == Qt::Key_Return) &&
-                 canvasMode == CanvasMode::drawPath) {
-        const bool manual = mDocument.fDrawPathManual;
-        if (manual) { mCurrentCanvas->drawPathFinish(1/e.fScale); }
-    } else { return false; }
-
-    return true;
+    return false;
 }
 
 void CanvasWindow::setResolution(const qreal fraction)

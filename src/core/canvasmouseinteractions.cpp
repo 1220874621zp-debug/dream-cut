@@ -249,32 +249,6 @@ void Canvas::handleLeftButtonMousePress(const eMouseEvent& e)
         handleAddSmartPointMousePress(e);
     } else if (mCurrentMode == CanvasMode::pointTransform) {
         handleMovePointMousePressEvent(e);
-    } else if (mCurrentMode == CanvasMode::drawPath) {
-        const bool manual = mDocument.fDrawPathManual;
-        bool start;
-        if (manual) {
-            start = mManualDrawPathState == ManualDrawPathState::none;
-            if (mManualDrawPathState == ManualDrawPathState::drawn) {
-                qreal dist;
-                const int forceSplit = mDrawPath.nearestForceSplit(e.fPos, &dist);
-                const int maxDist = 10;
-                if (dist < maxDist) { mDrawPath.removeForceSplit(forceSplit); }
-                else {
-                    const int smoothPt = mDrawPath.nearestSmoothPt(e.fPos, &dist);
-                    if (dist < maxDist) { mDrawPath.addForceSplit(smoothPt); }
-                }
-                mDrawPath.fit(DBL_MAX/5, false);
-            }
-        } else { start = true; }
-        if (start) {
-            mDrawPathFirst = getPointAtAbsPos(e.fPos, mCurrentMode, invScale);
-            mDrawPathFit = 0;
-            drawPathClear();
-            mDrawPath.lineTo(e.fPos);
-        }
-    } else if (mCurrentMode == CanvasMode::pickFillStroke ||
-               mCurrentMode == CanvasMode::pickFillStrokeEvent) {
-        //mPressedBox = getBoxAtFromAllDescendents(e.fPos);
     } else if (mCurrentMode == CanvasMode::circleCreate) {
         // bitmap auto-detect, same rule as the rect tool: a single
         // selected bitmap/mask-host layer (or a press over one) draws
@@ -294,13 +268,6 @@ void Canvas::handleLeftButtonMousePress(const eMouseEvent& e)
             mCreationPressPos = snappedPos;
             mHasCreationPressPos = true;
         }
-    } else if (mCurrentMode == CanvasMode::nullCreate) {
-        const auto newPath = enve::make_shared<NullObject>();
-        newPath->planCenterPivotPosition();
-        mCurrentContainer->addContained(newPath);
-        newPath->setAbsolutePos(e.fPos);
-        clearBoxesSelection();
-        addBoxToSelection(newPath.get());
     } else if (mCurrentMode == CanvasMode::rectCreate) {
         // bitmap auto-detect: a single selected bitmap/mask-host layer
         // wins (masks stay on the selected layer no matter what the
@@ -360,9 +327,6 @@ void Canvas::cancelCurrentTransform()
         else { cancelSelectedBoxesTransform(); }
     } else if (mCurrentMode == CanvasMode::pathCreate) {
         //
-    } else if (mCurrentMode == CanvasMode::pickFillStroke ||
-               mCurrentMode == CanvasMode::pickFillStrokeEvent) {
-        //mCanvasWindow->setCanvasMode(MOVE_PATH);
     }
     mValueInput.clearAndDisableInput();
     mTransMode = TransformMode::none;
@@ -452,163 +416,6 @@ void Canvas::handleMovePathMouseRelease(const eMouseEvent &e)
     } else {
         pushUndoRedoName("Move Objects");
         finishSelectedBoxesTransform();
-    }
-}
-
-SmartNodePoint* drawPathAppend(const QList<qCubicSegment2D>& fitted,
-                               SmartNodePoint* endPoint)
-{
-    for (int i = 0; i < fitted.count(); i++) {
-        const auto& seg = fitted.at(i);
-        endPoint->moveC2ToAbsPos(seg.c1());
-        endPoint = endPoint->actionAddPointAbsPos(seg.p3());
-        endPoint->moveC0ToAbsPos(seg.c2());
-    }
-    return endPoint;
-}
-
-qsptr<SmartVectorPath> drawPathNew(QList<qCubicSegment2D>& fitted)
-{
-    const QPointF& begin = fitted.first().p0();
-    const QPointF& end = fitted.last().p3();
-    const qreal beginEndDist = pointToLen(end - begin);
-    const bool close = beginEndDist < 7 && fitted.count() > 1;
-    if (close) { fitted.last().setP3(begin); }
-    const auto newPath = enve::make_shared<SmartVectorPath>();
-    CubicList fittedList(fitted);
-    newPath->loadSkPath(fittedList.toSkPath());
-    newPath->planCenterPivotPosition();
-    return newPath;
-}
-
-void Canvas::drawPathClear()
-{
-    mManualDrawPathState = ManualDrawPathState::none;
-    mDrawPathFirst.clear();
-    mDrawPath.clear();
-    mDrawPathTmp.reset();
-}
-
-void Canvas::drawPathFinish(const qreal invScale)
-{
-    mDrawPath.smooth(mDocument.fDrawPathSmooth);
-    const bool manual = mDocument.fDrawPathManual;
-    const qreal error = manual ? DBL_MAX/5 :
-                                 mDocument.fDrawPathMaxError;
-    mDrawPath.fit(error, !manual);
-
-    auto& fitted = mDrawPath.getFitted();
-    if (!fitted.isEmpty()) {
-        const QPointF& begin = fitted.first().p0();
-        const QPointF& end = fitted.last().p3();
-        const auto beginHover = getPointAtAbsPos(begin, mCurrentMode, invScale);
-        const auto beginNode = enve_cast<SmartNodePoint*>(beginHover);
-        const auto endHover = getPointAtAbsPos(end, mCurrentMode, invScale);
-        const auto endNode = enve_cast<SmartNodePoint*>(endHover);
-        const bool beginEndPoint = beginNode ? beginNode->isEndPoint() : false;
-        const bool endEndPoint = endNode ? endNode->isEndPoint() : false;
-        bool createNew = false;
-
-        if (beginNode && endNode && beginNode != endNode) {
-            const auto beginParent = beginNode->getTargetAnimator();
-            const auto endParent = endNode->getTargetAnimator();
-            const bool sampeParent = beginParent == endParent;
-
-            if (sampeParent) {
-                const auto transform = beginNode->getTransform();
-                const auto matrix = transform->getTotalTransform();
-                const auto invMatrix = matrix.inverted();
-                std::for_each(fitted.begin(), fitted.end(),
-                              [&invMatrix](qCubicSegment2D& seg) {
-                    seg.transform(invMatrix);
-                });
-                const int beginId = beginNode->getNodeId();
-                const int endId = endNode->getNodeId();
-                beginParent->actionReplaceSegments(beginId, endId, fitted);
-            } else if (beginEndPoint && endEndPoint) {
-                const bool reverse = endNode->hasNextPoint();
-
-                const auto orderedBegin = reverse ? endNode : beginNode;
-                const auto orderedEnd = reverse ? beginNode : endNode;
-
-                if (orderedEnd->hasNextPoint() || !endNode->hasNextPoint()) {
-                    std::reverse(fitted.begin(), fitted.end());
-                    std::for_each(fitted.begin(), fitted.end(),
-                                  [](qCubicSegment2D& seg) { seg.reverse(); });
-                }
-
-                const auto& lastSeg = fitted.last();
-                const auto mid = fitted.mid(0, fitted.count() - 1);
-                const auto last = drawPathAppend(mid, orderedEnd);
-                last->moveC2ToAbsPos(lastSeg.c1());
-                orderedBegin->moveC0ToAbsPos(lastSeg.c2());
-                last->actionConnectToNormalPoint(orderedBegin);
-            } else { createNew = true; }
-        } else if (beginNode && beginEndPoint) {
-            drawPathAppend(fitted, beginNode);
-        } else if (endNode && endEndPoint) {
-            drawPathAppend(fitted, endNode);
-        } else { createNew = true; }
-        if (createNew) {
-            const auto matrix = mCurrentContainer->getTotalTransform();
-            const auto invMatrix = matrix.inverted();
-            std::for_each(fitted.begin(), fitted.end(),
-                          [&invMatrix](qCubicSegment2D& seg) {
-                seg.transform(invMatrix);
-            });
-            const auto newPath = drawPathNew(fitted);
-            mCurrentContainer->addContained(newPath);
-            clearBoxesSelection();
-            addBoxToSelection(newPath.get());
-        }
-    }
-
-    drawPathClear();
-}
-
-const QColor Canvas::pickPixelColor(const QPoint &pos)
-{
-    // try the "safe" option first
-    if (QApplication::activeWindow()) {
-        const auto nPos = QApplication::activeWindow()->mapFromGlobal(pos);
-        return QApplication::activeWindow()->grab(QRect(QPoint(nPos.x(), nPos.y()),
-                                                        QSize(1, 1))).toImage().pixel(0, 0);
-    }
-
-    // "insecure" fallback (will not work in a sandbox or wayland)
-    // will prompt for permissions on macOS
-    // Windows and X11 don't care
-    QScreen *screen = QApplication::screenAt(pos);
-    if (!screen) { return QColor(); }
-    QPoint localPos = pos - screen->geometry().topLeft();
-    const auto pix = screen->grabWindow(0, localPos.x(), localPos.y(), 1, 1);
-    return QColor(pix.toImage().pixel(0, 0));
-}
-
-void Canvas::applyPixelColor(const QColor &color,
-                             const bool &fill)
-{
-    if (!color.isValid()) { return; }
-    for (const auto& box : mSelectedBoxes) {
-        if (fill) {
-            auto settings = box->getFillSettings();
-            if (settings) {
-                if (settings->getPaintType() == PaintType::NOPAINT) {
-                    settings->setPaintType(PaintType::FLATPAINT);
-                }
-                settings->setCurrentColor(color, true);
-                box->fillStrokeSettingsChanged();
-            }
-        } else {
-            auto settings = box->getStrokeSettings();
-            if (settings) {
-                if (settings->getPaintType() == PaintType::NOPAINT) {
-                    settings->setPaintType(PaintType::FLATPAINT);
-                }
-                settings->setCurrentColor(color, true);
-                box->fillStrokeSettingsChanged();
-            }
-        }
     }
 }
 
@@ -848,12 +655,6 @@ void Canvas::handleLeftMouseRelease(const eMouseEvent &e)
         finishMaskCircleDrag(e);
     } else if (mCurrentMode == CanvasMode::pathCreate) {
         handleAddSmartPointMouseRelease(e);
-    } else if (mCurrentMode == CanvasMode::drawPath) {
-        const bool manual = mDocument.fDrawPathManual;
-        if (manual) { mManualDrawPathState = ManualDrawPathState::drawn; }
-        else { drawPathFinish(1/e.fScale); }
-    } else if (mCurrentMode == CanvasMode::pickFillStrokeEvent) {
-        emit currentPickedColor(pickPixelColor(e.fGlobalPos));
     }
     mValueInput.clearAndDisableInput();
     mTransMode = TransformMode::none;

@@ -43,20 +43,16 @@ class UndoRedoStack;
 class BasicTransformAnimator;
 class BoxTransformAnimator;
 
+// NLE 清单：只保留剪辑软件用得到的画布模式
+// （boxTransform 移动/点编辑、pathCreate 钢笔蒙版、circleCreate
+// 椭圆蒙版、rectCreate 矩形蒙版、textCreate 文字）
 enum class CanvasMode : short {
     boxTransform,
     pointTransform,
     pathCreate,
-    drawPath,
-
-    paint,
     circleCreate,
     rectCreate,
-    textCreate,
-
-    nullCreate,
-    pickFillStroke,
-    pickFillStrokeEvent
+    textCreate
 };
 
 enum class UpdateReason {

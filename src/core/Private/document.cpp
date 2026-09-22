@@ -296,10 +296,6 @@ void Document::setActiveScene(Canvas * const scene)
                         this, [this](QrealAnimator* const target) {
             emit openApplyExpressionDialog(target);
         });
-        conn << connect(fActiveScene, &Canvas::currentHoverColor,
-                        this, [this](const QColor &color) {
-            emit currentPixelColor(color);
-        });
         emit currentBoxChanged(fActiveScene->getCurrentBox());
         emit selectedPaintSettingsChanged();
     }

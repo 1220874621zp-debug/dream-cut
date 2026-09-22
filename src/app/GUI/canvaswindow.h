@@ -156,7 +156,6 @@ private:
     qreal mDragGuidePos = 0;    // canvas coordinate
 
     void setCanvasMode(const CanvasMode mode);
-    void updatePaintModeCursor();
 
     Document& mDocument;
     Actions& mActions;
@@ -165,7 +164,6 @@ private:
     QTransform mViewTransform;
     QPointF mPrevMousePos;
     QPointF mPrevPressPos;
-    //bool mValidPaintTarget = false;
 
     bool mBlockInput;
     bool mMouseGrabber;

@@ -45,12 +45,9 @@ const QList<ShortcutEntry> &ShortcutSettingsWidget::entries()
         {"boxTransform", tr("Object Mode (Select Tool)"), tr("Tools"), "F1", "V", true},
         {"pointTransform", tr("Point Mode (Edit Points)"), tr("Tools"), "F2", "", true},
         {"pathCreate", tr("Add Path (Pen Tool)"), tr("Tools"), "F3", "G", true},
-        {"drawPath", tr("Draw Path (Freehand)"), tr("Tools"), "F4", "F4", true},
         {"circleMode", tr("Add Circle (Shape)"), tr("Tools"), "F5", "Q", true},
         {"rectMode", tr("Add Rectangle (Shape)"), tr("Tools"), "F6", "Shift+Q", true},
         {"textMode", tr("Add Text"), tr("Tools"), "F7", "Ctrl+T", true},
-        {"nullMode", tr("Add Null Object"), tr("Tools"), "F8", "F8", true},
-        {"pickMode", tr("Color Pick Mode (Eyedropper)"), tr("Tools"), "F9", "F9", true},
         {"localPivot", tr("Pivot Global / Local"), tr("Tools"), "P", "", true},
         {"colorBookmark", tr("Bookmark Current Color"), tr("Tools"), "B", "", true},
         // --- playback / navigation (bound in TimelineDockWidget) ---

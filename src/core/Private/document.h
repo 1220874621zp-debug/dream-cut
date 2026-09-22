@@ -128,10 +128,6 @@ public:
 
     SimpleBrushWrapper* fOutlineBrush = nullptr;
 
-    bool fDrawPathManual = false;
-    int fDrawPathSmooth = 25;
-    qreal fDrawPathMaxError = 50;
-
     QColor fBrushColor;
     SimpleBrushWrapper* fBrush = nullptr;
     bool fOnionVisible = false;
@@ -275,7 +271,6 @@ signals:
     void openExpressionDialog(QrealAnimator* const target);
     void openApplyExpressionDialog(QrealAnimator* const target);
     void newVideo(const VideoBox::VideoSpecs specs);
-    void currentPixelColor(const QColor &color);
 
     // https://github.com/friction2d/friction/pull/736
     void fitCanvasToSize();

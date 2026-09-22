@@ -281,26 +281,6 @@ void ColorSettingsWidget::moveAlphaWidgetToTab(const int tabId) {
                 mTabWidget->widget(tabId)->minimumSizeHint());*/
 }
 
-void ColorSettingsWidget::startColorPicking()
-{
-    const auto scene = *Document::sInstance->fActiveScene;
-    if (!scene) { return; }
-    CanvasMode lastMode = Document::sInstance->fCanvasMode;
-    Document::sInstance->setCanvasMode(CanvasMode::pickFillStrokeEvent);
-    auto conn = std::make_shared<QMetaObject::Connection>();
-    *conn = connect(scene, &Canvas::currentPickedColor,
-                    this, [this, conn, lastMode](const QColor &color) {
-        qDebug() << "selected color" << color << color.isValid();
-        if (color.isValid()) {
-            emitStartFullColorChangedSignal();
-            setDisplayedColor(color);
-            emitFinishFullColorChangedSignal();
-        }
-        disconnect(*conn);
-        Document::sInstance->setCanvasMode(lastMode);
-    });
-}
-
 ColorSettingsWidget::ColorSettingsWidget(QWidget *parent)
     : QWidget(parent)
 {
@@ -431,17 +411,7 @@ ColorSettingsWidget::ColorSettingsWidget(QWidget *parent)
     aLayout->addWidget(aRect);
     aLayout->addWidget(aSpin);
 
-    mPickingButton = new QPushButton(QIcon::fromTheme("pick"), QString(), this);
-    mPickingButton->setFocusPolicy(Qt::NoFocus);
-    mPickingButton->setToolTip(tr("Pick Color"));
-    connect(mPickingButton, &QPushButton::released,
-            this, &ColorSettingsWidget::startColorPicking);
-    eSizesUI::widget.add(mPickingButton, [this](const int size) {
-        mPickingButton->setFixedSize(size, size);
-    });
-
     mColorLabelLayout->addWidget(mColorLabel);
-    mColorLabelLayout->addWidget(mPickingButton);
     mWidgetsLayout->addLayout(mColorLabelLayout);
 
     mTabWidget->setObjectName("ColorTabWidget");

@@ -42,7 +42,6 @@
 #include "CacheHandlers/usepointer.h"
 #include "CacheHandlers/sceneframecontainer.h"
 #include "undoredo.h"
-#include "drawpath.h"
 #include <QMouseEvent>
 #include <QTabletEvent>
 #include <QSizeF>
@@ -652,8 +651,6 @@ signals:
     void openMarkerEditor();
     void openExpressionDialog(QrealAnimator* const target);
     void openApplyExpressionDialog(QrealAnimator* const target);
-    void currentPickedColor(const QColor &color);
-    void currentHoverColor(const QColor &color);
     void markersChanged();
     void canvasModeSet(const CanvasMode &mode);
     // a frame container has just landed in the scene-frame cache
@@ -1069,9 +1066,6 @@ private:
                                                  const bool &useAnchorOffsets = true,
                                                  const bool &mustHaveSelected = true);
 
-    void drawPathClear();
-    void drawPathFinish(const qreal invScale);
-
     const QColor pickPixelColor(const QPoint &pos);
     void applyPixelColor(const QColor &color,
                          const bool &fill);
@@ -1151,12 +1145,6 @@ protected:
     stdsptr<PathPivot> mRotPivot;
 
     stdptr<SmartNodePoint> mLastEndPoint;
-
-    stdptr<MovablePoint> mDrawPathFirst;
-    ManualDrawPathState mManualDrawPathState = ManualDrawPathState::none;
-    int mDrawPathFit = 0;
-    SkPath mDrawPathTmp;
-    DrawPath mDrawPath;
 
     NormalSegment mHoveredNormalSegment;
     NormalSegment mCurrentNormalSegment;

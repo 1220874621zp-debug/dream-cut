@@ -39,18 +39,11 @@ ToolBox::ToolBox(Actions &actions,
     , mDocument(document)
     , mMain(nullptr)
     , mControls(nullptr)
-    , mExtra(nullptr)
     , mInteract(nullptr)
     , mGroupMain(nullptr)
     , mGroupNodes(nullptr)
-    , mGroupDraw(nullptr)
-    , mGroupColorPicker(nullptr)
     , mGroupAutoSelect(nullptr)
-    , mDrawPathMaxError(nullptr)
-    , mDrawPathSmooth(nullptr)
     , mLocalPivot(nullptr)
-    , mColorPickerButton(nullptr)
-    , mColorPickerLabel(nullptr)
     , mAutoSelectLayer(nullptr)
     , mTempCanvasButton(nullptr)
 {
@@ -64,8 +57,6 @@ QToolBar *ToolBox::getToolBar(const Type &type)
         return mMain;
     case Type::Controls:
         return mControls;
-    case Type::Extra:
-        return mExtra;
     case Type::Interact:
         return mInteract;
     default:
@@ -87,7 +78,6 @@ void ToolBox::setMovable(const bool movable)
 {
     mMain->setMovable(movable);
     mControls->setMovable(movable);
-    if (mExtra) { mExtra->setMovable(movable); }
 }
 
 void ToolBox::setupToolBox(QWidget *parent)
@@ -100,23 +90,15 @@ void ToolBox::setupToolBox(QWidget *parent)
                         true);
     mControls = new ToolControls(parent);
     mInteract = new ToolInteract(parent);
-    // disable for now
-    /*mExtra = new ToolboxToolBar(tr("Extra Tools"),
-                                "ToolBoxExtra",
-                                parent);*/
 
     mGroupMain = new QActionGroup(this);
     mGroupNodes = new QActionGroup(this);
-    mGroupDraw = new QActionGroup(this);
-    mGroupColorPicker = new QActionGroup(this);
     mGroupAutoSelect = new QActionGroup(this);
     mGroupAutoSelect->setExclusive(false);
 
     setupDocument();
     setupMainActions();
     setupNodesActions();
-    setupDrawActions();
-    setupColorPickerActions();
     setupAutoSelectActions();
 }
 
@@ -126,8 +108,6 @@ void ToolBox::setupDocument()
             this, &ToolBox::setCurrentCanvas);
     connect(&mDocument, &Document::canvasModeSet,
             this, &ToolBox::setCanvasMode);
-    connect(&mDocument, &Document::currentPixelColor,
-            this, &ToolBox::updateColorPicker);
 }
 
 void ToolBox::setupMainAction(const QIcon &icon,
@@ -177,9 +157,6 @@ void ToolBox::setupMainAction(const QIcon &icon,
         case CanvasMode::pathCreate:
             mActions.setAddPointMode();
             break;
-        case CanvasMode::drawPath:
-            mActions.setDrawPathMode();
-            break;
         case CanvasMode::circleCreate:
             mActions.setCircleMode();
             break;
@@ -188,12 +165,6 @@ void ToolBox::setupMainAction(const QIcon &icon,
             break;
         case CanvasMode::textCreate:
             mActions.setTextMode();
-            break;
-        case CanvasMode::nullCreate:
-            mActions.setNullMode();
-            break;
-        case CanvasMode::pickFillStroke:
-            mActions.setPickPaintSettingsMode();
             break;
         default:;
         }
@@ -312,13 +283,6 @@ void ToolBox::setupMainActions()
                                                          "F3").toString()),
                     {CanvasMode::pathCreate},
                     false);
-    setupMainAction(QIcon::fromTheme("drawPath"),
-                    tr("Draw Path"),
-                    QKeySequence(AppSupport::getSettings("shortcuts",
-                                                         "drawPath",
-                                                         "F4").toString()),
-                    {CanvasMode::drawPath},
-                    false);
     setupMainAction(QIcon::fromTheme("circleCreate"),
                     tr("Add Circle"),
                     QKeySequence(AppSupport::getSettings("shortcuts",
@@ -339,27 +303,6 @@ void ToolBox::setupMainActions()
                                                          "textMode",
                                                          "F7").toString()),
                     {CanvasMode::textCreate},
-                    false);
-    setupMainAction(QIcon::fromTheme("nullCreate"),
-                    tr("Add Null Object"),
-                    QKeySequence(AppSupport::getSettings("shortcuts",
-                                                         "nullMode",
-                                                         "F8").toString()),
-                    {CanvasMode::nullCreate},
-                    false);
-    // separator between the shape tools and the camera/pick tools
-    {
-        auto sep = new QAction(mMain);
-        sep->setSeparator(true);
-        mGroupMain->addAction(sep);
-    }
-    setupMainAction(QIcon::fromTheme("pick"),
-                    tr("Color Pick Mode"),
-                    QKeySequence(AppSupport::getSettings("shortcuts",
-                                                         "pickMode",
-                                                         "F9").toString()),
-                    {CanvasMode::pickFillStroke,
-                     CanvasMode::pickFillStrokeEvent},
                     false);
 
     // local pivot
@@ -544,83 +487,6 @@ void ToolBox::setupNodesActions()
     mGroupNodes->setVisible(false);
 }
 
-void ToolBox::setupDrawActions()
-{
-    mDrawPathMaxError = new QDoubleSlider(1, 200, 1, mControls, false);
-    mDrawPathMaxError->setNumberDecimals(0);
-    mDrawPathMaxError->setMinimumWidth(50);
-    mDrawPathMaxError->setDisplayedValue(mDocument.fDrawPathMaxError);
-    connect(mDrawPathMaxError, &QDoubleSlider::valueEdited,
-            this, [this](const qreal value) {
-        mDocument.fDrawPathMaxError = qFloor(value);
-    });
-
-    mDrawPathSmooth = new QDoubleSlider(1, 200, 1, mControls, false);
-    mDrawPathSmooth->setNumberDecimals(0);
-    mDrawPathSmooth->setMinimumWidth(50);
-    mDrawPathSmooth->setDisplayedValue(mDocument.fDrawPathSmooth);
-    connect(mDrawPathSmooth, &QDoubleSlider::valueEdited,
-            this, [this](const qreal value) {
-        mDocument.fDrawPathSmooth = qFloor(value);
-    });
-
-    const auto labelMax = new QLabel(tr("Max Error"), mControls);
-    const auto labelSmooth = new QLabel(tr("Smooth"), mControls);
-
-    mGroupDraw->addAction(mControls->addSpacer(true, true));
-    mGroupDraw->addAction(mControls->addAction(QIcon::fromTheme("drawPath"),
-                                               QString()));
-    mGroupDraw->addAction(mControls->addWidget(labelMax));
-    mGroupDraw->addAction(mControls->addSeparator());
-    mGroupDraw->addAction(mControls->addWidget(mDrawPathMaxError));
-
-    mGroupDraw->addAction(mControls->addSpacer(true, true));
-
-    mGroupDraw->addAction(mControls->addAction(QIcon::fromTheme("drawPath"),
-                                               QString()));
-    mGroupDraw->addAction(mControls->addWidget(labelSmooth));
-    mGroupDraw->addAction(mControls->addSeparator());
-    mGroupDraw->addAction(mControls->addWidget(mDrawPathSmooth));
-    mGroupDraw->addAction(mControls->addSpacer(true, true));
-
-    {
-        const auto act = new QAction(mDocument.fDrawPathManual ?
-                                         QIcon::fromTheme("drawPathAutoUnchecked") :
-                                         QIcon::fromTheme("drawPathAutoChecked"),
-                                     tr("Automatic/Manual Fitting"),
-                                     this);
-        connect(act, &QAction::triggered,
-                this, [this, act]() {
-            mDocument.fDrawPathManual = !mDocument.fDrawPathManual;
-            mDrawPathMaxError->setDisabled(mDocument.fDrawPathManual);
-            act->setIcon(mDocument.fDrawPathManual ?
-                             QIcon::fromTheme("drawPathAutoUnchecked") :
-                             QIcon::fromTheme("drawPathAutoChecked"));
-        });
-        mControls->addAction(act);
-        mGroupDraw->addAction(act);
-        ThemeSupport::setToolbarButtonStyle("ToolBoxButton", mControls, act);
-    }
-
-    mGroupDraw->setEnabled(false);
-    mGroupDraw->setVisible(false);
-}
-
-void ToolBox::setupColorPickerActions()
-{
-    mColorPickerButton = new QToolButton(mControls);
-    mColorPickerButton->setObjectName("FlatButton");
-    mColorPickerButton->setIcon(QIcon::fromTheme("pick"));
-    mColorPickerLabel = new QLabel(mControls);
-
-    mGroupColorPicker->addAction(mControls->addSpacer(true, true));
-    mGroupColorPicker->addAction(mControls->addSeparator());
-    mGroupColorPicker->addAction(mControls->addWidget(mColorPickerButton));
-    mGroupColorPicker->addAction(mControls->addWidget(mColorPickerLabel));
-
-    mGroupColorPicker->setVisible(false);
-}
-
 void ToolBox::setupAutoSelectActions()
 {
     // PS-style move-tool option: clicking visible pixels on the canvas
@@ -676,7 +542,6 @@ void ToolBox::setupAutoSelectActions()
 void ToolBox::setCurrentCanvas(Canvas * const target)
 {
     mControls->setCurrentCanvas(target);
-    if (mExtra) { mExtra->setCurrentCanvas(target); }
     mTempCanvasTarget.assign(target);
     if (mTempCanvasButton) {
         QSignalBlocker block(mTempCanvasButton);
@@ -698,38 +563,12 @@ void ToolBox::setCanvasMode(const CanvasMode &mode)
 {
     const bool boxMode = mode == CanvasMode::boxTransform;
     const bool pointMode = mode == CanvasMode::pointTransform;
-    const bool drawMode = mode == CanvasMode::drawPath;
-    const bool pickMode = mode == CanvasMode::pickFillStroke ||
-                          mode == CanvasMode::pickFillStrokeEvent;
 
     mGroupNodes->setEnabled(pointMode);
     mGroupNodes->setVisible(pointMode);
-
-    mGroupDraw->setEnabled(drawMode);
-    mGroupDraw->setVisible(drawMode);
 
     mGroupAutoSelect->setEnabled(boxMode);
     mGroupAutoSelect->setVisible(boxMode);
 
     mLocalPivot->setEnabled(boxMode || pointMode);
-
-    if (mExtra) { mExtra->setCanvasMode(mode); }
-
-    mGroupColorPicker->setVisible(pickMode);
-    if (pickMode) { updateColorPicker(Qt::black); }
-}
-
-void ToolBox::updateColorPicker(const QColor &color)
-{
-    if (!mColorPickerButton || !mColorPickerLabel) { return; }
-    mColorPickerButton->setStyleSheet(QString("background-color: %1;").arg(color.isValid() ?
-                                                                               color.name() :
-                                                                               "black"));
-    mColorPickerLabel->setText(QString("&nbsp;"
-                                       "<b>R:</b> %1 "
-                                       "<b>G:</b> %2 "
-                                       "<b>B:</b> %3")
-                                   .arg(QString::number(color.isValid() ? color.redF() : 0., 'f', 3),
-                                        QString::number(color.isValid() ? color.greenF() : 0., 'f', 3),
-                                        QString::number(color.isValid() ? color.blueF() : 0., 'f', 3)));
 }

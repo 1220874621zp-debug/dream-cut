@@ -335,7 +335,6 @@ set(
     colorsetting.cpp
     conncontext.cpp
     customidentifier.cpp
-    drawpath.cpp
     eevent.cpp
     efiltersettings.cpp
     etexture.cpp
@@ -713,7 +712,6 @@ set(
     cpurendertools.h
     customhandler.h
     customidentifier.h
-    drawpath.h
     eevent.h
     efiltersettings.h
     etexture.h

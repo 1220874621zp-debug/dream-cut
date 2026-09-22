@@ -35,10 +35,8 @@
 #include "conncontextptr.h"
 
 #include "widgets/toolbar.h"
-#include "widgets/toolboxtoolbar.h"
 #include "widgets/toolcontrols.h"
 #include "widgets/toolinteract.h"
-#include "widgets/qdoubleslider.h"
 
 namespace Friction
 {
@@ -51,7 +49,6 @@ namespace Friction
             enum Type {
                 Main,
                 Controls,
-                Extra,
                 Interact
             };
             enum Node {
@@ -87,23 +84,15 @@ namespace Friction
             Document &mDocument;
             ToolBar *mMain;
             ToolControls *mControls;
-            ToolboxToolBar *mExtra;
             ToolInteract *mInteract;
 
             QActionGroup *mGroupMain;
             QActionGroup *mGroupNodes;
-            QActionGroup *mGroupDraw;
-            QActionGroup *mGroupColorPicker;
             QActionGroup *mGroupAutoSelect;
-
-            QDoubleSlider *mDrawPathMaxError;
-            QDoubleSlider *mDrawPathSmooth;
 
             QAction *mLocalPivot;
             QAction *mMaskPen;
 
-            QToolButton *mColorPickerButton;
-            QLabel *mColorPickerLabel;
             QCheckBox *mAutoSelectLayer;
             QToolButton *mTempCanvasButton;
             ConnContextQPtr<Canvas> mTempCanvasTarget;
@@ -120,15 +109,11 @@ namespace Friction
                                   const QString &title,
                                   const Node &node);
             void setupNodesActions();
-            void setupDrawActions();
-            void setupColorPickerActions();
             void setupAutoSelectActions();
             void syncTempCanvasButton();
 
             void setCurrentCanvas(Canvas * const target);
             void setCanvasMode(const CanvasMode &mode);
-
-            void updateColorPicker(const QColor &color);
         };
     }
 }

@@ -775,64 +775,6 @@ void Canvas::renderSk(SkCanvas* const canvas,
         } else if (!mouseGrabbing || mRotPivot->isSelected()) {
             mRotPivot->drawSk(canvas, mCurrentMode, invZoom, false, false);
         }
-    } else if (mCurrentMode == CanvasMode::drawPath) {
-        const SkScalar nodeSize = 0.15f*eSizesUI::widget*invZoom;
-        SkPaint paint;
-        paint.setStyle(SkPaint::kFill_Style);
-        paint.setAntiAlias(true);
-
-        const auto& pts = mDrawPath.smoothPts();
-        const auto drawColor = eSettings::instance().fLastUsedStrokeColor;
-        paint.setARGB(255,
-                      drawColor.red(),
-                      drawColor.green(),
-                      drawColor.blue());
-        const SkScalar ptSize = 0.25*nodeSize;
-        for (const auto& pt : pts) {
-            canvas->drawCircle(pt.x(), pt.y(), ptSize, paint);
-        }
-
-        const bool drawFitted = mDocument.fDrawPathManual &&
-                                mManualDrawPathState == ManualDrawPathState::drawn;
-        if (drawFitted) {
-            paint.setARGB(255, 255, 0, 0);
-            const auto& highlightPts = mDrawPath.forceSplits();
-            for (const int ptId : highlightPts) {
-                const auto& pt = pts.at(ptId);
-                canvas->drawCircle(pt.x(), pt.y(), nodeSize, paint);
-            }
-            const auto& fitted = mDrawPath.getFitted();
-            paint.setARGB(255, 255, 0, 0);
-            for (const auto& seg : fitted) {
-                const auto path = seg.toSkPath();
-                SkiaHelpers::drawOutlineOverlay(canvas,
-                                                path,
-                                                invZoom,
-                                                SK_ColorWHITE);
-                const auto& p0 = seg.p0();
-                canvas->drawCircle(p0.x(), p0.y(), nodeSize, paint);
-            }
-            if (!mDrawPathTmp.isEmpty()) {
-                SkiaHelpers::drawOutlineOverlay(canvas,
-                                                mDrawPathTmp,
-                                                invZoom,
-                                                SK_ColorWHITE);
-            }
-        }
-
-        paint.setARGB(255, 0, 75, 155);
-
-        if (mHoveredPoint_d && mHoveredPoint_d->isSmartNodePoint()) {
-            const QPointF pos = mHoveredPoint_d->getAbsolutePos();
-            const qreal r = 0.5*qInvZoom*mHoveredPoint_d->getRadius();
-            canvas->drawCircle(pos.x(), pos.y(), r, paint);
-        }
-
-        if (mDrawPathFirst) {
-            const QPointF pos = mDrawPathFirst->getAbsolutePos();
-            const qreal r = 0.5*qInvZoom*mDrawPathFirst->getRadius();
-            canvas->drawCircle(pos.x(), pos.y(), r, paint);
-        }
     }
 
     /*if(mPaintTarget.isValid()) {
@@ -1464,11 +1406,6 @@ void Canvas::updatePivot()
 
 void Canvas::setCanvasMode(const CanvasMode mode)
 {
-    if (mCurrentMode == CanvasMode::pickFillStroke ||
-        mCurrentMode == CanvasMode::pickFillStrokeEvent) {
-        emit currentPickedColor(QColor());
-        emit currentHoverColor(QColor());
-    }
     mCurrentMode = mode;
     mSelecting = false;
     mStylusDrawing = false;
@@ -1476,31 +1413,8 @@ void Canvas::setCanvasMode(const CanvasMode mode)
     clearCurrentSmartEndPoint();
     clearLastPressedPoint();
     updatePivot();
-    //updatePaintBox();
     emit canvasModeSet(mode);
 }
-
-/*void Canvas::updatePaintBox()
-{
-    mPaintTarget.setPaintBox(nullptr);
-    if (mCurrentMode != CanvasMode::paint) { return; }
-    for (int i = mSelectedBoxes.count() - 1; i >= 0; i--) {
-        const auto& iBox = mSelectedBoxes.at(i);
-        if (enve_cast<PaintBox*>(iBox)) {
-            mPaintTarget.setPaintBox(static_cast<PaintBox*>(iBox));
-            break;
-        }
-    }
-}*/
-
-/*bool Canvas::handlePaintModeKeyPress(const eKeyEvent &e)
-{
-    if (mCurrentMode != CanvasMode::paint) { return false; }
-    if (e.fKey == Qt::Key_N && mPaintTarget.isValid()) {
-        newEmptyPaintFrameAction();
-    } else { return false; }
-    return true;
-}*/
 
 bool Canvas::handleModifierChange(const eKeyEvent &e)
 {
@@ -1563,8 +1477,6 @@ void Canvas::deleteAction()
     case CanvasMode::circleCreate:
     case CanvasMode::rectCreate:
     case CanvasMode::textCreate:
-    case CanvasMode::nullCreate:
-    case CanvasMode::drawPath:
     case CanvasMode::pathCreate:
         removeSelectedBoxesAndClearList();
         break;
@@ -1945,7 +1857,6 @@ void Canvas::anim_setAbsFrame(const int frame)
 
     mUndoRedoStack->setFrame(clamped);
 
-    //if (mCurrentMode == CanvasMode::paint) { mPaintTarget.setupOnionSkin(); }
     emit currentFrameChanged(clamped);
 
     schedulePivotUpdate();

@@ -991,7 +991,6 @@ void MainWindow::setupDocument()
 
     // set defaults
     mDocument.setPath("");
-    mDocument.fDrawPathManual = false;
     mDocument.setCanvasMode(CanvasMode::boxTransform);
 }
 

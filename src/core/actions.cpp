@@ -853,16 +853,8 @@ void Actions::setAddPointMode() {
     mDocument.setCanvasMode(CanvasMode::pathCreate);
 }
 
-void Actions::setDrawPathMode() {
-    mDocument.setCanvasMode(CanvasMode::drawPath);
-}
-
 void Actions::setRectangleMode() {
     mDocument.setCanvasMode(CanvasMode::rectCreate);
-}
-
-void Actions::setPickPaintSettingsMode() {
-    mDocument.setCanvasMode(CanvasMode::pickFillStroke);
 }
 
 void Actions::setCircleMode() {
@@ -871,14 +863,6 @@ void Actions::setCircleMode() {
 
 void Actions::setTextMode() {
     mDocument.setCanvasMode(CanvasMode::textCreate);
-}
-
-void Actions::setPaintMode() {
-    mDocument.setCanvasMode(CanvasMode::paint);
-}
-
-void Actions::setNullMode() {
-    mDocument.setCanvasMode(CanvasMode::nullCreate);
 }
 
 

@@ -178,7 +178,6 @@ private:
                     const bool allTracks);
     void trackSelectAt(const QPoint &pos, const int clipId,
                        const bool backward);
-    void trackSelectAll(const QPoint &pos, const bool backward);
 
     // ---- track header interactions ----
     QRect addTrackRect(const bool audio) const;  // corner +V / +A buttons
