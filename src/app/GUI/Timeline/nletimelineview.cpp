@@ -899,11 +899,21 @@ void NleTimelineView::mousePressEvent(QMouseEvent *e)
     mPressPos = e->pos();
 
     // heal a drag whose release was lost (dock hidden mid-drag,
-    // alt-tab with button held): a fresh press always starts clean
-    if (mDrag != DragMode::None || mPending != DragMode::None) {
+    // alt-tab with button held, a grab broken by the compositor, a
+    // context menu swallowing the release): a fresh press always
+    // starts clean. mRubber is part of the check on purpose - a
+    // stuck rubber band eats EVERY move event (the early return in
+    // mouseMoveEvent) while press-side selection keeps working, so
+    // the timeline looks alive but no drag ever runs again
+    if (mDrag != DragMode::None || mPending != DragMode::None || mRubber) {
+        if (mDrag != DragMode::None || mRubber) {
+            qInfo("[NLE] press heals stuck gesture drag=%d rubber=%d",
+                  int(mDrag), int(mRubber));
+        }
         mDrag = DragMode::None;
         mPending = DragMode::None;
         mPendingRoll = false;
+        mRubber = false;
         mDragClipId = -1;
         mDragTrackIdx = -1;
         mSnapTarget = -1;
@@ -1433,6 +1443,7 @@ void NleTimelineView::finishGestureCommit(const bool insertMode)
     mTangled.clear();
     mSpacerOrig.clear();
     const DragMode drag = mDrag;
+    qInfo("[NLE] gesture commit drag=%d moves=%d", int(drag), moves.size());
     mDrag = DragMode::None;
     mRoll = false;
     mDragClipId = -1;
@@ -1645,6 +1656,36 @@ bool NleTimelineView::KFT_keyPressEvent(QKeyEvent *e)
 
 void NleTimelineView::leaveEvent(QEvent *)
 {
+    // a leave WHILE a button gesture runs means the implicit mouse
+    // grab was broken (compositor took over, window lost the pointer):
+    // the release will never arrive. Cancel the gesture right here -
+    // a drag committed with candidates, a pending press and a rubber
+    // band all reset, or the rubber branch would eat every future
+    // move event while the press side keeps working (zombie timeline)
+    if (mDrag != DragMode::None || mPending != DragMode::None || mRubber) {
+        qInfo("[NLE] leave aborts gesture drag=%d pending=%d rubber=%d",
+              int(mDrag), int(mPending), int(mRubber));
+        if (mDrag == DragMode::TrackHeight) {
+            mHeightPreview.clear();
+            mDragTrackIdx = -1;
+        } else if (mDrag != DragMode::None) {
+            // drop outside = cancel: the candidates die, the document
+            // was never touched during the gesture
+            mCandidates.clear();
+            mMovingIds.clear();
+            mTangled.clear();
+            mSpacerOrig.clear();
+        }
+        mDrag = DragMode::None;
+        mPending = DragMode::None;
+        mPendingRoll = false;
+        mRubber = false;
+        mDragClipId = -1;
+        mSnapTarget = -1;
+        mDropIllegal = false;
+        mLastFeedback.clear();
+        mModel->setGestureActive(false);
+    }
     mHoverId = -1;
     mHoverPos = QPoint(-1, -1);
     update();
