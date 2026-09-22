@@ -257,6 +257,8 @@ private:
     bool mInWriteback = false;
     bool mGestureActive = false;
     bool mRebuildQueued = false;
+    // 删除/修剪发生过：下一次 refresh 评估把场景范围收回内容末尾
+    bool mCheckRangeShrink = false;
     QList<QMetaObject::Connection> mSceneConns;
     QList<QMetaObject::Connection> mChildConns;
 };

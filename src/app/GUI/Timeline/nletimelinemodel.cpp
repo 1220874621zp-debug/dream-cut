@@ -336,6 +336,11 @@ bool NleTimelineModel::commitMoves(const QVector<Move> &moves,
     };
     for (const auto &m : all) { anyKnown = applyToWork(m) || anyKnown; }
     if (!anyKnown) { return false; }
+    // 有时长变化的提交（右缘修剪收短等）允许范围收缩评估
+    for (const auto &m : all) {
+        const auto oc = clip(m.clipId);
+        if (oc && oc->duration != m.duration) { mCheckRangeShrink = true; break; }
+    }
     if (compactAfter && mMagnetic) {
         // compactGapsPlan over the working table - MAIN TRACK ONLY
         // (CapCut): overlays never get sucked in
@@ -684,6 +689,7 @@ bool NleTimelineModel::requestDelete(const QSet<int> &clipIds,
                                      const bool ripple)
 {
     if (mInWriteback || mGestureActive) { return false; }
+    mCheckRangeShrink = true;
     const auto scene = mPanelScene.data();
     if (!scene || mFps <= 0.) { return false; }
 
@@ -1425,6 +1431,17 @@ void NleTimelineModel::refreshFromDocument()
         mClips.append(c);
         if (selectionIds.contains(c.clipId)) { mSelected.insert(c.clipId); }
     }
+    // 剪枝：已删除图层的 id 映射清掉（指针键只比不解引用）
+    {
+        QSet<eBoxOrSound*> liveLayers;
+        for (const auto &it : items) {
+            if (it.first) { liveLayers.insert(it.first); }
+        }
+        for (auto it = mLayerToClipId.begin(); it != mLayerToClipId.end();) {
+            if (!liveLayers.contains(it.key())) { it = mLayerToClipId.erase(it); }
+            else { ++it; }
+        }
+    }
 
     {
         QString ts, cs;
@@ -1441,18 +1458,31 @@ void NleTimelineModel::refreshFromDocument()
     // scene keeps its default range when the user declines the
     // adjust-scene dialog, and a playhead beyond scene max makes
     // DirectPlayer::play restart from the in point ("always plays
-    // from the beginning"). Grow the range to the last clip's end
-    // (UI-state write: no undo entry, refresh-guarded)
+    // from the beginning"). Grow the range to the last clip's end.
+    // 删短内容（删除/右缘修剪）后同样把范围收回内容末尾：留 1 秒
+    // 余量防修剪抖动，且只在发生过删除/修剪的刷新里评估，用户在
+    // 场景设置里手定的长范围不会被普通编辑悄悄改掉（UI 态写入）
     if (scene && !mClips.isEmpty()) {
         int contentEnd = 0;
         for (const auto &c : mClips) {
             contentEnd = qMax(contentEnd, c.start + c.duration);
         }
         const auto range = scene->getFrameRange();
+        int newMax = range.fMax;
         if (contentEnd > range.fMax) {
+            newMax = contentEnd;
+        } else if (mCheckRangeShrink &&
+                   range.fMax - contentEnd > qRound(mFps)) {
+            newMax = qMax(range.fMin, contentEnd);
+        }
+        mCheckRangeShrink = false;
+        if (newMax != range.fMax) {
             mInWriteback = true;
-            scene->setFrameRange({range.fMin, contentEnd}, false);
+            scene->setFrameRange({range.fMin, newMax}, false);
             mInWriteback = false;
+            if (scene->anim_getCurrentAbsFrame() > newMax) {
+                scene->anim_setAbsFrame(newMax);
+            }
         }
     }
 

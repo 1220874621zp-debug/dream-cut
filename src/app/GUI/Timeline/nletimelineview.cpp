@@ -42,9 +42,10 @@ NleTimelineView::NleTimelineView(NleTimelineModel * const model,
     setMinimumHeight(320);
 
     // repaint on any model change (tracks/clips/selection); the media
-    // caches survive because clip ids are stable per layer
+    // caches survive because clip ids are stable per layer - dead ids
+    // (deleted clips, reloaded projects) are pruned on each change
     connect(mModel, &NleTimelineModel::modelChanged,
-            this, [this]() { updateScrollBar(); update(); });
+            this, [this]() { pruneMediaCaches(); updateScrollBar(); update(); });
     connect(mModel, &NleTimelineModel::selectionChanged,
             this, [this]() { update(); });
 
@@ -796,6 +797,35 @@ void NleTimelineView::refreshThemeColors()
     if (cVideoBar != accentDark) { cVideoBar = accentDark; }
 }
 
+// 媒体缓存按活 clipId 剪枝：块删除/工程重载后，其胶片条、波形、
+// 中点缩略图与占位贴图不再被引用（clipId 不复用，留着就是纯泄漏）
+void NleTimelineView::pruneMediaCaches()
+{
+    QSet<int> live;
+    for (const auto &c : mModel->clips()) { live.insert(c.clipId); }
+
+    auto pruneIntKey = [live](auto &map) {
+        for (auto it = map.begin(); it != map.end();) {
+            if (!live.contains(it.key())) { it = map.erase(it); }
+            else { ++it; }
+        }
+    };
+    pruneIntKey(mRealThumbs);
+    pruneIntKey(mRealScaled);
+    pruneIntKey(mFilm);
+    pruneIntKey(mWaves);
+
+    // 占位贴图键 = "clipId x 高度"
+    for (auto it = mThumbCache.begin(); it != mThumbCache.end();) {
+        const QString key = it.key();
+        const int xPos = key.indexOf(QLatin1Char('x'));
+        const bool stale = xPos <= 0 ||
+                !live.contains(key.left(xPos).toInt());
+        if (stale) { it = mThumbCache.erase(it); }
+        else { ++it; }
+    }
+}
+
 // ---------------------------------------------------------------- picking
 
 int NleTimelineView::clipAt(const QPoint &pos, QRectF *rectOut) const
@@ -954,8 +984,13 @@ void NleTimelineView::setPlayheadFrame(const int frame)
 {
     const int f = qMax(0, frame);
     if (f == mPlayheadFrame) { return; }
+    const int oldX = frameToX(mPlayheadFrame);
+    const int newX = frameToX(f);
     mPlayheadFrame = f;
-    update();
+    // 播放头逐帧移动只刷新旧两条竖带（标尺手柄 x±7 + 线宽 + 抗锯齿
+    // 余量），播放/拖拽时不再每次整幅重绘全部块与波形
+    update(QRect(oldX - 8, 0, 17, height())
+               .united(QRect(newX - 8, 0, 17, height())));
 }
 
 // razor cut at the cursor position: one clip for a plain click, every
