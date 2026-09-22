@@ -229,6 +229,7 @@ private:
     int mSnapTarget = -1;      // snap guide frame, -1 = none
     bool mGhostLane = false;   // drop targets a to-be-created track
     bool mGhostLaneAudio = false;
+    bool mGhostLaneTop = false; // drag-into-the-ruler grows the group at its top
     QPoint mPressPos;
     int mDragTrackIdx = -1;    // TrackHeight gesture lane
     int mPressTrackHeight = 0;

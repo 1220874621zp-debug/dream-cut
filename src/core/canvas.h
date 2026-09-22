@@ -361,7 +361,10 @@ public:
     void initTrackSpecs(const QList<eTrackSpec> &specs);
     // undoable add/remove (id allocation reuses the per-parent trackId
     // space so spec ids and layer trackIds never collide)
-    int addTrackSpec(const bool audio, const QString &name);
+    // insertIdx < 0 appends; otherwise inserts at that spec list
+    // position (the NLE uses it to grow a type group at its top)
+    int addTrackSpec(const bool audio, const QString &name,
+                     const int insertIdx = -1);
     bool removeTrackSpec(const int id);
     // plain setters (UI-state properties, deliberately not undoable)
     void setTrackSpecName(const int id, const QString &name);

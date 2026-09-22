@@ -705,9 +705,21 @@ bool NleTimelineModel::requestDetachAudio(const int clipId)
     }
     const QString path = vidBox->getFilePath();
     if (path.isEmpty()) { return false; }
-    // snapshot before finishAction: the refresh rebuilds the clip
-    // table, the row pointers (c) would dangle
+    // snapshot EVERYTHING up front: setting the new sound's durRect
+    // fires min/max signals that refresh the clip table mid-function,
+    // so the row pointer (c) dangles long before finishAction - the
+    // range must come from locals, never from c after any mutation
     const QString clipName = c->name;
+    const int clipStart = c->start;
+    const int clipEnd = c->start + c->duration - 1;
+    // park target: the first audio track (type completeness
+    // guarantees one) - resolved BEFORE any mutation: addContained
+    // and setTrackId both trigger refreshes that rebuild mTracks,
+    // a range-for over it would iterate a dead vector
+    int audioTrackId = -1;
+    for (const auto &t : mTracks) {
+        if (t.audio) { audioTrackId = t.id; break; }
+    }
 
     scene->pushUndoRedoName(tr("Detach Audio"));
 
@@ -721,14 +733,10 @@ bool NleTimelineModel::requestDetachAudio(const int clipId)
         // same visible window as the video clip (the file handler is
         // already cached from the import, so the length is final and
         // the range sticks)
-        dur->setMinAbsFrame(c->start);
-        dur->setMaxAbsFrame(c->start + c->duration - 1);
+        dur->setMinAbsFrame(clipStart);
+        dur->setMaxAbsFrame(clipEnd);
     }
-    // park on the first audio track (type completeness guarantees
-    // one exists)
-    for (const auto &t : mTracks) {
-        if (t.audio) { snd->setTrackId(t.id); break; }
-    }
+    if (audioTrackId >= 0) { snd->setTrackId(audioTrackId); }
     embedded->setVisible(false);
 
     finishAction();
@@ -738,18 +746,28 @@ bool NleTimelineModel::requestDetachAudio(const int clipId)
 
 // ---------------------------------------------------------------- tracks
 
-int NleTimelineModel::requestTrackAdd(const bool audio)
+int NleTimelineModel::requestTrackAdd(const bool audio, const bool atTop)
 {
     const auto scene = mPanelScene.data();
     if (!scene) { return -1; }
     int sameType = 0;
+    int insertIdx = -1;
+    int scanned = 0;
     for (const auto &t : mTracks) {
-        if (t.audio == audio) { ++sameType; }
+        if (t.audio == audio) {
+            ++sameType;
+            if (insertIdx < 0) { insertIdx = scanned; }
+        }
+        ++scanned;
     }
     const QString name = audio
             ? QStringLiteral("A%1").arg(sameType + 1)
             : QStringLiteral("V%1").arg(sameType + 1);
-    const int id = scene->addTrackSpec(audio, name);
+    // atTop: insert at the type group head (the NLE track order is
+    // video group then audio group, so this index is also the spec
+    // list position of the group head)
+    const int id = scene->addTrackSpec(audio, name,
+                                       atTop ? insertIdx : -1);
     finishAction();
     return id;
 }

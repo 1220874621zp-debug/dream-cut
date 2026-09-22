@@ -153,6 +153,13 @@ int NleTimelineView::ghostLaneTop() const
 {
     const auto &tracks = mModel->tracks();
     int idx = 0;
+    if (mGhostLaneTop) {
+        // the group head: above V1 for video (the very top), above
+        // the audio group for audio (right below the video group)
+        while (idx < tracks.size() &&
+               tracks.at(idx).audio != mGhostLaneAudio) { ++idx; }
+        return trackY(idx);
+    }
     while (idx < tracks.size() &&
            tracks.at(idx).audio != mGhostLaneAudio) { ++idx; }
     while (idx < tracks.size() &&
@@ -970,6 +977,7 @@ void NleTimelineView::mousePressEvent(QMouseEvent *e)
         mSpacerOrig.clear();
         mDropIllegal = false;
         mGhostLane = false;
+        mGhostLaneTop = false;
         mModel->setGestureActive(false);
     }
 
@@ -1255,15 +1263,19 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
         int newStart = qMax(0, curFrame - mGrabOffsetFrames);
 
         // CapCut lane lifecycle: dragging below every existing track
-        // targets a NEW lane of the clip's type (materializes on
-        // release); anywhere else keeps clamping to the nearest
-        // same-type lane
+        // OR up into the ruler targets a NEW lane of the clip's type
+        // (materializes on release - at the type group bottom or its
+        // top, respectively); anywhere else keeps clamping to the
+        // nearest same-type lane
         const int nTracks = mModel->tracks().size();
         const int lastBottom = nTracks
                 ? trackY(nTracks - 1) + trackHeight(nTracks - 1)
                 : rulerHeight();
-        const bool newLaneZone = e->pos().y() > lastBottom + 8;
+        const bool newLaneBottom = e->pos().y() > lastBottom + 12;
+        const bool newLaneTop = e->pos().y() < rulerHeight();
+        const bool newLaneZone = newLaneBottom || newLaneTop;
         mGhostLane = newLaneZone;
+        mGhostLaneTop = newLaneTop;
         mGhostLaneAudio = c->audio;
         int trIdx = newLaneZone ? -1 : trackAtY(e->pos().y());
         if (!newLaneZone &&
@@ -1529,7 +1541,8 @@ void NleTimelineView::finishGestureCommit(const bool insertMode)
     // first (its refresh runs immediately - the gesture is over),
     // then the commit lands the clip on it and purges emptied lanes
     if (mGhostLane && hadMoves && drag == DragMode::MoveClip) {
-        const int newId = mModel->requestTrackAdd(mGhostLaneAudio);
+        const int newId = mModel->requestTrackAdd(mGhostLaneAudio,
+                                                  mGhostLaneTop);
         if (newId >= 0) {
             for (auto &mv : moves) {
                 if (mv.trackId == kGhostTrackId) { mv.trackId = newId; }
@@ -1540,6 +1553,7 @@ void NleTimelineView::finishGestureCommit(const bool insertMode)
         }
     }
     mGhostLane = false;
+    mGhostLaneTop = false;
     if (hadMoves && !moves.isEmpty()) {
         mModel->commitMoves(moves, drag != DragMode::MoveClip &&
                                mModel->magnetic());
@@ -1767,6 +1781,7 @@ void NleTimelineView::leaveEvent(QEvent *)
         mSnapTarget = -1;
         mDropIllegal = false;
         mGhostLane = false;
+        mGhostLaneTop = false;
         mLastFeedback.clear();
         mModel->setGestureActive(false);
     }
@@ -1792,6 +1807,7 @@ void NleTimelineView::hideEvent(QHideEvent *)
     mSpacerOrig.clear();
     mDropIllegal = false;
     mGhostLane = false;
+    mGhostLaneTop = false;
     mRubber = false;
     mModel->setGestureActive(false);
 }

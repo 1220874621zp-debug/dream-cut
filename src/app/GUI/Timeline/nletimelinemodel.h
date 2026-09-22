@@ -163,8 +163,9 @@ public:
     // ---- tracks (explicit entities, spec ops on the scene) ----
     // returns the new track id (-1 on failure); the panel renders
     // video specs first, then audio specs, so an appended track lands
-    // at the end of its type group
-    int requestTrackAdd(const bool audio);
+    // at the end of its type group; atTop grows the type group at
+    // its top instead (drag-into-the-ruler drop zone)
+    int requestTrackAdd(const bool audio, const bool atTop = false);
     bool requestTrackRemove(const int trackId);
     void requestTrackRename(const int trackId, const QString &name);
     void requestTrackSetLocked(const int trackId, const bool locked);

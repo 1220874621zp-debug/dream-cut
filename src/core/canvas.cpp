@@ -2518,7 +2518,8 @@ void Canvas::initTrackSpecs(const QList<eTrackSpec> &specs)
     mTrackSpecs = specs;
 }
 
-int Canvas::addTrackSpec(const bool audio, const QString &name)
+int Canvas::addTrackSpec(const bool audio, const QString &name,
+                         const int insertIdx)
 {
     // ids share the space with the layers' trackIds (per scene) so a
     // spec id can never collide with an id a member allocates later
@@ -2535,8 +2536,10 @@ int Canvas::addTrackSpec(const bool audio, const QString &name)
     spec.mName = name;
     spec.mHeight = trackSpecDefaultHeight(audio);
     const int id = spec.mId;
-    const auto insert = [this, spec]() {
-        mTrackSpecs.append(spec);
+    const auto insert = [this, spec, insertIdx]() {
+        const int at = insertIdx < 0 || insertIdx > mTrackSpecs.size()
+                ? mTrackSpecs.size() : insertIdx;
+        mTrackSpecs.insert(at, spec);
         return true;
     };
     const auto remove = [this, id]() {
