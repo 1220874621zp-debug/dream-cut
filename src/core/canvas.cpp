@@ -2396,6 +2396,13 @@ void Canvas::writeBoundingBox(eWriteStream& dst) const
 {
     writeGradients(dst);
     ContainerBox::writeBoundingBox(dst);
+    // NLE track specs (positional tail, v52+)
+    dst << qint32(mTrackSpecs.size());
+    for (const auto &s : mTrackSpecs) {
+        dst << qint32(s.mId) << qint32(s.mAudio)
+            << qint32(s.mLocked) << qint32(s.mHeight)
+            << s.mName.toUtf8();
+    }
     clearGradientRWIds();
 }
 
@@ -2406,7 +2413,132 @@ void Canvas::readBoundingBox(eReadStream& src)
     if (src.evFileVersion() < EvFormat::readSceneSettingsBeforeContent) {
         readSettings(src);
     }
+    if (src.evFileVersion() >= EvFormat::nleTrackSpecs) {
+        qint32 count = 0;
+        src >> count;
+        mTrackSpecs.clear();
+        for (qint32 i = 0; i < count; ++i) {
+            qint32 id = -1, audio = 0, locked = 0, height = 0;
+            QByteArray name;
+            src >> id >> audio >> locked >> height >> name;
+            eTrackSpec spec;
+            spec.mId = id;
+            spec.mAudio = audio != 0;
+            spec.mLocked = locked != 0;
+            spec.mHeight = height;
+            spec.mName = QString::fromUtf8(name);
+            mTrackSpecs.append(spec);
+        }
+    }
     clearGradientRWIds();
+}
+
+// ---- NLE track specs ----
+
+bool Canvas::hasTrackSpec(const int id) const
+{
+    for (const auto &s : mTrackSpecs) {
+        if (s.mId == id) { return true; }
+    }
+    return false;
+}
+
+void Canvas::initTrackSpecs(const QList<eTrackSpec> &specs)
+{
+    mTrackSpecs = specs;
+}
+
+int Canvas::addTrackSpec(const bool audio, const QString &name)
+{
+    // ids share the space with the layers' trackIds (per scene) so a
+    // spec id can never collide with an id a member allocates later
+    int maxId = -1;
+    for (const auto &c : getContained()) {
+        if (c) { maxId = qMax(maxId, c->trackId()); }
+    }
+    for (const auto &s : mTrackSpecs) {
+        maxId = qMax(maxId, s.mId);
+    }
+    eTrackSpec spec;
+    spec.mId = maxId + 1;
+    spec.mAudio = audio;
+    spec.mName = name;
+    spec.mHeight = trackSpecDefaultHeight(audio);
+    const int id = spec.mId;
+    const auto insert = [this, spec]() {
+        mTrackSpecs.append(spec);
+        return true;
+    };
+    const auto remove = [this, id]() {
+        for (int i = 0; i < mTrackSpecs.size(); ++i) {
+            if (mTrackSpecs.at(i).mId == id) {
+                mTrackSpecs.removeAt(i);
+                return true;
+            }
+        }
+        return false;
+    };
+    insert();
+    addUndoRedo(tr("Add Track"), remove, insert);
+    return id;
+}
+
+bool Canvas::removeTrackSpec(const int id)
+{
+    // a track carrying members cannot be removed (move or delete the
+    // clips first); empty tracks delete freely
+    for (const auto &c : getContained()) {
+        if (c && c->trackId() == id) { return false; }
+    }
+    int index = -1;
+    eTrackSpec spec;
+    for (int i = 0; i < mTrackSpecs.size(); ++i) {
+        if (mTrackSpecs.at(i).mId == id) {
+            index = i;
+            spec = mTrackSpecs.at(i);
+            break;
+        }
+    }
+    if (index < 0) { return false; }
+    const auto insert = [this, spec, index]() {
+        if (!hasTrackSpec(spec.mId)) {
+            mTrackSpecs.insert(qMin(index, mTrackSpecs.size()), spec);
+        }
+        return true;
+    };
+    const auto remove = [this, id]() {
+        for (int i = 0; i < mTrackSpecs.size(); ++i) {
+            if (mTrackSpecs.at(i).mId == id) {
+                mTrackSpecs.removeAt(i);
+                return true;
+            }
+        }
+        return false;
+    };
+    remove();
+    addUndoRedo(tr("Remove Track"), insert, remove);
+    return true;
+}
+
+void Canvas::setTrackSpecName(const int id, const QString &name)
+{
+    for (auto &s : mTrackSpecs) {
+        if (s.mId == id) { s.mName = name; return; }
+    }
+}
+
+void Canvas::setTrackSpecLocked(const int id, const bool locked)
+{
+    for (auto &s : mTrackSpecs) {
+        if (s.mId == id) { s.mLocked = locked; return; }
+    }
+}
+
+void Canvas::setTrackSpecHeight(const int id, const int height)
+{
+    for (auto &s : mTrackSpecs) {
+        if (s.mId == id) { s.mHeight = height; return; }
+    }
 }
 
 void Canvas::writeMarkers(eWriteStream &dst) const

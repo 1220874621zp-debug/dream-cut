@@ -30,11 +30,12 @@ public:
     double fps() const { return m_fps; }
     // ruler markers (abs frames + titles), painted as amber guides
     void setMarkers(const QVector<QPair<int, QString>> &markers);
-    // lane muted mirror (paint dimming); set from the sync rebuild
-    void setTrackMuted(const int trackIdx, const bool muted);
-    // lane name override applied after rebuildTracks
-    void setTrackName(const int trackIdx, const QString &name);
     int trackCount() const { return m_tracks.size(); }
+    // persistent track id of a lane (eTrackSpec id, -1 = none)
+    int trackIdAt(const int trackIdx) const
+    { return m_tracks.value(trackIdx).id; }
+    // panel log entry (sync-side refusals surface in the log view)
+    void log(const QString &msg) { emitLog(msg); }
     // document ops go through the sync bridge (undoable on the doc side)
     void requestDelete(const bool ripple = false);
     // header badge rects (mute / lock), shared by paint & hit test
@@ -70,7 +71,17 @@ signals:
     // active editing tool changed (int = EditTool); the dock keeps its
     // checkable toolbar actions in sync with keyboard switches
     void toolChanged(int tool);
-    void trackMuteToggleRequested(const int trackIdx);
+    // track lifecycle / state: tracks are explicit entities (P0), so
+    // adding/removing/locking/resizing a lane is a spec operation on
+    // the scene; a new video track lands on top of the video block, a
+    // new audio track below the audio block
+    void trackAddRequested(bool audio);
+    void trackRemoveRequested(int trackIdx);
+    void trackHeightChanged(int trackIdx, int height);
+    void trackLockChanged(int trackIdx, bool locked);
+    // allSameType: Shift on the mute badge toggles every track of the
+    // same type in one press (kdenlive behavior)
+    void trackMuteToggleRequested(int trackIdx, bool allSameType);
     void trackRenameRequested(const int trackIdx, const QString &name);
     void markerAddRequested(const int frame);
     void markerRemoveRequested(const int frame);
@@ -106,10 +117,11 @@ private:
         int hueSeed = 0;     // thumbnail variation seed
     };
     struct Track {
+        int id = -1;               // persistent eTrackSpec id
         QString name;
         int height = 64;
         ClipType type = ClipType::Video;
-        bool locked = false; // UI-side: clips on the lane refuse drag/trim
+        bool locked = false; // persistent: spec carries it across rebuilds
         bool muted = false;  // mirror of the lane's layer visibility
     };
 
@@ -133,7 +145,8 @@ private:
     QString timecode(double t) const;
 
     // ---- interaction ----
-    enum class DragMode { None, MoveClip, TrimLeft, TrimRight, Playhead };
+    enum class DragMode { None, MoveClip, TrimLeft, TrimRight, Playhead,
+                          TrackHeight };
     int clipAt(const QPoint &pos, QRectF *rectOut = nullptr) const; // index or -1
     double snapTime(double t, int ignoreClipIdx, bool *snappedOut) const;
     void applyZoom(double factor, int anchorX);
@@ -141,6 +154,19 @@ private:
     void updateScrollBar();
     void emitLog(const QString &msg);
     bool overlapsOnTrack(int track, double start, double len, int ignoreIdx) const;
+
+    // ---- overlap hard constraint (kdenlive semantics): a drop is
+    // legal when no clip OUTSIDE the moving set collides on its lane;
+    // clips already tangled with the moving set at press time (legacy
+    // overlap layouts) are exempt so they can still be dragged apart
+    bool dropLegal(const int dragIdx, const double newStart) const;
+    bool overlapsOutsideMoving(const int dragIdx, const int track,
+                               const double start, const double len) const;
+    QSet<int> m_tangled;   // press-time exemption set (see dropLegal)
+
+    // ---- track header interactions ----
+    QRect addTrackRect(const bool audio) const;  // corner +V / +A buttons
+    int nearestLaneOfType(const int y, const ClipType type) const;
 
     QVector<Track> m_tracks;
     QVector<Clip>  m_clips;
@@ -172,7 +198,9 @@ private:
     double m_origStart = 0.0;
     double m_origLength = 0.0;
     int m_origTrack = 0;
-    int m_dragTempLane = -1;   // live-inserted lane while dragging outside
+    int m_dragTrack = -1;      // TrackHeight gesture lane
+    int m_pressTrackHeight = 0;
+    bool m_dropIllegal = false; // live overlap feedback during a move
     double m_snapTarget = -1.0;   // for drawing snap guide, -1 = none
     QPoint m_pressPos;
 
@@ -226,7 +254,17 @@ public:
     int appendClip(const QString &name, const double startSec,
                    const double lengthSec, const bool audio,
                    const int track);
-    void rebuildTracks(const int videoCount, const int audioCount);
+    // full track table push from the sync rebuild: tracks are explicit
+    // entities (persistent specs), no longer derived from clip layout
+    struct TrackInfo {
+        int id = -1;          // persistent eTrackSpec id
+        QString name;
+        bool audio = false;
+        bool locked = false;
+        bool muted = false;   // mirror: all of the track's layers hidden
+        int height = 0;       // 0 = type default
+    };
+    void setTracks(const QVector<TrackInfo> &tracks);
     void setPlayheadSec(const double t);
     QVector<ClipInfo> allClips() const;
     int videoTrackCount() const;
@@ -258,15 +296,15 @@ public:
     int compactTrackGaps();
 
 private:
-    // ---- track merge (bridge extension): move every clip of srcTrack to
-    // dstTrack (same type, overlaps allowed), then drop emptied lanes ----
-    void mergeTrackInto(const int srcTrack, const int dstTrack);
-    // free drag keeps the dragged clip on a throwaway lane while it hovers
-    // outside every same-type lane: releasing there == separating to its
-    // own lane (merge/separate without touching the context menu)
-    int takeDragTempLane(const ClipType type, const int y);
-    int dropDragTempLane();
-    void renameLanes();
+    // ---- P0 track model: tracks are explicit persistent entities, so
+    // moving a clip between lanes only changes its lane (the sync
+    // writes the layer's trackId, never a structural row surgery);
+    // the old temp-lane separation and lane compaction are gone ----
+    // context-menu lane hop for one clip (dir -1 up / +1 down, same
+    // type lanes only, refused on collision or lock)
+    void moveClipToLane(const int clipIdx, const int dir);
+    // shared rename dialog (header double-click + context menu)
+    void renameLaneDialog(const int lane);
 
     // ---- magnetic follow (CapCut-style, bridge extension): trimming a
     // clip's out point shorter slides every same-track clip that started

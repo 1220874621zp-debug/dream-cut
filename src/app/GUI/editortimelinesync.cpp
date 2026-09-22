@@ -88,13 +88,64 @@ EditorTimelineSync::EditorTimelineSync(Document &document,
             razorCut(ids, sec);
         });
         connect(mWidget, &EditorTimelineWidget::trackMuteToggleRequested,
-                this, &EditorTimelineSync::toggleTrackMute);
+                this, [this](const int idx, const bool allType) {
+            toggleTrackMute(idx, allType);
+        });
         connect(mWidget, &EditorTimelineWidget::trackRenameRequested,
                 this, [this](const int idx, const QString &name) {
-            const int vc = mWidget ? mWidget->videoTrackCount() : 0;
-            const QString key = idx < vc ? QStringLiteral("v%1").arg(idx + 1)
-                                         : QStringLiteral("a%1").arg(idx - vc + 1);
-            mTrackNames.insert(key, name);
+            const auto scene = mPanelScene.data();
+            if (!scene || idx < 0 || idx >= mLaneSpecIds.size()) { return; }
+            scene->setTrackSpecName(mLaneSpecIds.at(idx), name);
+        });
+        // explicit track lifecycle: new video tracks land on top of
+        // the video block, new audio tracks below the audio block
+        connect(mWidget, &EditorTimelineWidget::trackAddRequested,
+                this, [this](const bool audio) {
+            const auto scene = mPanelScene.data();
+            if (!scene) { return; }
+            int sameType = 0;
+            for (const auto &s : scene->getTrackSpecs()) {
+                if (s.mAudio == audio) { ++sameType; }
+            }
+            const QString name = audio
+                    ? QStringLiteral("A%1").arg(sameType + 1)
+                    : QStringLiteral("V%1").arg(sameType + 1);
+            scene->addTrackSpec(audio, name);
+            if (Document::sInstance) { Document::sInstance->actionFinished(); }
+            rebuild();
+        });
+        connect(mWidget, &EditorTimelineWidget::trackRemoveRequested,
+                this, [this](const int trackIdx) {
+            const auto scene = mPanelScene.data();
+            if (!scene || trackIdx < 0 || trackIdx >= mLaneSpecIds.size()) { return; }
+            // the last lane of a type must survive: fresh layers of
+            // that type would have no legal home
+            const bool audio = mLaneAudio.at(trackIdx);
+            int sameType = 0;
+            for (const auto &a : mLaneAudio) { if (a == audio) { ++sameType; } }
+            if (sameType <= 1) {
+                mWidget->log(QStringLiteral("最后一个%1轨不可删除")
+                             .arg(audio ? QStringLiteral("音频") : QStringLiteral("视频")));
+                return;
+            }
+            if (scene->removeTrackSpec(mLaneSpecIds.at(trackIdx))) {
+                if (Document::sInstance) { Document::sInstance->actionFinished(); }
+                rebuild();
+            } else {
+                mWidget->log(QStringLiteral("轨道非空或不存在，未删除"));
+            }
+        });
+        connect(mWidget, &EditorTimelineWidget::trackHeightChanged,
+                this, [this](const int trackIdx, const int height) {
+            const auto scene = mPanelScene.data();
+            if (!scene || trackIdx < 0 || trackIdx >= mLaneSpecIds.size()) { return; }
+            scene->setTrackSpecHeight(mLaneSpecIds.at(trackIdx), height);
+        });
+        connect(mWidget, &EditorTimelineWidget::trackLockChanged,
+                this, [this](const int trackIdx, const bool locked) {
+            const auto scene = mPanelScene.data();
+            if (!scene || trackIdx < 0 || trackIdx >= mLaneSpecIds.size()) { return; }
+            scene->setTrackSpecLocked(mLaneSpecIds.at(trackIdx), locked);
         });
         connect(mWidget, &EditorTimelineWidget::markerAddRequested,
                 this, [this](const int frame) {
@@ -175,8 +226,7 @@ void EditorTimelineSync::rebuild()
     // edit (e.g. the user dove into a child scene), keep showing the
     // last scene that had blocks instead of blanking the panel
     const auto activeScene = mDocument.fActiveScene.data();
-    struct Item { eBoxOrSound *layer; bool audio; };
-    QList<Item> items;
+    QList<QPair<eBoxOrSound*, bool>> items;
     const auto collect = [&items](Canvas * const s) {
         items.clear();
         if (!s) { return; }
@@ -188,8 +238,7 @@ void EditorTimelineSync::rebuild()
             const auto layer = child.data();
             if (!layer) { continue; }
             const bool audio = enve_cast<eSound*>(layer) != nullptr;
-            if (audio) { items.append({layer, true}); }
-            else { items.append({layer, false}); }
+            items.append({layer, audio});
         }
     };
     collect(activeScene);
@@ -205,39 +254,76 @@ void EditorTimelineSync::rebuild()
     connectPanelScene(scene);
     connectChildren(scene);
     mClipToLayer.clear();
-    // lanes mirror the native track model: siblings sharing a trackId
-    // collapse into one lane, everything else owns a lane; lane order
-    // follows the contained order (contained[0] = native top row = top
-    // lane), so panel lanes and native rows stay two views of one order
-    QVector<int> lane(items.size(), 0);
-    {
-        QHash<int, int> vTidToLane, aTidToLane;
-        int vNext = 0, aNext = 0;
-        for (int i = 0; i < items.size(); ++i) {
-            const int tid = items[i].layer->trackId();
-            auto &tidToLane = items[i].audio ? aTidToLane : vTidToLane;
-            int &next = items[i].audio ? aNext : vNext;
-            if (tid >= 0) {
-                const auto it = tidToLane.constFind(tid);
-                if (it != tidToLane.constEnd()) { lane[i] = it.value(); continue; }
-                tidToLane.insert(tid, next);
-            }
-            lane[i] = next;
-            ++next;
-        }
-    }
-    int videoCount = 0;
-    int audioCount = 0;
-    for (int i = 0; i < items.size(); ++i) {
-        if (items[i].audio) { audioCount = qMax(audioCount, lane[i] + 1); }
-        else { videoCount = qMax(videoCount, lane[i] + 1); }
+
+    // tracks are explicit persistent entities: video specs first (top
+    // lane = first video spec), then audio specs. A virgin scene (or a
+    // pre-P0 project) installs the derived legacy layout once
+    auto specs = scene ? scene->getTrackSpecs() : QList<eTrackSpec>();
+    if (scene && specs.isEmpty()) {
+        // the setTrackId calls inside must not re-enter rebuild, and
+        // must not leave undo entries (a load-time migration must not
+        // be the user's first Ctrl+Z)
+        mInWriteback = true;
+        const auto undoBlock = scene->blockUndoRedo();
+        specs = deriveTrackSpecs(scene, items);
+        mInWriteback = false;
     }
 
-    mWidget->rebuildTracks(videoCount, audioCount);
+    QVector<EditorTimelineWidget::TrackInfo> trackInfos;
+    QHash<int, int> laneById;
+    for (const auto &s : specs) {
+        if (s.mAudio) { continue; }
+        laneById.insert(s.mId, trackInfos.size());
+        trackInfos.append({s.mId, s.mName, false, s.mLocked, false, s.mHeight});
+    }
+    const int videoCount = trackInfos.size();
+    for (const auto &s : specs) {
+        if (!s.mAudio) { continue; }
+        laneById.insert(s.mId, trackInfos.size());
+        trackInfos.append({s.mId, s.mName, true, s.mLocked, false, s.mHeight});
+    }
+    mLaneSpecIds.clear();
+    mLaneAudio.clear();
+    for (const auto &ti : trackInfos) {
+        mLaneSpecIds.append(ti.id);
+        mLaneAudio.append(ti.audio);
+    }
+
+    // lane membership: the layer's trackId; unknown ids (fresh layers)
+    // park on the topmost track of their type until the next writeback
+    // materializes the id - rebuild itself never mutates the doc
+    QVector<int> lane(items.size(), 0);
+    QVector<QList<eBoxOrSound*>> laneMembers(trackInfos.size());
+    for (int i = 0; i < items.size(); ++i) {
+        int laneIdx = laneById.value(items[i].first->trackId(), -1);
+        if (laneIdx < 0) {
+            for (int t = 0; t < trackInfos.size(); ++t) {
+                if (trackInfos[t].audio == items[i].second) { laneIdx = t; break; }
+            }
+        }
+        if (laneIdx < 0) { laneIdx = 0; }
+        lane[i] = laneIdx;
+        laneMembers[laneIdx].append(items[i].first);
+    }
+    // mute mirror + default numbering for unnamed specs
+    for (int t = 0; t < trackInfos.size(); ++t) {
+        bool allHidden = !laneMembers[t].isEmpty();
+        for (const auto *l : laneMembers[t]) {
+            if (l->isVisible()) { allHidden = false; break; }
+        }
+        trackInfos[t].muted = allHidden;
+        if (trackInfos[t].name.isEmpty()) {
+            trackInfos[t].name = trackInfos[t].audio
+                    ? QStringLiteral("A%1").arg(trackInfos.size() - t)
+                    : QStringLiteral("V%1").arg(videoCount - t);
+        }
+    }
+
+    mWidget->setTracks(trackInfos);
     mWidget->clearAllClips();
     qDebug("[ETL] rebuild panel=%s items=%d video=%d audio=%d active=%s",
            scene ? scene->prp_getName().toUtf8().constData() : "-",
-           items.size(), videoCount, audioCount,
+           items.size(), videoCount, trackInfos.size() - videoCount,
            mDocument.fActiveScene ?
                mDocument.fActiveScene->prp_getName().toUtf8().constData() : "-");
 
@@ -245,25 +331,6 @@ void EditorTimelineSync::rebuild()
     const qreal fps = scene->getFps();
     if (fps > 0.) { mWidget->setFps(fps); }
     {
-        // lane name overrides + mute mirrors (all lane layers hidden)
-        const int vc = mWidget->videoTrackCount();
-        for (int t = 0; t < mWidget->trackCount(); ++t) {
-            const QString key = t < vc ? QStringLiteral("v%1").arg(t + 1)
-                                       : QStringLiteral("a%1").arg(t - vc + 1);
-            const auto nameIt = mTrackNames.constFind(key);
-            if (nameIt != mTrackNames.constEnd()) {
-                mWidget->setTrackName(t, nameIt.value());
-            }
-        }
-        // mute state: computed below per lane from the layer list
-        QVector<bool> laneMuted(videoCount + audioCount, true);
-        for (int i = 0; i < items.size(); ++i) {
-            const int track = items[i].audio ? videoCount + lane[i] : lane[i];
-            if (items[i].layer->isVisible()) { laneMuted[track] = false; }
-        }
-        for (int t = 0; t < laneMuted.size(); ++t) {
-            mWidget->setTrackMuted(t, laneMuted[t]);
-        }
         // ruler markers from the scene (abs frames + titles)
         QVector<QPair<int, QString>> marks;
         for (const auto &m : scene->getMarkers()) {
@@ -277,7 +344,7 @@ void EditorTimelineSync::rebuild()
         const auto &it = items[i];
         double start = 0.;
         double len = fallbackLen;
-        const auto dur = it.layer->getDurationRectangle();
+        const auto dur = it.first->getDurationRectangle();
         if (dur && fps > 0.) {
             // absolute frames: the native timeline draws and hit-tests
             // the duration bar in abs space (durationrectangle.cpp draw)
@@ -286,97 +353,136 @@ void EditorTimelineSync::rebuild()
             start = minF / fps;
             len = (maxF - minF + 1) / fps;
         }
-        const int track = it.audio ? videoCount + lane[i] : lane[i];
-        const int id = mWidget->appendClip(it.layer->prp_getName(),
-                                           start, len, it.audio, track);
-        mClipToLayer.insert(id, it.layer);
+        const int id = mWidget->appendClip(it.first->prp_getName(),
+                                           start, len, it.second, lane[i]);
+        mClipToLayer.insert(id, it.first);
     }
     requestMedia();
     updatePlayheadFromDoc();
+}
+
+QList<eTrackSpec> EditorTimelineSync::deriveTrackSpecs(
+        Canvas * const scene,
+        const QList<QPair<eBoxOrSound*, bool>> &items)
+{
+    // pre-P0 panel derivation, frozen into the persistent table:
+    // siblings sharing a trackId share a lane (first-seen order),
+    // every other layer owns one; ids come from the layers' own space
+    struct Lane { int tid; QList<eBoxOrSound*> members; };
+    QList<Lane> lanes[2]; // 0 = video, 1 = audio
+    for (const auto &it : items) {
+        const int audioIdx = it.second ? 1 : 0;
+        const int tid = it.first->trackId();
+        bool joined = false;
+        if (tid >= 0) {
+            for (auto &ln : lanes[audioIdx]) {
+                if (ln.tid == tid) {
+                    ln.members << it.first;
+                    joined = true;
+                    break;
+                }
+            }
+        }
+        if (!joined) { lanes[audioIdx].append({tid, {it.first}}); }
+    }
+    int nextId = scene->newTrackId(scene);
+    QList<eTrackSpec> specs;
+    for (int a = 0; a < 2; ++a) {
+        const int total = lanes[a].size();
+        for (int i = 0; i < total; ++i) {
+            eTrackSpec spec;
+            spec.mId = nextId++;
+            spec.mAudio = a == 1;
+            spec.mName = a == 0
+                    ? QStringLiteral("V%1").arg(total - i)
+                    : QStringLiteral("A%1").arg(total - i);
+            specs.append(spec);
+            for (auto *l : lanes[a][i].members) {
+                if (l->trackId() != spec.mId) { l->setTrackId(spec.mId); }
+            }
+        }
+    }
+    // type completeness: the table must always hold at least one lane
+    // of EACH type, otherwise a fresh sound/visual layer would have no
+    // legal home (and the lane fallback would park it on a wrong-type
+    // lane)
+    const auto ensureType = [&](const bool audio) {
+        for (const auto &s : specs) { if (s.mAudio == audio) { return; } }
+        eTrackSpec spec;
+        spec.mId = nextId++;
+        spec.mAudio = audio;
+        spec.mName = audio ? QStringLiteral("A1") : QStringLiteral("V1");
+        specs.append(spec);
+    };
+    ensureType(false);
+    ensureType(true);
+
+    scene->initTrackSpecs(specs);
+    qDebug("[ETL] track migration: %d tracks installed", specs.size());
+    return specs;
 }
 
 void EditorTimelineSync::applyTrackWriteback()
 {
     const auto scene = mPanelScene.data();
     if (!mWidget || !scene) { return; }
-    const int videoTracks = mWidget->videoTrackCount();
+    if (mLaneSpecIds.isEmpty()) { return; }
 
-    struct Entry { eBoxOrSound *layer; int lane; double start; };
-    QList<Entry> video, audio;
+    mInWriteback = true;
+
+    // 1. lane -> trackId: pure membership. Moving a clip between lanes
+    // is a trackId write, never a structural row surgery (the P0 core
+    // invariant that turns timeline drags into real editing semantics)
     for (const auto &clip : mWidget->allClips()) {
         const auto layer = mClipToLayer.value(clip.id).data();
         if (!layer) { continue; }
-        if (clip.audio) { audio.append({layer, clip.track - videoTracks, clip.start}); }
-        else { video.append({layer, clip.track, clip.start}); }
+        if (clip.track < 0 || clip.track >= mLaneSpecIds.size()) { continue; }
+        const int specId = mLaneSpecIds.at(clip.track);
+        if (layer->trackId() != specId) { layer->setTrackId(specId); }
     }
 
-    mInWriteback = true;
+    // 2. row order: keep each track's members contiguous with the
+    // tracks in spec order (the compositing-order invariant), but keep
+    // the CURRENT relative order within a track - a same-lane time
+    // slide reorders nothing. Reorder only when membership moved
     for (const bool isAudio : {false, true}) {
-        auto &entries = isAudio ? audio : video;
-        if (entries.isEmpty()) { continue; }
-        // panel order: top lane first, then clip start (the panel's
-        // top-to-bottom reading of the timeline)
-        std::stable_sort(entries.begin(), entries.end(),
-                         [](const Entry &a, const Entry &b) {
-            if (a.lane != b.lane) { return a.lane < b.lane; }
-            return a.start < b.start;
+        QList<eBoxOrSound*> members; // in current contained order
+        for (const auto &c : scene->getContained()) {
+            const auto l = c.data();
+            if (!l) { continue; }
+            const bool audio = enve_cast<eSound*>(l) != nullptr;
+            if (audio != isAudio) { continue; }
+            members << l;
+        }
+        if (members.size() < 2) { continue; }
+        QList<eBoxOrSound*> desired = members;
+        std::stable_sort(desired.begin(), desired.end(),
+                [this](eBoxOrSound * const a, eBoxOrSound * const b) {
+            return mLaneSpecIds.indexOf(a->trackId())
+                    < mLaneSpecIds.indexOf(b->trackId());
         });
-        const auto parent = entries.first().layer->getParentGroup();
+        bool changed = false;
+        for (int i = 0; i < members.size(); ++i) {
+            if (members.at(i) != desired.at(i)) { changed = true; break; }
+        }
+        if (!changed) { continue; }
+        const auto parent = members.first()->getParentGroup();
         if (!parent || parent->getParentScene() != scene) { continue; }
-
-        // 1. persist the panel order as the native row order (contained
-        // order). Skip when they already agree; when they differ, the
-        // panel rows occupy the topmost slot the group currently holds
-        // and the members stack in panel order below it
-        bool needReorder = false;
-        bool stale = false;
-        int prevIdx = -1;
         int minIdx = INT_MAX;
-        for (const auto &e : entries) {
-            const int idx = parent->getContainedIndex(e.layer);
+        bool stale = false;
+        for (const auto *m : members) {
+            const int idx = parent->getContainedIndex(
+                        const_cast<eBoxOrSound*>(m));
             if (idx < 0) { stale = true; break; }
             minIdx = qMin(minIdx, idx);
-            if (idx <= prevIdx) { needReorder = true; }
-            prevIdx = qMax(prevIdx, idx);
         }
-        if (!stale && needReorder) {
-            parent->moveContainedInList(entries.first().layer, minIdx);
-            for (int i = 1; i < entries.size(); ++i) {
-                parent->moveContainedBelow(entries[i].layer,
-                                           entries[i - 1].layer);
-            }
-        }
-
-        // 2. lanes -> tracks: a lane with several blocks joins (or keeps)
-        //    one shared trackId; a single-block lane leaves any track
-        int laneStart = 0;
-        while (laneStart < entries.size()) {
-            int laneEnd = laneStart;
-            while (laneEnd < entries.size() &&
-                   entries[laneEnd].lane == entries[laneStart].lane) { ++laneEnd; }
-            if (laneEnd - laneStart == 1) {
-                auto * const m = entries[laneStart].layer;
-                if (m->isInTrack()) { m->setTrackId(-1); }
-            } else {
-                // keep an existing id when these members already share
-                // one, otherwise open a fresh track
-                QHash<int, int> votes;
-                int best = -1, bestVotes = 0;
-                for (int i = laneStart; i < laneEnd; ++i) {
-                    const int tid = entries[i].layer->trackId();
-                    if (tid < 0) { continue; }
-                    const int v = ++votes[tid];
-                    if (v > bestVotes) { bestVotes = v; best = tid; }
-                }
-                const int tid = best >= 0 ? best : scene->newTrackId(parent);
-                for (int i = laneStart; i < laneEnd; ++i) {
-                    auto * const m = entries[i].layer;
-                    if (m->trackId() != tid) { m->setTrackId(tid); }
-                }
-            }
-            laneStart = laneEnd;
+        if (stale || minIdx == INT_MAX) { continue; }
+        parent->moveContainedInList(desired.first(), minIdx);
+        for (int i = 1; i < desired.size(); ++i) {
+            parent->moveContainedBelow(desired.at(i), desired.at(i - 1));
         }
     }
+
     mInWriteback = false;
     if (Document::sInstance) { Document::sInstance->actionFinished(); }
 }
@@ -608,8 +714,7 @@ bool EditorTimelineSync::eventFilter(QObject * const obj, QEvent * const ev)
                 // magnetic invariant: tracks hold no gaps after any edit
                 if (mWidget->magnetic()) { mWidget->compactTrackGaps(); }
                 applyWriteback();
-                mWidget->compactLanes();      // drop lanes emptied by the drag
-                applyTrackWriteback();        // lanes -> native rows/tracks
+                applyTrackWriteback();        // trackIds (+ row blocks)
                 rebuild();
                 mRebuildQueued = false;
             }
@@ -812,20 +917,31 @@ void EditorTimelineSync::razorCut(const QList<int> &clipIds, const double sec)
     splitBoxes(boxes, frame);
 }
 
-void EditorTimelineSync::toggleTrackMute(const int trackIdx)
+void EditorTimelineSync::toggleTrackMute(const int trackIdx,
+                                         const bool allSameType)
 {
     if (!mWidget || mInWriteback || mDragging) { return; }
     const auto scene = mPanelScene.data();
     if (!scene) { return; }
-    // lane layers: every clip currently parked on that panel track
+    // target lanes: one, or every lane of the same type (kdenlive Shift)
+    QList<int> lanes{trackIdx};
+    if (allSameType && trackIdx >= 0 && trackIdx < mLaneAudio.size()) {
+        const bool audio = mLaneAudio.at(trackIdx);
+        lanes.clear();
+        for (int t = 0; t < mLaneAudio.size(); ++t) {
+            if (mLaneAudio.at(t) == audio) { lanes << t; }
+        }
+    }
+    // lane layers: every clip currently parked on the target lanes
     QList<eBoxOrSound*> laneLayers;
     const auto clips = mWidget->allClips();
     for (const auto &c : clips) {
-        if (c.track != trackIdx) { continue; }
+        if (!lanes.contains(c.track)) { continue; }
         const auto layer = mClipToLayer.value(c.id).data();
         if (layer) { laneLayers << layer; }
     }
     if (laneLayers.isEmpty()) { return; }
+    // one press = one common state: any visible member -> hide all
     const bool anyVisible = std::any_of(
                 laneLayers.cbegin(), laneLayers.cend(),
                 [](eBoxOrSound * const l) { return l->isVisible(); });

@@ -107,6 +107,12 @@ namespace EvFormat {
         // X/Y and must skip reading the new pair (positional)
         latticeWarpP1 = 51,
 
+        // NLE track specs (Canvas tail: count + id/audio/locked/
+        // height/name entries); the persistent track table that turns
+        // the timeline lanes into explicit entities; older files lack
+        // the block and must skip it (positional)
+        nleTrackSpecs = 52,
+
         nextVersion
     };
 

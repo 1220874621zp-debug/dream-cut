@@ -85,6 +85,16 @@ enum class AlignRelativeTo {
     scene, lastSelected, lastSelectedPivot, boundingBox
 };
 
+// persistent NLE track (one lane of the editing timeline): id matches
+// the eBoxOrSound trackId space, height 0 = type default
+struct eTrackSpec {
+    int mId = -1;
+    bool mAudio = false;
+    QString mName;
+    bool mLocked = false;
+    int mHeight = 0;
+};
+
 class CORE_EXPORT Canvas : public CanvasBase
 {
     friend class CanvasWindow;
@@ -333,6 +343,29 @@ public:
     // stack the other members of the anchor's track directly below
     // it, keeping the whole track contiguous after a reorder drop
     void gatherTrack(eBoxOrSound* const anchor);
+
+    // ---- NLE track specs: the persistent track table (kdenlive-style
+    // explicit tracks). Lanes in the editing timeline are no longer
+    // derived from the layers' trackIds on the fly - they ARE these
+    // specs, so a track survives with no members, moving a clip only
+    // writes its trackId, and lock/name/height persist per track ----
+    const QList<eTrackSpec> &getTrackSpecs() const { return mTrackSpecs; }
+    bool hasTrackSpec(const int id) const;
+    // one-time legacy migration: install the derived lane layout as
+    // the scene's track table (not undoable, runs during panel load)
+    void initTrackSpecs(const QList<eTrackSpec> &specs);
+    // undoable add/remove (id allocation reuses the per-parent trackId
+    // space so spec ids and layer trackIds never collide)
+    int addTrackSpec(const bool audio, const QString &name);
+    bool removeTrackSpec(const int id);
+    // plain setters (UI-state properties, deliberately not undoable)
+    void setTrackSpecName(const int id, const QString &name);
+    void setTrackSpecLocked(const int id, const bool locked);
+    void setTrackSpecHeight(const int id, const int height);
+    // default lane height per type used when a spec carries none
+    static int trackSpecDefaultHeight(const bool audio)
+    { return audio ? 52 : 60; }
+
     const QString checkForUnsupportedBoxSVG(BoundingBox* const box);
     const QString checkForUnsupportedBoxesSVG(const QList<BoundingBox*> boxes);
     const QString checkForUnsupportedSVG();
@@ -1150,6 +1183,9 @@ protected:
     FrameMarker mIn{tr("In"), false, 0};
     FrameMarker mOut{tr("Out"), false, 0};
     std::vector<FrameMarker> mMarkers;
+    // persistent NLE track table (see eTrackSpec); empty until the
+    // editing timeline installs the derived layout on first open
+    QList<eTrackSpec> mTrackSpecs;
 
     void handleMovePointMousePressEvent(const eMouseEvent &e);
     void handleMovePointMouseMove(const eMouseEvent &e);

@@ -15,6 +15,7 @@ class Document;
 class EditorTimelineWidget;
 class eBoxOrSound;
 class BoundingBox;
+struct eTrackSpec;
 
 // Edit-timeline semantic bridge. The panel mirrors the native timeline:
 // EVERY child layer of the ACTIVE scene shows here - sound layers become
@@ -61,10 +62,9 @@ public:
     // inside each clip, at least one frame on both sides); sounds are
     // skipped (the doc-side split only supports visual layers)
     void razorCut(const QList<int> &clipIds, const double sec);
-    // toggle the lane's layer visibility (mute)
-    void toggleTrackMute(const int trackIdx);
-    // lane name overrides, survive rebuilds ("v1"/"a2" keyed)
-    QHash<QString, QString> mTrackNames;
+    // toggle the lane's layer visibility (mute); allSameType extends
+    // the toggle to every track of the same type (kdenlive Shift)
+    void toggleTrackMute(const int trackIdx, const bool allSameType);
     // shift one layer's whole clip by frameDelta (min+max transforms)
     void shiftLayerFrames(eBoxOrSound * const layer, const int frameDelta);
 
@@ -76,6 +76,13 @@ private:
     void connectPanelScene(Canvas * const scene);
     void connectChildren(Canvas * const scene);
     void syncPlayheadToDoc();
+    // one-time legacy migration: derive the pre-P0 lane layout from
+    // the layers' trackIds, install it as the scene's persistent track
+    // table and assign every layer its track id (guarded by
+    // mInWriteback: the setTrackId calls must not re-enter rebuild)
+    QList<struct eTrackSpec> deriveTrackSpecs(
+            Canvas * const scene,
+            const QList<QPair<eBoxOrSound*, bool>> &items);
     // select the boxes on the canvas and run the frame-parameterized
     // split (one undo set, one rebuild)
     void splitBoxes(const QList<BoundingBox*> &boxes, const int frame);
@@ -101,6 +108,10 @@ private:
     // last one that had blocks when the active scene has none
     QPointer<Canvas> mPanelScene;
     QHash<int, QPointer<eBoxOrSound>> mClipToLayer;
+    // lane index -> persistent spec id / audio flag (filled by rebuild,
+    // consumed by the writeback and the track lifecycle handlers)
+    QVector<int> mLaneSpecIds;
+    QVector<bool> mLaneAudio;
     // thumbnail cache keyed by "<boxPtr>:<relFrame>" so renames and
     // rebuilds reuse renders; only a changed mid frame re-renders
     QHash<QString, QImage> mThumbDone;

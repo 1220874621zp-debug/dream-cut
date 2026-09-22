@@ -18,6 +18,7 @@
 #include <QLineEdit>
 #include <QSet>
 #include <algorithm>
+#include <climits>
 
 #include "themesupport.h"
 
@@ -171,6 +172,24 @@ void EditorTimelineWidget::paintEvent(QPaintEvent *)
     p.fillRect(0, 0, headerWidth(), rulerHeight(), cHeader);
     p.setPen(cGridLine);
     p.drawLine(0, rulerHeight() - 1, width(), rulerHeight() - 1);
+
+    // corner +V / +A buttons: explicit track creation
+    QFont cf = font();
+    cf.setPixelSize(10);
+    p.setFont(cf);
+    for (int a = 0; a < 2; ++a) {
+        const bool audio = a == 1;
+        const QRect b = addTrackRect(audio);
+        const bool hov = b.contains(m_hoverPos);
+        p.setPen(QPen(hov ? cAccent : cGridLine, 1));
+        p.setBrush(hov ? QColor(cAccent.red(), cAccent.green(),
+                                cAccent.blue(), 46)
+                       : QColor(0x2a, 0x2a, 0x2c));
+        p.drawRoundedRect(b, 3, 3);
+        p.setPen(hov ? QColor(0xff, 0xff, 0xff) : cText);
+        p.drawText(b, Qt::AlignCenter,
+                   audio ? QStringLiteral("+A") : QStringLiteral("+V"));
+    }
 }
 
 void EditorTimelineWidget::drawRuler(QPainter &p)
@@ -242,13 +261,17 @@ void EditorTimelineWidget::drawTrackHeaders(QPainter &p)
         p.drawText(QRect(38, top, headerWidth() - 68, m_tracks[i].height),
                    Qt::AlignVCenter, m_tracks[i].name);
 
-        // mute badge (M): dim when off, red when the lane is muted
+        // mute badge: video lane hides the picture, audio lane mutes the
+        // sound (one visibility op in friction, glyph says which)
         const QRect mb = muteBadgeRect(i);
-        p.setPen(QPen(m_tracks[i].muted ? QColor(0xe8, 0x4c, 0x4c) : cGridLine, 1));
+        const bool laneMuted = m_tracks[i].muted;
+        p.setPen(QPen(laneMuted ? QColor(0xe8, 0x4c, 0x4c) : cGridLine, 1));
         p.setBrush(Qt::NoBrush);
         p.drawRoundedRect(mb, 4, 4);
-        p.setPen(m_tracks[i].muted ? QColor(0xe8, 0x4c, 0x4c) : cTextDim);
-        p.drawText(mb, Qt::AlignCenter, QStringLiteral("M"));
+        p.setPen(laneMuted ? QColor(0xe8, 0x4c, 0x4c) : cTextDim);
+        p.drawText(mb, Qt::AlignCenter,
+                   m_tracks[i].type == ClipType::Video
+                       ? QStringLiteral("隐") : QStringLiteral("静"));
 
         // lock badge (L): dim when off, amber when the lane is locked
         const QRect lb = lockBadgeRect(i);
@@ -483,6 +506,14 @@ void EditorTimelineWidget::drawClip(QPainter &p, int index, bool ghost)
         p.setPen(QPen(hovered ? QColor(0x9a, 0x9a, 0x9a) : QColor(0x10, 0x10, 0x10), 1));
         p.drawPath(path);
     }
+
+    // illegal drop feedback: red border + veil while the move overlaps
+    if (m_dropIllegal && index == m_dragClip && !ghost) {
+        p.setPen(QPen(cPlayhead, 2));
+        p.setBrush(QColor(cPlayhead.red(), cPlayhead.green(),
+                          cPlayhead.blue(), 40));
+        p.drawPath(path);
+    }
     p.restore();
 }
 
@@ -551,6 +582,66 @@ bool EditorTimelineWidget::overlapsOnTrack(int track, double start, double len, 
     return false;
 }
 
+// clips outside the moving set that the dragged clip + its group
+// riders would collide with; the tangled exemption (press-time
+// overlap with the moving set) lets legacy overlap layouts untangle
+bool EditorTimelineWidget::overlapsOutsideMoving(const int dragIdx,
+                                                 const int track,
+                                                 const double start,
+                                                 const double len) const
+{
+    for (int i = 0; i < m_clips.size(); ++i) {
+        if (i == dragIdx) { continue; }
+        if (m_drag == DragMode::MoveClip &&
+                m_selectedIds.contains(m_clips[i].id)) { continue; } // rider
+        if (m_tangled.contains(m_clips[i].id)) { continue; } // legacy knot
+        const Clip &o = m_clips[i];
+        if (o.track != track) { continue; }
+        if (start < o.start + o.length - 1e-9 &&
+                o.start < start + len - 1e-9) { return true; }
+    }
+    return false;
+}
+
+bool EditorTimelineWidget::dropLegal(const int dragIdx,
+                                     const double newStart) const
+{
+    if (dragIdx < 0 || dragIdx >= m_clips.size()) { return false; }
+    const Clip &c = m_clips[dragIdx];
+    if (overlapsOutsideMoving(dragIdx, c.track, newStart, c.length)) { return false; }
+    // group riders shift by the same delta on their own lanes
+    const double delta = newStart - m_origStart;
+    for (const auto &g : m_groupOrig) {
+        if (g.idx < 0 || g.idx >= m_clips.size()) { continue; }
+        const Clip &r = m_clips[g.idx];
+        const double rs = qMax(0.0, g.origStart + delta);
+        if (overlapsOutsideMoving(dragIdx, r.track, rs, r.length)) { return false; }
+    }
+    return true;
+}
+
+// corner buttons (+V / +A) in the ruler/header junction square
+QRect EditorTimelineWidget::addTrackRect(const bool audio) const
+{
+    return QRect(audio ? 100 : 72, 6, 26, 18);
+}
+
+// nearest lane of the requested type for a y position (free drags
+// clamp here instead of creating implicit lanes)
+int EditorTimelineWidget::nearestLaneOfType(const int y,
+                                            const ClipType type) const
+{
+    int best = -1;
+    int bestDist = INT_MAX;
+    for (int i = 0; i < m_tracks.size(); ++i) {
+        if (m_tracks[i].type != type) { continue; }
+        const int mid = trackY(i) + m_tracks[i].height / 2;
+        const int d = qAbs(y - mid);
+        if (d < bestDist) { bestDist = d; best = i; }
+    }
+    return best;
+}
+
 // ---------------------------------------------------------------- events
 
 // ---- editing tools ----
@@ -579,6 +670,23 @@ void EditorTimelineWidget::requestSplitAtPlayhead()
 
 void EditorTimelineWidget::applyToolCursor(const QPoint &pos)
 {
+    // header area interactions come first: +V/+A buttons, lane height
+    // resize edge, plain header
+    if (pos.x() < headerWidth()) {
+        if (pos.y() <= rulerHeight()) {
+            setCursor((addTrackRect(false).contains(pos) ||
+                       addTrackRect(true).contains(pos))
+                          ? Qt::PointingHandCursor : Qt::ArrowCursor);
+            return;
+        }
+        const int tr = trackAtY(pos.y());
+        if (tr >= 0 && qAbs(pos.y() - (trackY(tr) + m_tracks[tr].height)) <= 4) {
+            setCursor(Qt::SplitVCursor);
+            return;
+        }
+        setCursor(Qt::ArrowCursor);
+        return;
+    }
     if (m_tool == EditTool::Razor) {
         setCursor(m_razorCursor);
         return;
@@ -676,7 +784,7 @@ void EditorTimelineWidget::mousePressEvent(QMouseEvent *e)
                static_cast<int>(m_drag), m_dragClip);
         m_drag = DragMode::None;
         m_dragClip = -1;
-        m_dragTempLane = -1;
+        m_dragTrack = -1;
         m_snapTarget = -1.0;
     }
 
@@ -694,16 +802,36 @@ void EditorTimelineWidget::mousePressEvent(QMouseEvent *e)
            e->pos().x(), e->pos().y(), idx, m_clips.size(), m_tracks.size(),
            m_scrollSec, m_pxPerSec);
 
-    // ---- track header area: mute / lock badges ----
+    // corner square (+V / +A track buttons)
+    if (e->pos().x() < headerWidth() && e->pos().y() <= rulerHeight()) {
+        if (addTrackRect(false).contains(e->pos())) {
+            emit trackAddRequested(false);
+        } else if (addTrackRect(true).contains(e->pos())) {
+            emit trackAddRequested(true);
+        }
+        return;
+    }
+
+    // ---- track header area: height resize / mute / lock ----
     if (e->pos().x() < headerWidth() && e->pos().y() > rulerHeight()) {
         const int tr = trackAtY(e->pos().y());
         if (tr >= 0) {
+            // bottom edge of the header row = lane height resize
+            if (qAbs(e->pos().y() - (trackY(tr) + m_tracks[tr].height)) <= 4) {
+                m_drag = DragMode::TrackHeight;
+                m_dragTrack = tr;
+                m_pressTrackHeight = m_tracks[tr].height;
+                return;
+            }
             if (muteBadgeRect(tr).contains(e->pos())) {
-                emit trackMuteToggleRequested(tr);
+                // Shift = every track of the same type (kdenlive)
+                emit trackMuteToggleRequested(
+                            tr, e->modifiers() & Qt::ShiftModifier);
                 return;
             }
             if (lockBadgeRect(tr).contains(e->pos())) {
                 m_tracks[tr].locked = !m_tracks[tr].locked;
+                emit trackLockChanged(tr, m_tracks[tr].locked);
                 update();
                 return;
             }
@@ -751,7 +879,7 @@ void EditorTimelineWidget::mousePressEvent(QMouseEvent *e)
         m_origStart = c.start;
         m_origLength = c.length;
         m_origTrack = c.track;
-        m_dragTempLane = -1;
+        m_dropIllegal = false;
         // group move: snapshot every other selected clip's start so the
         // whole selection rides the same time delta
         m_groupOrig.clear();
@@ -759,6 +887,31 @@ void EditorTimelineWidget::mousePressEvent(QMouseEvent *e)
             for (int i = 0; i < m_clips.size(); ++i) {
                 if (i != idx && m_selectedIds.contains(m_clips[i].id)) {
                     m_groupOrig.append({i, m_clips[i].start});
+                }
+            }
+        }
+        // press-time tangle snapshot: clips outside the moving set that
+        // already overlap it (legacy overlap layouts) are exempt from
+        // the drop legality check, so knots can still be dragged apart
+        m_tangled.clear();
+        {
+            const auto tangleOn = [this](const int lane, const double s,
+                                         const double l) {
+                for (const Clip &o : m_clips) {
+                    if (m_selectedIds.contains(o.id)) { continue; }
+                    if (o.track != lane) { continue; }
+                    if (s < o.start + o.length - 1e-9 &&
+                            o.start < s + l - 1e-9) {
+                        m_tangled.insert(o.id);
+                    }
+                }
+            };
+            tangleOn(c.track, c.start, c.length);
+            for (const auto &g : m_groupOrig) {
+                if (g.idx >= 0 && g.idx < m_clips.size()) {
+                    tangleOn(m_clips[g.idx].track,
+                             m_clips[g.idx].start,
+                             m_clips[g.idx].length);
                 }
             }
         }
@@ -843,6 +996,15 @@ void EditorTimelineWidget::mouseMoveEvent(QMouseEvent *e)
     case DragMode::Playhead:
         m_playhead = qMax(0.0, t);
         break;
+    case DragMode::TrackHeight: {
+        if (m_dragTrack >= 0 && m_dragTrack < m_tracks.size()) {
+            const int dy = e->pos().y() - m_pressPos.y();
+            m_tracks[m_dragTrack].height =
+                    qBound(36, m_pressTrackHeight + dy, 220);
+        }
+        update();
+        return; // header gestures never auto-scroll the content
+    }
     case DragMode::MoveClip: {
         Clip &c = m_clips[m_dragClip];
         double newStart = qMax(0.0, t - m_grabOffsetSec);
@@ -850,26 +1012,36 @@ void EditorTimelineWidget::mouseMoveEvent(QMouseEvent *e)
         double snappedT = snapTime(newStart, m_dragClip, &snapped);
         if (snapped) { newStart = snappedT; m_snapTarget = snappedT; }
 
-        // free track switching == merge/separate: a same-type lane under
-        // the cursor takes the clip as-is (overlaps allowed == merging
-        // into that track); hovering outside every same-type lane parks
-        // the clip on a new lane of its own (== separating)
+        // lane under the cursor, clamped to the nearest same-type lane:
+        // tracks are explicit entities now, hovering outside never
+        // spawns a throwaway lane
         int tr = trackAtY(e->pos().y());
-        const bool sameType = tr >= 0 && m_tracks[tr].type == c.type;
-        if (sameType && tr != m_dragTempLane) {
-            const int removed = dropDragTempLane();
-            c.track = (removed >= 0 && tr > removed) ? tr - 1 : tr;
-        } else if (!sameType) {
-            c.track = takeDragTempLane(c.type, e->pos().y());
+        if (tr < 0 || m_tracks[tr].type != c.type) {
+            tr = nearestLaneOfType(e->pos().y(), c.type);
         }
+        const bool laneOk = tr >= 0 && !m_tracks[tr].locked;
+
+        // overlap hard constraint: an illegal candidate keeps the last
+        // legal state and flags the dragged clip red
+        const int prevTrack = c.track;
+        const double prevStart = c.start;
+        if (laneOk) { c.track = tr; }
         c.start = newStart;
-        // group move: every other selected clip rides the same time
-        // delta (vertical lane changes stay single-clip on purpose)
-        if (!m_groupOrig.isEmpty()) {
-            const double delta = newStart - m_origStart;
-            for (const auto &g : m_groupOrig) {
-                if (g.idx >= 0 && g.idx < m_clips.size()) {
-                    m_clips[g.idx].start = qMax(0.0, g.origStart + delta);
+        if (!(laneOk && dropLegal(m_dragClip, newStart))) {
+            c.track = prevTrack;
+            c.start = prevStart;
+            m_dropIllegal = true;
+            m_snapTarget = -1.0;
+        } else {
+            m_dropIllegal = false;
+            // group move: every other selected clip rides the same time
+            // delta (vertical lane changes stay single-clip on purpose)
+            if (!m_groupOrig.isEmpty()) {
+                const double delta = newStart - m_origStart;
+                for (const auto &g : m_groupOrig) {
+                    if (g.idx >= 0 && g.idx < m_clips.size()) {
+                        m_clips[g.idx].start = qMax(0.0, g.origStart + delta);
+                    }
                 }
             }
         }
@@ -882,8 +1054,19 @@ void EditorTimelineWidget::mouseMoveEvent(QMouseEvent *e)
         bool snapped = false;
         double sT = snapTime(ns, m_dragClip, &snapped);
         if (snapped) { ns = sT; m_snapTarget = sT; }
-        // merged tracks may overlap: trimming into a neighbour is allowed,
-        // the user resolves overlaps by dragging / trimming on purpose
+        // neighbor edge: the left handle cannot cross the previous clip
+        // on the lane (clips tangled with this one stay trimmable)
+        double lo = 0.0;
+        for (int i = 0; i < m_clips.size(); ++i) {
+            if (i == m_dragClip) { continue; }
+            const Clip &o = m_clips[i];
+            if (o.track != c.track || m_selectedIds.contains(o.id)) { continue; }
+            if (o.start + o.length <= m_origStart + 1e-9) {
+                lo = qMax(lo, o.start + o.length);
+            }
+        }
+        lo = qMin(lo, end - MIN_CLIP_LEN);
+        ns = qMax(ns, lo);
         c.start = ns;
         c.length = end - ns;
         break;
@@ -894,6 +1077,17 @@ void EditorTimelineWidget::mouseMoveEvent(QMouseEvent *e)
         bool snapped = false;
         double sT = snapTime(ne, m_dragClip, &snapped);
         if (snapped) { ne = sT; m_snapTarget = sT; }
+        // neighbor edge: the right handle cannot cross the next clip's
+        // start on the lane
+        double hi = double(INT_MAX);
+        for (int i = 0; i < m_clips.size(); ++i) {
+            if (i == m_dragClip) { continue; }
+            const Clip &o = m_clips[i];
+            if (o.track != c.track || m_selectedIds.contains(o.id)) { continue; }
+            if (o.start >= m_origStart - 1e-9) { hi = qMin(hi, o.start); }
+        }
+        hi = qMax(hi, m_origStart + MIN_CLIP_LEN);
+        ne = qMin(ne, hi);
         c.length = ne - c.start;
         // magnetic follow: shortening the out point slides attached
         // neighbours left; Alt keeps them in place for a plain trim
@@ -903,8 +1097,10 @@ void EditorTimelineWidget::mouseMoveEvent(QMouseEvent *e)
     default: break;
     }
 
-    // edge auto-scroll while dragging
-    if (m_drag != DragMode::Playhead) {
+    // edge auto-scroll while dragging clips (never for the playhead or
+    // header gestures)
+    if (m_drag == DragMode::MoveClip || m_drag == DragMode::TrimLeft ||
+            m_drag == DragMode::TrimRight) {
         if (e->pos().x() > width() - 24) m_scrollSec += 20 / m_pxPerSec;
         else if (e->pos().x() < headerWidth() + 24) m_scrollSec = qMax(0.0, m_scrollSec - 20 / m_pxPerSec);
         updateScrollBar();
@@ -933,6 +1129,17 @@ void EditorTimelineWidget::mouseReleaseEvent(QMouseEvent *e)
         return;
     }
 
+    if (m_drag == DragMode::TrackHeight) {
+        if (m_dragTrack >= 0 && m_dragTrack < m_tracks.size()) {
+            emit trackHeightChanged(m_dragTrack,
+                                    m_tracks[m_dragTrack].height);
+        }
+        m_drag = DragMode::None;
+        m_dragTrack = -1;
+        update();
+        return;
+    }
+
     if (m_drag != DragMode::None && m_dragClip >= 0 && m_dragClip < m_clips.size()) {
         const Clip &c = m_clips[m_dragClip];
         if (qAbs(c.start - m_origStart) > 1e-6 || qAbs(c.length - m_origLength) > 1e-6 ||
@@ -948,8 +1155,9 @@ void EditorTimelineWidget::mouseReleaseEvent(QMouseEvent *e)
     }
     m_drag = DragMode::None;
     m_dragClip = -1;
-    m_dragTempLane = -1;
     m_snapTarget = -1.0;
+    m_dropIllegal = false;
+    m_tangled.clear();
     m_groupOrig.clear();
     update();
 }
@@ -961,15 +1169,7 @@ void EditorTimelineWidget::mouseDoubleClickEvent(QMouseEvent *e)
         const int lane = trackAtY(e->pos().y());
         if (lane >= 0 && !muteBadgeRect(lane).contains(e->pos())
                 && !lockBadgeRect(lane).contains(e->pos())) {
-            bool ok = false;
-            const QString name = QInputDialog::getText(
-                        this, tr("重命名轨道"), tr("轨道名称:"),
-                        QLineEdit::Normal, m_tracks[lane].name, &ok);
-            if (ok && !name.trimmed().isEmpty()) {
-                m_tracks[lane].name = name.trimmed();
-                emit trackRenameRequested(lane, m_tracks[lane].name);
-                update();
-            }
+            renameLaneDialog(lane);
         }
         return;
     }
@@ -1052,7 +1252,7 @@ void EditorTimelineWidget::hideEvent(QHideEvent *)
     }
     m_drag = DragMode::None;
     m_dragClip = -1;
-    m_dragTempLane = -1;
+    m_dragTrack = -1;
     m_snapTarget = -1.0;
 }
 
@@ -1141,7 +1341,7 @@ void EditorTimelineWidget::clearAllClips()
     m_hover = -1;
     m_drag = DragMode::None;
     m_dragClip = -1;
-    m_dragTempLane = -1;
+    m_dragTrack = -1;
     m_snapTarget = -1.0;
     m_clips.clear();
     m_thumbCache.clear();
@@ -1177,17 +1377,18 @@ int EditorTimelineWidget::appendClip(const QString &name,
     return c.id;
 }
 
-void EditorTimelineWidget::rebuildTracks(const int videoCount,
-                                         const int audioCount)
+void EditorTimelineWidget::setTracks(const QVector<TrackInfo> &tracks)
 {
-    m_dragTempLane = -1;
     m_tracks.clear();
-    // top -> bottom: V<max> ... V1, then A<max> ... A1 (demo layout)
-    for (int i = videoCount; i >= 1; --i) {
-        m_tracks.append({QStringLiteral("V%1").arg(i), 60, ClipType::Video});
-    }
-    for (int i = audioCount; i >= 1; --i) {
-        m_tracks.append({QStringLiteral("A%1").arg(i), 52, ClipType::Audio});
+    for (const auto &t : tracks) {
+        Track lane;
+        lane.id = t.id;
+        lane.name = t.name;
+        lane.type = t.audio ? ClipType::Audio : ClipType::Video;
+        lane.locked = t.locked;
+        lane.muted = t.muted;
+        lane.height = t.height > 0 ? t.height : (t.audio ? 52 : 60);
+        m_tracks.append(lane);
     }
     updateScrollBar();
     update();
@@ -1246,6 +1447,23 @@ void EditorTimelineWidget::contextMenuEvent(QContextMenuEvent *e)
         return;
     }
 
+    // track header: lifecycle menu (explicit tracks)
+    if (e->pos().x() < headerWidth() && e->pos().y() > rulerHeight()) {
+        const int lane = trackAtY(e->pos().y());
+        if (lane < 0) { QWidget::contextMenuEvent(e); return; }
+        const bool audio = m_tracks[lane].type == ClipType::Audio;
+        QMenu menu(this);
+        QAction *add = menu.addAction(audio ? tr("添加音频轨")
+                                            : tr("添加视频轨"));
+        QAction *del = menu.addAction(tr("删除轨道（仅空轨可删）"));
+        QAction *rename = menu.addAction(tr("重命名轨道"));
+        QAction *act = menu.exec(e->globalPos());
+        if (act == add) { emit trackAddRequested(audio); }
+        else if (act == del) { emit trackRemoveRequested(lane); }
+        else if (act == rename) { renameLaneDialog(lane); }
+        return;
+    }
+
     const int idx = clipAt(e->pos());
     if (idx < 0) { QWidget::contextMenuEvent(e); return; }
     if (!m_selectedIds.contains(m_clips[idx].id)) {
@@ -1274,9 +1492,9 @@ void EditorTimelineWidget::contextMenuEvent(QContextMenuEvent *e)
     QAction *down = nullptr;
     if (upOk || downOk) {
         menu.addSeparator();
-        up = menu.addAction(tr("合并到上一轨"));
+        up = menu.addAction(tr("移动到上一轨"));
         up->setEnabled(upOk);
-        down = menu.addAction(tr("合并到下一轨"));
+        down = menu.addAction(tr("移动到下一轨"));
         down->setEnabled(downOk);
     }
 
@@ -1288,9 +1506,24 @@ void EditorTimelineWidget::contextMenuEvent(QContextMenuEvent *e)
     else if (act == backAll) { trackSelectAll(e->pos(), true); }
     else if (act == fwd) { trackSelectAt(e->pos(), idx, false); }
     else if (act == fwdAll) { trackSelectAll(e->pos(), false); }
-    else if (act == up && upOk) mergeTrackInto(src, src - 1);
-    else if (act == down && downOk) mergeTrackInto(src, src + 1);
+    else if (act == up && upOk) moveClipToLane(idx, -1);
+    else if (act == down && downOk) moveClipToLane(idx, 1);
     update();
+}
+
+// shared by the header double-click and the context menu
+void EditorTimelineWidget::renameLaneDialog(const int lane)
+{
+    if (lane < 0 || lane >= m_tracks.size()) { return; }
+    bool ok = false;
+    const QString name = QInputDialog::getText(
+                this, tr("重命名轨道"), tr("轨道名称:"),
+                QLineEdit::Normal, m_tracks[lane].name, &ok);
+    if (ok && !name.trimmed().isEmpty()) {
+        m_tracks[lane].name = name.trimmed();
+        emit trackRenameRequested(lane, m_tracks[lane].name);
+        update();
+    }
 }
 
 // direction-only variant for the context menu (no clip hit needed):
@@ -1312,106 +1545,28 @@ void EditorTimelineWidget::trackSelectAll(const QPoint &pos,
             .arg(picked.size()));
 }
 
-void EditorTimelineWidget::mergeTrackInto(const int src, const int dst)
+// context-menu lane hop: same-type neighbour lane only, refused on
+// collision or a locked target (the writeback turns it into a plain
+// trackId change, no row surgery)
+void EditorTimelineWidget::moveClipToLane(const int clipIdx, const int dir)
 {
-    if (src == dst) return;
-    if (src < 0 || src >= m_tracks.size()) return;
-    if (dst < 0 || dst >= m_tracks.size()) return;
-    if (m_tracks[src].type != m_tracks[dst].type) return;
-    const QString srcName = m_tracks[src].name;
-    const QString dstName = m_tracks[dst].name;
-    // overlaps are allowed on purpose: the user resolves them by
-    // dragging / trimming afterwards
-    for (Clip &c : m_clips) {
-        if (c.track == src) c.track = dst;
+    if (clipIdx < 0 || clipIdx >= m_clips.size()) { return; }
+    const Clip c = m_clips.value(clipIdx);
+    int dst = c.track + dir;
+    if (dst < 0 || dst >= m_tracks.size()) { return; }
+    if (m_tracks[dst].type != c.type) { return; }
+    if (m_tracks[dst].locked) {
+        emitLog(QStringLiteral("目标轨道已锁定"));
+        return;
     }
-    compactLanes();
-    emitLog(QStringLiteral("merge track %1 -> %2").arg(srcName, dstName));
+    if (overlapsOutsideMoving(clipIdx, dst, c.start, c.length)) {
+        emitLog(QStringLiteral("目标位置与现有块重叠"));
+        return;
+    }
+    m_clips[clipIdx].track = dst;
+    emitLog(QStringLiteral("移动块 \"%1\" 到 %2")
+            .arg(c.name, m_tracks[dst].name));
     emit trackLayoutChanged();
-}
-
-void EditorTimelineWidget::compactLanes()
-{
-    m_dragTempLane = -1;
-    const int oldVideo = videoTrackCount();
-    const int oldAudio = m_tracks.size() - oldVideo;
-    QVector<int> vUsed, aUsed;
-    for (const Clip &c : m_clips) {
-        if (c.track < oldVideo) {
-            if (!vUsed.contains(c.track)) vUsed.append(c.track);
-        } else {
-            const int lane = c.track - oldVideo;
-            if (!aUsed.contains(lane)) aUsed.append(lane);
-        }
-    }
-    // distinct lanes within range: full count means no gap to close
-    if (vUsed.size() == oldVideo && aUsed.size() == oldAudio) return;
-    std::sort(vUsed.begin(), vUsed.end());
-    std::sort(aUsed.begin(), aUsed.end());
-    QHash<int, int> vMap, aMap;
-    for (int i = 0; i < vUsed.size(); ++i) vMap.insert(vUsed[i], i);
-    for (int i = 0; i < aUsed.size(); ++i) aMap.insert(aUsed[i], i);
-    for (Clip &c : m_clips) {
-        if (c.track < oldVideo) c.track = vMap.value(c.track, 0);
-        else c.track = vUsed.size() + aMap.value(c.track - oldVideo, 0);
-    }
-    rebuildTracks(vUsed.size(), aUsed.size());
-    updateScrollBar();
-    update();
-}
-
-int EditorTimelineWidget::takeDragTempLane(const ClipType type, const int y)
-{
-    if (m_dragTempLane >= 0 && m_dragTempLane < m_tracks.size()
-            && m_tracks[m_dragTempLane].type == type) {
-        return m_dragTempLane;
-    }
-    int top, bottom;
-    if (type == ClipType::Video) {
-        top = 0;
-        bottom = videoTrackCount();
-    } else {
-        top = videoTrackCount();
-        bottom = m_tracks.size();
-    }
-    // cursor above the type group -> new lane on top, else at the bottom
-    const int idx = (bottom > top && y >= trackY(top)) ? bottom : top;
-    m_tracks.insert(idx, {QString(),
-                          type == ClipType::Video ? 60 : 52,
-                          type});
-    for (Clip &cc : m_clips) {
-        if (cc.track >= idx) { cc.track += 1; }
-    }
-    m_dragTempLane = idx;
-    renameLanes();
-    updateScrollBar();
-    update();
-    return idx;
-}
-
-int EditorTimelineWidget::dropDragTempLane()
-{
-    const int idx = m_dragTempLane;
-    m_dragTempLane = -1;
-    if (idx < 0 || idx >= m_tracks.size()) { return -1; }
-    // only ever occupied by the dragged clip itself
-    m_tracks.removeAt(idx);
-    for (Clip &cc : m_clips) {
-        if (cc.track > idx) { cc.track -= 1; }
-    }
-    renameLanes();
-    updateScrollBar();
-    update();
-    return idx;
-}
-
-void EditorTimelineWidget::renameLanes()
-{
-    const int v = videoTrackCount();
-    for (int i = 0; i < m_tracks.size(); ++i) {
-        if (i < v) { m_tracks[i].name = QStringLiteral("V%1").arg(v - i); }
-        else { m_tracks[i].name = QStringLiteral("A%1").arg(m_tracks.size() - i); }
-    }
 }
 
 void EditorTimelineWidget::setClipThumbnail(const int clipId, const QImage &image)
@@ -1523,22 +1678,6 @@ QList<int> EditorTimelineWidget::selectedClipIds() const
 void EditorTimelineWidget::setMarkers(const QVector<QPair<int, QString>> &markers)
 {
     m_markers = markers;
-    update();
-}
-
-void EditorTimelineWidget::setTrackMuted(const int trackIdx, const bool muted)
-{
-    if (trackIdx < 0 || trackIdx >= m_tracks.size()) { return; }
-    if (m_tracks[trackIdx].muted == muted) { return; }
-    m_tracks[trackIdx].muted = muted;
-    update();
-}
-
-void EditorTimelineWidget::setTrackName(const int trackIdx, const QString &name)
-{
-    if (trackIdx < 0 || trackIdx >= m_tracks.size()) { return; }
-    if (m_tracks[trackIdx].name == name) { return; }
-    m_tracks[trackIdx].name = name;
     update();
 }
 
