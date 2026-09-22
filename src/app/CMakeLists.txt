@@ -20,7 +20,7 @@
 #
 
 cmake_minimum_required(VERSION 3.12)
-project(friction LANGUAGES CXX)
+project(dreamcut LANGUAGES CXX)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
 
@@ -191,17 +191,17 @@ endif()
 if(UNIX AND NOT APPLE)
     include_directories(${GPERF_INCLUDE_DIRS})
     configure_file(
-        app.desktop.in
+        dreamcut.desktop.in
         ${CMAKE_BINARY_DIR}/${PROJECT_FREEDESKTOP}.desktop
         @ONLY
     )
     configure_file(
-        meta.xml.in
+        dreamcut.meta.xml.in
         ${CMAKE_BINARY_DIR}/meta.xml
         @ONLY
     )
     configure_file(
-        appdata.xml.in
+        dreamcut.appdata.xml.in
         ${CMAKE_BINARY_DIR}/appdata.xml
         @ONLY
     )
@@ -364,15 +364,15 @@ add_executable(
     ${WINDOWS_RESOURCE_FILE}
 )
 
-add_executable(friction_effects_test effects_unittest.cpp ${RESOURCES})
+add_executable(dreamcut_effects_test effects_unittest.cpp ${RESOURCES})
 target_link_directories(
-    friction_effects_test
+    dreamcut_effects_test
     PRIVATE
     ${FFMPEG_LIBRARIES_DIRS}
     ${SKIA_LIBRARIES_DIRS}
 )
 target_link_libraries(
-    friction_effects_test
+    dreamcut_effects_test
     PRIVATE
     ${PROJECT_NAME}core
     ${PROJECT_NAME}ui
@@ -384,23 +384,23 @@ target_link_libraries(
 if(WIN32)
     # headless reproduction harness for the project-switch heap corruption
     # (development tool only, never installed or deployed)
-    add_executable(friction_harness harness.cpp memoryhandler.cpp memorychecker.cpp)
-    set_target_properties(friction_harness PROPERTIES WIN32_EXECUTABLE FALSE)
+    add_executable(dreamcut_harness harness.cpp memoryhandler.cpp memorychecker.cpp)
+    set_target_properties(dreamcut_harness PROPERTIES WIN32_EXECUTABLE FALSE)
     if(MSVC)
         # generate a linker map so the VEH crash reporter output can be
         # symbolized without any debugger installed
-        target_link_options(friction_harness PRIVATE "/DEBUG" "/MAP")
+        target_link_options(dreamcut_harness PRIVATE "/DEBUG" "/MAP")
     endif()
 
     target_link_directories(
-        friction_harness
+        dreamcut_harness
         PRIVATE
         ${FFMPEG_LIBRARIES_DIRS}
         ${SKIA_LIBRARIES_DIRS}
     )
 
     target_link_libraries(
-        friction_harness
+        dreamcut_harness
         PRIVATE
         ${PROJECT_NAME}core
         ${QT_LIBRARIES}
@@ -489,7 +489,7 @@ if(${SKIA_USE_SYSTEM_LIBS} AND UNIX)
         ${ZLIB_LIBRARIES}
     )
     target_link_libraries(
-        friction_effects_test
+        dreamcut_effects_test
         PRIVATE
         ${EXPAT_LIBRARIES}
         ${FREETYPE_LIBRARIES}
@@ -507,14 +507,14 @@ if(${SKIA_STATIC})
     if(UNIX AND NOT APPLE)
         if(${SKIA_USE_EGL})
             target_link_libraries(${PROJECT_NAME} PRIVATE ${EGL_LIBRARIES} ${GLES_LIBRARIES} ${FONTCONFIG_LIBRARIES} pthread dl)
-            target_link_libraries(friction_effects_test PRIVATE ${EGL_LIBRARIES} ${GLES_LIBRARIES} ${FONTCONFIG_LIBRARIES} pthread dl)
+            target_link_libraries(dreamcut_effects_test PRIVATE ${EGL_LIBRARIES} ${GLES_LIBRARIES} ${FONTCONFIG_LIBRARIES} pthread dl)
         else()
             target_link_libraries(${PROJECT_NAME} PRIVATE OpenGL::GLX ${FONTCONFIG_LIBRARIES} pthread dl)
-            target_link_libraries(friction_effects_test PRIVATE OpenGL::GLX ${FONTCONFIG_LIBRARIES} pthread dl)
+            target_link_libraries(dreamcut_effects_test PRIVATE OpenGL::GLX ${FONTCONFIG_LIBRARIES} pthread dl)
         endif()
         if(NOT ${SKIA_USE_SYSTEM_LIBS})
             target_link_libraries(${PROJECT_NAME} PRIVATE ${FONTCONFIG_LIBRARIES})
-            target_link_libraries(friction_effects_test PRIVATE ${FONTCONFIG_LIBRARIES})
+            target_link_libraries(dreamcut_effects_test PRIVATE ${FONTCONFIG_LIBRARIES})
         endif()
     endif()
     if(APPLE)
@@ -528,7 +528,7 @@ if(${SKIA_STATIC})
             "-framework ImageIO"
         )
         target_link_libraries(
-            friction_effects_test
+            dreamcut_effects_test
             PRIVATE
             "-framework CoreFoundation"
             "-framework CoreGraphics"
@@ -541,7 +541,7 @@ endif()
 
 if(UNIX AND NOT APPLE)
     target_link_libraries(${PROJECT_NAME} PRIVATE pthread dl)
-    target_link_libraries(friction_effects_test PRIVATE pthread dl)
+    target_link_libraries(dreamcut_effects_test PRIVATE pthread dl)
 endif()
 
 if(APPLE)

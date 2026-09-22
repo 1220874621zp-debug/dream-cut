@@ -62,7 +62,7 @@ bool isLayersExt(const QString &ext) {
 }
 
 bool isEvExt(const QString &extension) {
-    return (extension.toLower() == "friction" || extension.toLower() == "ev");
+    return (extension.toLower() == "dreamcut" || extension.toLower() == "ev");
 }
 
 bool hasVideoExt(const QString &filename) {

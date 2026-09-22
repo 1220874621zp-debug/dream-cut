@@ -1110,7 +1110,7 @@ ThemeIconProvider::ThemeIconProvider()
 QIcon ThemeIconProvider::icon(const QFileInfo &info) const
 {
     const QString name = info.fileName().toLower();
-    if (name.endsWith(".friction")) { return mIcon; }
+    if (name.endsWith(".dreamcut")) { return mIcon; }
     const QByteArray suffix = info.suffix().toLower().toUtf8();
     if (!suffix.isEmpty() && isThumbFormat(suffix)) {
         auto *store = FileThumbStore::instance();

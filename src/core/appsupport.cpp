@@ -188,7 +188,7 @@ AppSupport::AppSupport(QObject *parent)
 void AppSupport::clearSettings(const QString &group)
 {
     if (AppSupport::isAppPortable()) {
-        QSettings settings(QString("%1/friction.conf").arg(getAppConfigPath()),
+        QSettings settings(QString("%1/dreamcut.conf").arg(getAppConfigPath()),
                            QSettings::IniFormat);
         clearSettings(&settings, group);
         return;
@@ -212,7 +212,7 @@ QVariant AppSupport::getSettings(const QString &group,
                                  const QString &org)
 {
     if (AppSupport::isAppPortable()) {
-        QSettings settings(QString("%1/friction.conf").arg(getAppConfigPath()),
+        QSettings settings(QString("%1/dreamcut.conf").arg(getAppConfigPath()),
                            QSettings::IniFormat);
         return getSettings(&settings, group, key, fallback);
     }
@@ -245,7 +245,7 @@ void AppSupport::setSettings(const QString &group,
                              const QString &org)
 {
     if (AppSupport::isAppPortable()) {
-        QSettings settings(QString("%1/friction.conf").arg(getAppConfigPath()),
+        QSettings settings(QString("%1/dreamcut.conf").arg(getAppConfigPath()),
                            QSettings::IniFormat);
         setSettings(&settings, group, key, value, append);
         return;
@@ -287,22 +287,22 @@ void AppSupport::setSettings(QSettings *settings,
 
 const QString AppSupport::getAppName()
 {
-    return QString::fromUtf8("friction");
+    return QString::fromUtf8("dreamcut");
 }
 
 const QString AppSupport::getAppDisplayName()
 {
-    return QString::fromUtf8("Friction");
+    return QString::fromUtf8("Dream Cut");
 }
 
 const QString AppSupport::getAppDomain()
 {
-    return QString::fromUtf8("friction.graphics");
+    return QString::fromUtf8("dreamcut.local");
 }
 
 const QString AppSupport::getAppID()
 {
-    return QString::fromUtf8("graphics.friction.Friction");
+    return QString::fromUtf8("graphics.dreamcut.DreamCut");
 }
 
 const QString AppSupport::getAppUrl()
@@ -1276,12 +1276,12 @@ bool AppSupport::hasXDGDesktopIntegration()
         !path.startsWith(QDir::homePath())) { path = QString("%1/.local/share").arg(QDir::homePath()); }
 
     QStringList files;
-    QString desktop = "applications/graphics.friction.Friction.desktop";
+    QString desktop = "applications/graphics.dreamcut.DreamCut.desktop";
     files << desktop;
-    files << "mime/packages/graphics.friction.Friction.xml";
-    files << "icons/hicolor/scalable/apps/graphics.friction.Friction.svg";
-    files << "icons/hicolor/256x256/apps/graphics.friction.Friction.png";
-    files << "icons/hicolor/scalable/mimetypes/application-x-graphics.friction.Friction.svg";
+    files << "mime/packages/graphics.dreamcut.DreamCut.xml";
+    files << "icons/hicolor/scalable/apps/graphics.dreamcut.DreamCut.svg";
+    files << "icons/hicolor/256x256/apps/graphics.dreamcut.DreamCut.png";
+    files << "icons/hicolor/scalable/mimetypes/application-x-graphics.dreamcut.DreamCut.svg";
     files << "icons/hicolor/256x256/mimetypes/application-x-graphics.friction.Friction.png";
 
     for (const auto &file : files) {
@@ -1460,10 +1460,10 @@ bool AppSupport::removeXDGDesktopIntegration()
 
     QStringList files;
     files << "applications/graphics.friction.Friction.desktop";
-    files << "mime/packages/graphics.friction.Friction.xml";
-    files << "icons/hicolor/scalable/apps/graphics.friction.Friction.svg";
-    files << "icons/hicolor/256x256/apps/graphics.friction.Friction.png";
-    files << "icons/hicolor/scalable/mimetypes/application-x-graphics.friction.Friction.svg";
+    files << "mime/packages/graphics.dreamcut.DreamCut.xml";
+    files << "icons/hicolor/scalable/apps/graphics.dreamcut.DreamCut.svg";
+    files << "icons/hicolor/256x256/apps/graphics.dreamcut.DreamCut.png";
+    files << "icons/hicolor/scalable/mimetypes/application-x-graphics.dreamcut.DreamCut.svg";
     files << "icons/hicolor/256x256/mimetypes/application-x-graphics.friction.Friction.png";
 
     for (const auto &file : files) {

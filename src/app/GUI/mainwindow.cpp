@@ -685,7 +685,7 @@ void MainWindow::askRestoreDefaultUi()
     const auto result = QMessageBox::question(this,
                                               tr("Restore default user interface?"),
                                               tr("Are you sure you want to restore default user interface? "
-                                                 "You must restart Friction to apply."));
+                                                 "You must restart Dream Cut to apply."));
     if (result != QMessageBox::Yes) { return; }
     eSettings::sInstance->fRestoreDefaultUi = true;
 }
@@ -1847,11 +1847,11 @@ void MainWindow::openFile()
         disable();
         const QString defPath = mDocument.fEvFile.isEmpty() ? getLastOpenDir() : mDocument.fEvFile;
         const QString title = tr("Open File", "OpenDialog_Title");
-        const QString files = tr("Friction Files %1", "OpenDialog_FileType");
+        const QString files = tr("Dream Cut Files %1", "OpenDialog_FileType");
         const QString openPath = AppSupport::getOpenFile(this,
                                                          title,
                                                          defPath,
-                                                         files.arg("(*.friction)"));
+                                                         files.arg("(*.dreamcut)"));
         if (!openPath.isEmpty()) { openFile(openPath); }
         enable();
     }
@@ -1863,7 +1863,7 @@ void MainWindow::openFile(const QString& openPath)
     try {
         QFileInfo fi(openPath);
         const QString suffix = fi.suffix();
-        if (suffix == "friction") {
+        if (suffix == "dreamcut") {
             loadEVFile(openPath);
         } /*else if (suffix == "xev") {
             loadXevFile(openPath);
@@ -1904,7 +1904,7 @@ void MainWindow::saveFile(const QString& path,
     try {
         QFileInfo fi(path);
         const QString suffix = fi.suffix();
-        if (suffix == "friction") {
+        if (suffix == "dreamcut") {
             saveToFile(path);
         } /*else if (suffix == "xev") {
             saveToFileXEV(path);
@@ -1929,12 +1929,12 @@ void MainWindow::saveFileAs(const bool setPath)
     const QString defPath = mDocument.fEvFile.isEmpty() ? getLastSaveDir() : mDocument.fEvFile;
 
     const QString title = tr("Save File", "SaveDialog_Title");
-    const QString fileType = tr("Friction Files %1", "SaveDialog_FileType");
+    const QString fileType = tr("Dream Cut Files %1", "SaveDialog_FileType");
     QString saveAs = AppSupport::getSaveFile(this,
                                              title,
                                              defPath,
-                                             fileType.arg("(*.friction)"),
-                                             "friction");
+                                             fileType.arg("(*.dreamcut)"),
+                                             "dreamcut");
     enableEventFilter();
     if (!saveAs.isEmpty()) { saveFile(saveAs, setPath); }
 }
@@ -1944,7 +1944,7 @@ void MainWindow::saveBackup()
     const QString defPath = mDocument.fEvFile;
     QFileInfo defInfo(defPath);
     if (defPath.isEmpty() || defInfo.isDir())  { return; }
-    const QString backupPath = defPath + "_backup/backup_%1.friction";
+    const QString backupPath = defPath + "_backup/backup_%1.dreamcut";
     int id = 1;
     QFile backupFile(backupPath.arg(id));
     while (backupFile.exists()) {
@@ -2041,7 +2041,7 @@ void MainWindow::importFile()
 
     const QString title = tr("Import File(s)", "ImportDialog_Title");
     const QString fileType = tr("Files %1", "ImportDialog_FileTypes");
-    const QString fileTypes = "(*.friction " +
+    const QString fileTypes = "(*.dreamcut " +
             FileExtensions::videoFilters() +
             FileExtensions::imageFilters() +
             FileExtensions::soundFilters() + ")";

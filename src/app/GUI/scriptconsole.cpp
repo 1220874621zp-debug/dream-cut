@@ -162,7 +162,7 @@ ScriptConsoleDock::ScriptConsoleDock(QWidget * const parent)
     // REPL engine with the full plugin API
     mHost = new Friction::Core::JsHost(this);
 
-    appendOutput(tr("Friction JS console ready. Try:")
+    appendOutput(tr("Dream Cut JS console ready. Try:")
                  + QStringLiteral("\n  app.activeScene")
                  + QStringLiteral("\n  scene.numLayers")
                  + QStringLiteral("\n  layer = scene.layer(1)"));

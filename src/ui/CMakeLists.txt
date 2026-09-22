@@ -18,7 +18,7 @@
 #
 
 cmake_minimum_required(VERSION 3.12)
-project(frictionui LANGUAGES CXX)
+project(dreamcutui LANGUAGES CXX)
 
 if(APPLE)
     enable_language(OBJCXX)
@@ -254,7 +254,7 @@ endif()
 target_link_libraries(
     ${PROJECT_NAME}
     PRIVATE
-    frictioncore
+    dreamcutcore
     ${QT_LIBRARIES}
     ${SKIA_LIBRARIES}
     ${FFMPEG_LIBRARIES}

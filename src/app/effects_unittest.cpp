@@ -528,9 +528,9 @@ int main(int argc, char *argv[])
     // Test 4: Chinese translation resource load test
     runTest("Test 4: Chinese (zh_CN) Translation Loading", [&]() {
         QTranslator translator;
-        const bool loaded = translator.load(":/translations/friction_zh_CN.qm");
+        const bool loaded = translator.load(":/translations/dreamcut_zh_CN.qm");
         if (!loaded) {
-            throw std::runtime_error("Failed to load :/translations/friction_zh_CN.qm resource");
+            throw std::runtime_error("Failed to load :/translations/dreamcut_zh_CN.qm resource");
         }
     });
 

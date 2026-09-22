@@ -393,7 +393,7 @@ int main(int argc, char *argv[])
                     QStringLiteral("ui"), QStringLiteral("language"),
                     QStringLiteral("zh_CN")).toString();
         const bool isChinese = lang == QStringLiteral("zh_CN");
-        const bool loaded = appTranslator.load(":/translations/friction_zh_CN.qm");
+        const bool loaded = appTranslator.load(":/translations/dreamcut_zh_CN.qm");
         if (isChinese && loaded) {
             QCoreApplication::installTranslator(&appTranslator);
         }

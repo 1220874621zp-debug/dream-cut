@@ -477,7 +477,7 @@ static int runTrackMatteTest(Document& document, TaskScheduler& tasks) {
         fflush(stderr);
     }
 
-    // synthetic "遮罩.friction": mirror the user's saved project shape -
+    // synthetic "遮罩.dreamcut": mirror the user's saved project shape -
     // image inside a mask-host layer group, rect matte, preserve-alpha
     // toggles, visibility flips, GUI-path renders - and check the
     // matte attach verdicts and outcomes
@@ -994,7 +994,7 @@ int main(int argc, char *argv[]) {
         return runSynthetic(document, taskScheduler, cycles);
     }
     if(args.count() < 2) {
-        fprintf(stderr, "usage: friction_harness A.friction B.friction\n");
+        fprintf(stderr, "usage: dreamcut_harness A.dreamcut B.dreamcut\n");
         return 2;
     }
 

@@ -28,7 +28,7 @@ using namespace Friction::Ui;
 QuickSetupPresetsPage::QuickSetupPresetsPage(QWidget *parent)
     : WizardPage(parent)
 {
-    setTitle(tr("Friction Presets"));
+    setTitle(tr("Dream Cut Presets"));
     setSubTitle(tr("Select the presets you want installed by default."));
 
     const auto layout = new QFormLayout(this);

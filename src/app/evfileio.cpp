@@ -96,7 +96,7 @@ void MainWindow::loadEVFile(const QString &path)
                                          tr("Old project file detected, "
                                             "note that your project might behave differently. "
                                             "Also note that if you save this project you will not be able to open "
-                                            "it in an older version of Friction anymore."),
+                                            "it in an older version of Dream Cut anymore."),
                                          "ask",
                                          "openOldProject",
                                          QMessageBox::Icon::Information,

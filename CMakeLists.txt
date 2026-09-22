@@ -18,7 +18,7 @@
 #
 
 cmake_minimum_required(VERSION 3.12)
-project(friction.graphics)
+project(dreamcut)
 
 option(BUILD_SKIA "Build skia" ON)
 
@@ -69,5 +69,5 @@ add_subdirectory(src/ui)
 add_subdirectory(src/app)
 
 if(${BUILD_SKIA})
-    add_dependencies(frictioncore skialib)
+    add_dependencies(dreamcutcore skialib)
 endif()

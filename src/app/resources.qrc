@@ -44,7 +44,7 @@
     </qresource>
 
     <qresource prefix="/translations">
-        <file alias="friction_zh_CN.qm">translations/friction_zh_CN.qm</file>
+        <file alias="dreamcut_zh_CN.qm">translations/dreamcut_zh_CN.qm</file>
     </qresource>
     <qresource prefix="/">
         <file>presets/render/008-friction-preset-exr.conf</file>
@@ -57,7 +57,7 @@
         <file>presets/render/001-friction-preset-mp4-h264.conf</file>
         <file>xdg/friction.xml</file>
         <file>xdg/friction.desktop</file>
-        <file>icons/hicolor/scalable/apps/graphics.friction.Friction.svg</file>
+        <file>icons/hicolor/scalable/apps/graphics.dreamcut.DreamCut.svg</file>
         <file>icons/friction-splash.png</file>
     </qresource>
 </RCC>

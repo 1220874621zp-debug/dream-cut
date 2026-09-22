@@ -1,10 +1,10 @@
-#define MyAppName "Friction"
+#define MyAppName "Dream Cut"
 #define MyAppVersion "@PROJECT_VERSION@"
-#define MyAppPublisher "Friction"
+#define MyAppPublisher "Dream Cut"
 #define MyAppURL "https://friction.graphics"
-#define MyAppExeName "friction.exe"
+#define MyAppExeName "dreamcut.exe"
 #define MyAppAssocName MyAppName + " Project"
-#define MyAppAssocExt ".friction"
+#define MyAppAssocExt ".dreamcut"
 #define MyAppAssocKey StringChange(MyAppAssocName, " ", "") + MyAppAssocExt
 
 [Setup]
@@ -21,36 +21,36 @@ DisableProgramGroupPage=yes
 LicenseFile=LICENSE.md
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=setup
-OutputBaseFilename=friction
-SetupIconFile=friction.ico
+OutputBaseFilename=dreamcut
+SetupIconFile=dreamcut.ico
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
-WizardSmallImageFile=friction.bmp
+WizardSmallImageFile=dreamcut.bmp
 WizardImageStretch=yes
 
 [Components]
-Name: "friction"; Description: "Friction"; Types: full compact custom; Flags: fixed
+Name: "dreamcut"; Description: "Dream Cut"; Types: full compact custom; Flags: fixed
 Name: "ffmpeg"; Description: "FFmpeg"; Types: full compact custom; Flags: fixed
 Name: "qt"; Description: "Qt"; Types: full compact custom; Flags: fixed
 
 [Files]
-Source: "{#MyAppExeName}"; DestDir: "{app}"; Components: friction ; Flags: ignoreversion
-Source: "frictioncore.dll"; DestDir: "{app}"; Components: friction ; Flags: ignoreversion
-Source: "frictionui.dll"; DestDir: "{app}"; Components: friction ; Flags: ignoreversion
-Source: "skia.dll"; DestDir: "{app}"; Components: friction ; Flags: ignoreversion
+Source: "{#MyAppExeName}"; DestDir: "{app}"; Components: dreamcut ; Flags: ignoreversion
+Source: "frictioncore.dll"; DestDir: "{app}"; Components: dreamcut ; Flags: ignoreversion
+Source: "frictionui.dll"; DestDir: "{app}"; Components: dreamcut ; Flags: ignoreversion
+Source: "skia.dll"; DestDir: "{app}"; Components: dreamcut ; Flags: ignoreversion
 
 ; VC++ runtime, app-local — clean machines without the VC++ redistributable
 ; cannot start the app otherwise (msvcp140/vcruntime140 are hard imports)
-Source: "msvcp140.dll"; DestDir: "{app}"; Components: friction ; Flags: ignoreversion
-Source: "msvcp140_1.dll"; DestDir: "{app}"; Components: friction ; Flags: ignoreversion
-Source: "vcruntime140.dll"; DestDir: "{app}"; Components: friction ; Flags: ignoreversion
-Source: "vcruntime140_1.dll"; DestDir: "{app}"; Components: friction ; Flags: ignoreversion
+Source: "msvcp140.dll"; DestDir: "{app}"; Components: dreamcut ; Flags: ignoreversion
+Source: "msvcp140_1.dll"; DestDir: "{app}"; Components: dreamcut ; Flags: ignoreversion
+Source: "vcruntime140.dll"; DestDir: "{app}"; Components: dreamcut ; Flags: ignoreversion
+Source: "vcruntime140_1.dll"; DestDir: "{app}"; Components: dreamcut ; Flags: ignoreversion
 
 ; runtime-loaded (QLibrary) features: AI depth estimation + vector trace
-Source: "onnxruntime.dll"; DestDir: "{app}"; Components: friction ; Flags: ignoreversion skipifsourcedoesntexist
-Source: "vtracer.dll"; DestDir: "{app}"; Components: friction ; Flags: ignoreversion skipifsourcedoesntexist
-Source: "frictionskottie.dll"; DestDir: "{app}"; Components: friction ; Flags: ignoreversion skipifsourcedoesntexist
+Source: "onnxruntime.dll"; DestDir: "{app}"; Components: dreamcut ; Flags: ignoreversion skipifsourcedoesntexist
+Source: "vtracer.dll"; DestDir: "{app}"; Components: dreamcut ; Flags: ignoreversion skipifsourcedoesntexist
+Source: "frictionskottie.dll"; DestDir: "{app}"; Components: dreamcut ; Flags: ignoreversion skipifsourcedoesntexist
 
 Source: "av*.dll"; DestDir: "{app}"; Components: ffmpeg ; Flags: ignoreversion skipifsourcedoesntexist
 Source: "sw*.dll"; DestDir: "{app}"; Components: ffmpeg ; Flags: ignoreversion skipifsourcedoesntexist
