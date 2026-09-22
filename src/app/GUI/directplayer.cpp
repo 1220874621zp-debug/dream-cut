@@ -42,7 +42,16 @@ bool DirectPlayer::play()
     const auto fIn = scene->getFrameIn();
     const auto fOut = scene->getFrameOut();
     const int minFrame = fIn.enabled ? fIn.frame : scene->getMinFrame();
-    const int maxFrame = fOut.enabled ? fOut.frame : scene->getMaxFrame();
+    // content-aware end: the scene range may lag behind the clips
+    // (default range + declined adjust-scene) - a playhead on the far
+    // content would otherwise look "out of range" and restart from 0
+    int contentEnd = scene->getMaxFrame();
+    for (const auto &c : scene->getContained()) {
+        if (!c) { continue; }
+        const auto dur = c->getDurationRectangle();
+        if (dur) { contentEnd = qMax(contentEnd, dur->getMaxAbsFrame() + 1); }
+    }
+    const int maxFrame = fOut.enabled ? fOut.frame : contentEnd;
     int startFrame = scene->anim_getCurrentAbsFrame();
     if (startFrame < minFrame || startFrame > maxFrame) {
         // out of the play range: restart from the in point (NLE habit)

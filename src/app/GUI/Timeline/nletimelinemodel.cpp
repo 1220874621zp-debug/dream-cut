@@ -1375,6 +1375,25 @@ void NleTimelineModel::refreshFromDocument()
            scene ? scene->prp_getName().toUtf8().constData() : "-",
            items.size(), trackCount, mClips.size());
 
+    // NLE semantics: the scene timeline must cover the content. The
+    // scene keeps its default range when the user declines the
+    // adjust-scene dialog, and a playhead beyond scene max makes
+    // DirectPlayer::play restart from the in point ("always plays
+    // from the beginning"). Grow the range to the last clip's end
+    // (UI-state write: no undo entry, refresh-guarded)
+    if (scene && !mClips.isEmpty()) {
+        int contentEnd = 0;
+        for (const auto &c : mClips) {
+            contentEnd = qMax(contentEnd, c.start + c.duration);
+        }
+        const auto range = scene->getFrameRange();
+        if (contentEnd > range.fMax) {
+            mInWriteback = true;
+            scene->setFrameRange({range.fMin, contentEnd}, false);
+            mInWriteback = false;
+        }
+    }
+
     emit modelChanged();
     emit guidesChanged();
     if (scene) { emit playheadFrameChanged(scene->anim_getCurrentAbsFrame()); }
