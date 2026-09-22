@@ -37,7 +37,6 @@ class FileCacheHandler;
 // AE-like project panel: a single tree managing both the scenes
 // (compositions) and the imported file assets of the project.
 // Dragging a scene onto the active canvas creates an
-// InternalLinkCanvas (scene link), dragging a file asset out
 // imports/places it. User folders group scenes and file assets
 // (context menu "move to folder"); the folder layout persists per
 // project file via settings (scenes matched by name, files by path).
@@ -63,7 +62,6 @@ private:
     void rebuild();
     void updateActiveMark();
     void switchToScene(Canvas* const scene);
-    void linkToActiveScene(Canvas* const scene);
     Canvas* sceneAt(QTreeWidgetItem* const item) const;
     FileCacheHandler* fileAt(QTreeWidgetItem* const item) const;
     Canvas* activeScene() const;

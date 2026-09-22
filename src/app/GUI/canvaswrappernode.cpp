@@ -25,7 +25,6 @@
 
 #include "canvaswrappernode.h"
 #include "widgets/scenechooser.h"
-#include "scenenavigatorbar.h"
 #include "mainwindow.h"
 #include "Private/document.h"
 
@@ -40,12 +39,6 @@ public:
         connect(window, &CanvasWindow::currentSceneChanged,
                 mSceneMenu, qOverload<Canvas*>(&SceneChooser::setCurrentScene));
 
-        // AE-style breadcrumb + nested-scene chips next to the
-        // dropdown; nested (linked) scenes are one click away
-        mNavigator = new SceneNavigatorBar(mDocument, this);
-        addWidget(mNavigator);
-        connect(mNavigator, &SceneNavigatorBar::sceneRequested,
-                this, &CanvasWrapperMenuBar::requestSceneSwitch);
     }
 
     // initial binding only (ctor / project load)
@@ -83,7 +76,6 @@ private:
     Document& mDocument;
     CanvasWindow* const mWindow;
     SceneChooser * mSceneMenu;
-    SceneNavigatorBar * mNavigator = nullptr;
     Canvas * mCurrentScene = nullptr;
     std::map<Canvas*, QAction*> mSceneToAct;
 };

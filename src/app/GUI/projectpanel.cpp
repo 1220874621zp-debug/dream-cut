@@ -547,17 +547,6 @@ void ProjectPanel::switchToScene(Canvas* const scene)
     lay->switchToScene(scene);
 }
 
-void ProjectPanel::linkToActiveScene(Canvas* const scene)
-{
-    const auto active = activeScene();
-    if (!scene || !active || scene == active) { return; }
-    // mirrors the canvas right-click "Link Scene" action
-    const auto newLink = scene->createLink(false);
-    active->getCurrentGroup()->addContained(newLink);
-    newLink->centerPivotPosition();
-    Document::sInstance->actionFinished();
-}
-
 void ProjectPanel::showContextMenu(const QPoint& pos)
 {
     const auto item = mTree->itemAt(pos);
@@ -680,11 +669,6 @@ void ProjectPanel::showContextMenu(const QPoint& pos)
                        tr("打开场景"),
                        this, [this, scene]() {
             switchToScene(scene);
-        })->setEnabled(scene != active);
-        menu.addAction(QIcon::fromTheme("linked"),
-                       tr("链接到当前画布"),
-                       this, [this, scene]() {
-            linkToActiveScene(scene);
         })->setEnabled(scene != active);
         menu.addAction(QIcon::fromTheme("sequence"),
                        tr("场景属性..."),

@@ -66,7 +66,6 @@
 #include "GUI/dialogsinterface.h"
 #include "svgexporter.h"
 #include "svgexporthelpers.h"
-#include "internallinkcanvas.h"
 
 #include <QInputDialog>
 #include <QMessageBox>

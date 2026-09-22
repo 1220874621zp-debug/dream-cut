@@ -57,13 +57,6 @@ Actions::Actions(Document &document) : mDocument(document) {
         const auto deleteSceneActionExec = [this]() {
             if (!mActiveScene) { return false; }
             const auto sceneName = mActiveScene->prp_getName();
-            const bool isLinked = mDocument.sceneIsLinked(mActiveScene->ref<Canvas>());
-            if (isLinked) {
-                QMessageBox::information(nullptr,
-                                         tr("Scene is linked"),
-                                         tr("Can't delete %1, it's linked in a different scene.").arg(sceneName));
-                return false;
-            }
             const int buttonId = QMessageBox::question(nullptr,
                                                        tr("Delete %1").arg(sceneName),
                                                        tr("Are you sure you want to delete "

@@ -103,25 +103,6 @@ void Canvas::addActionsToMenu(QMenu *const menu)
         pasteAct->setShortcut(QStringLiteral("Ctrl+V"));
     }
 
-    const auto sceneIcon = QIcon::fromTheme("sequence");
-    QMenu * const linkCanvasMenu = menu->addMenu(sceneIcon,
-                                                 tr("Link Scene"));
-    for (const auto& canvas : mDocument.fScenes) {
-        const auto slot = [this, canvas]() {
-            auto newLink = canvas->createLink(false);
-            mCurrentContainer->addContained(newLink);
-            newLink->centerPivotPosition();
-        };
-        QAction * const action = linkCanvasMenu->addAction(sceneIcon,
-                                                           canvas->prp_getName(),
-                                                           this,
-                                                           slot);
-        if (canvas == this) {
-            action->setEnabled(false);
-            action->setVisible(false);
-        }
-    }
-
     menu->addAction(QIcon::fromTheme("duplicate"),
                     tr("Duplicate Scene"), [this]() {
         const auto newScene = Document::sInstance->createNewScene();

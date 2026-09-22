@@ -57,7 +57,6 @@
 #include "gradientwidgets/gradientwidget.h"
 #include <QMessageBox>
 #include "PathEffects/patheffectsinclude.h"
-#include "Boxes/internallinkcanvas.h"
 #include "Boxes/smartvectorpath.h"
 #include "Sound/soundcomposition.h"
 #include "RasterEffects/rastereffectcollection.h"

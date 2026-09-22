@@ -51,7 +51,6 @@
 #include <QDateTime>
 #include <QCoreApplication>
 #include "MovablePoints/smartnodepoint.h"
-#include "Boxes/internallinkcanvas.h"
 
 #include "pointtypemenu.h"
 #include "Animators/transformanimator.h"
@@ -1391,11 +1390,6 @@ void Canvas::saveSceneSVG(SvgExporter& exp) const
     exp.addNextTask(task);
     saveBoxesSVG(exp, task.get(), svg);
     task->queTask();
-}
-
-qsptr<BoundingBox> Canvas::createLink(const bool inner)
-{
-    return enve::make_shared<InternalLinkCanvas>(this, inner);
 }
 
 void Canvas::schedulePivotUpdate()
