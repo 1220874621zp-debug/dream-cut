@@ -92,6 +92,8 @@ public:
     void stepPreview();
 
     bool setPreviewFromStart(PreviewState state);
+    // keyframe navigation (timeline Up/Down keys); toolbar buttons
+    // were retired with the NLE toolbar slim-down
     bool setNextKeyframe();
     bool setPrevKeyframe();
 
@@ -122,13 +124,6 @@ private:
     void showTransformProperty(const int which); // 0 pivot 1 pos 2 scale 3 rot 4 opacity
     void showAnimatedProperties();               // U key behavior
     void setupPropertyShortcuts();
-
-    // key loop toolbar buttons: apply/remove a loop-out expression
-    // on every keyed animator of the selected layers (member funcs,
-    // NOT constructor-local lambdas - those dangle once the ctor
-    // returns and crash on the first click)
-    void applyLoopExpressions(const QString& header);
-    void clearLoopExpressions();
 
     // uniformly scale the selected layers so their width/height matches
     // the canvas (see Canvas::scaleSelectedBoxesToCanvas)
@@ -177,20 +172,13 @@ private:
     QAction *mClipCanvasButton = nullptr;
     QAction *mRulersButton = nullptr;
     QAction *mTransparencyGridButton = nullptr;
-    QAction *mLoopPoseFwdButton = nullptr;
-    QAction *mLoopPosePingPongButton = nullptr;
-    QAction *mLoopPoseSkipButton = nullptr;
     QAction *mMatchCanvasWidthButton = nullptr;
     QAction *mMatchCanvasHeightButton = nullptr;
-
-    FrameSpinBox *mFrameStartSpin;
-    FrameSpinBox *mFrameEndSpin;
 
     QAction *mFrameRewindAct;
     QAction *mFrameFastForwardAct;
     QAction *mSetInPointAct;
     QAction *mSetOutPointAct;
-    QAction *mSplitClipAct;
     QAction *mCurrentFrameSpinAct;
     FrameSpinBox *mCurrentFrameSpin;
     QSlider *mZoomSlider = nullptr;

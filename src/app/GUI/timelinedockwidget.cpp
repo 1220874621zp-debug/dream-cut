@@ -30,7 +30,6 @@
 #include <QScrollBar>
 #include <QShortcut>
 #include <QPainter>
-#include <QInputDialog>
 #include <QDir>
 #include <QFileInfo>
 #include <cmath>
@@ -84,46 +83,6 @@
 #include "Sound/audiohandler.h"
 
 namespace {
-// recursively gather every keyed QrealAnimator under prop (property
-// channels, nested containers, child boxes included)
-void collectKeyedQrealAnimators(Property* const prop,
-                                QList<QrealAnimator*>& out) {
-    const auto qa = dynamic_cast<QrealAnimator*>(prop);
-    if (qa) {
-        if (qa->anim_hasKeys()) out << qa;
-        return;
-    }
-    const auto ca = dynamic_cast<ComplexAnimator*>(prop);
-    if (ca) {
-        const int n = ca->ca_getNumberOfChildren();
-        for (int i = 0; i < n; i++) {
-            collectKeyedQrealAnimators(ca->ca_getChildAt<Property>(i), out);
-        }
-    }
-}
-
-// user-supplied SVG loop glyphs rasterized via QSvgRenderer (the
-// iconengines plugin is not deployed, a plain QIcon on .svg would
-// not render)
-QIcon svgLoopIcon(const QString& qrcPath)
-{
-    QIcon result;
-    QFile f(qrcPath);
-    if (!f.open(QIODevice::ReadOnly)) { return result; }
-    QSvgRenderer renderer(f.readAll());
-    if (!renderer.isValid()) { return result; }
-    for (const int size : {64, 32, 24, 16}) {
-        QPixmap pm(size, size);
-        pm.fill(Qt::transparent);
-        QPainter p(&pm);
-        p.setRenderHint(QPainter::Antialiasing);
-        renderer.render(&p, QRectF(0, 0, size, size));
-        p.end();
-        result.addPixmap(pm);
-    }
-    return result;
-}
-
 // qrc SVG toolbar icon rendered AT the device pixel ratio: a plain
 // 64x64 dpr=1 pixmap is upscaled 2x on 200% displays and looks blurry,
 // so render 64*dpr physical px and tag the pixmap with the dpr.
@@ -272,8 +231,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     , mDocument(document)
     , mMainWindow(parent)
     , mToolBar(nullptr)
-    , mFrameStartSpin(nullptr)
-    , mFrameEndSpin(nullptr)
     , mFrameRewindAct(nullptr)
     , mFrameFastForwardAct(nullptr)
     , mCurrentFrameSpinAct(nullptr)
@@ -500,91 +457,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
             if(scene) scene->setTransparencyGrid(checked);
         });
 
-        // key loop modes: toggles right of the freeze-pose button;
-        // enabling applies a loop-out expression (AE loopOut alike,
-        // see Expression::parseLoopHeader) to every keyed animator of
-        // the selected layers, disabling clears those expressions
-        // again; the expression lives in the project, so it survives
-        // saves and is per-property undoable.
-        // applyLoopExpressions/clearLoopExpressions are MEMBER funcs:
-        // constructor-local lambdas dangle after the ctor returns
-        const auto setCheckedQuiet = [](QAction* const act,
-                                        const bool checked) {
-            act->blockSignals(true);
-            act->setChecked(checked);
-            act->blockSignals(false);
-        };
-
-        // user-supplied SVG glyphs: forward = single cycle arrow,
-        // ping-pong = swap arrows, skip = loop with a jump bar
-        mLoopPoseFwdButton = new QAction(
-                    svgLoopIcon(QStringLiteral(":/icons/loop_fwd.svg")),
-                    tr("Loop Keys"), this);
-        mLoopPoseFwdButton->setCheckable(true);
-        mLoopPoseFwdButton->setToolTip(tr(
-                "Cycle keyframed animation forward after the last key "
-                "(1,2,3 -> 1,2,3,1,...); applies a loop expression to "
-                "every keyed property of the selected layers "
-                "included; click again to remove"));
-        connect(mLoopPoseFwdButton, &QAction::triggered,
-                this, [this, setCheckedQuiet](const bool checked) {
-            if (checked) {
-                setCheckedQuiet(mLoopPosePingPongButton, false);
-                setCheckedQuiet(mLoopPoseSkipButton, false);
-                applyLoopExpressions(QStringLiteral("//loop:cycle"));
-            } else clearLoopExpressions();
-        });
-
-        // ping-pong: two opposing arrows
-        mLoopPosePingPongButton = new QAction(
-                    svgLoopIcon(QStringLiteral(":/icons/loop_pingpong.svg")),
-                    tr("Ping-Pong Loop"), this);
-        mLoopPosePingPongButton->setCheckable(true);
-        mLoopPosePingPongButton->setToolTip(tr(
-                "Bounce keyframed animation back and forth after the "
-                "last key (1,2,3 -> 1,2,3,2,1,...); applies a loop "
-                "expression to every keyed property of the selected "
-                "layers included; click again to remove"));
-        connect(mLoopPosePingPongButton, &QAction::triggered,
-                this, [this, setCheckedQuiet](const bool checked) {
-            if (checked) {
-                setCheckedQuiet(mLoopPoseFwdButton, false);
-                setCheckedQuiet(mLoopPoseSkipButton, false);
-                applyLoopExpressions(QStringLiteral("//loop:pingpong"));
-            } else clearLoopExpressions();
-        });
-
-        // skip cycle: loop with a jump bar over the skipped keys
-        mLoopPoseSkipButton = new QAction(
-                    svgLoopIcon(QStringLiteral(":/icons/loop_skip.svg")),
-                    tr("Skip Loop"), this);
-        mLoopPoseSkipButton->setCheckable(true);
-        mLoopPoseSkipButton->setToolTip(tr(
-                "Cycle keyframed animation skipping the given number of "
-                "leading keys (keys 1,2,3, skip 1 -> cycles 2,3); the "
-                "amount is asked for when enabled; applies a loop "
-                "expression to every keyed property of the selected "
-                "layers included; click again to remove"));
-        connect(mLoopPoseSkipButton, &QAction::triggered,
-                this, [this, setCheckedQuiet](const bool checked) {
-            if (!checked) {
-                clearLoopExpressions();
-                return;
-            }
-            setCheckedQuiet(mLoopPoseFwdButton, false);
-            setCheckedQuiet(mLoopPosePingPongButton, false);
-            bool ok = false;
-            const int skip = QInputDialog::getInt(
-                        this, tr("Skip Loop"),
-                        tr("Number of leading keys to skip:"),
-                        1, 1, 999, 1, &ok);
-            if (!ok) {
-                setCheckedQuiet(mLoopPoseSkipButton, false);
-                return;
-            }
-            applyLoopExpressions(
-                        QStringLiteral("//loop:skip=%1").arg(skip));
-        });
     }
 
     // match canvas: uniformly scale every selected layer so its width
@@ -644,51 +516,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
                 this, [this]() { matchSelectedToCanvas(false); });
     }
 
-    mFrameStartSpin = new FrameSpinBox(this);
-    mFrameStartSpin->setKeyboardTracking(false);
-    mFrameStartSpin->setObjectName("LeftSpinBox");
-    mFrameStartSpin->setAlignment(Qt::AlignHCenter);
-    mFrameStartSpin->setFocusPolicy(Qt::ClickFocus);
-    mFrameStartSpin->setToolTip(tr("Scene frame start"));
-    mFrameStartSpin->setRange(0, INT_MAX);
-    connect(mFrameStartSpin,
-            &QSpinBox::editingFinished,
-            this, [this]() {
-            const auto scene = *mDocument.fActiveScene;
-            if (!scene) { return; }
-            auto range = scene->getFrameRange();
-            int frame = mFrameStartSpin->value();
-            if (range.fMin == frame) { return; }
-            if (frame >= range.fMax) {
-                mFrameStartSpin->setValue(range.fMin);
-                return;
-            }
-            range.fMin = frame;
-            scene->setFrameRange(range);
-    });
-
-    mFrameEndSpin = new FrameSpinBox(this);
-    mFrameEndSpin->setKeyboardTracking(false);
-    mFrameEndSpin->setAlignment(Qt::AlignHCenter);
-    mFrameEndSpin->setFocusPolicy(Qt::ClickFocus);
-    mFrameEndSpin->setToolTip(tr("Scene frame end"));
-    mFrameEndSpin->setRange(1, INT_MAX);
-    connect(mFrameEndSpin,
-            &QSpinBox::editingFinished,
-            this, [this]() {
-            const auto scene = *mDocument.fActiveScene;
-            if (!scene) { return; }
-            auto range = scene->getFrameRange();
-            int frame = mFrameEndSpin->value();
-            if (range.fMax == frame) { return; }
-            if (frame <= range.fMin) {
-                mFrameEndSpin->setValue(range.fMax);
-                return;
-            }
-            range.fMax = frame;
-            scene->setFrameRange(range);
-    });
-
     mCurrentFrameSpin = new FrameSpinBox(this);
     mCurrentFrameSpin->setKeyboardTracking(false);
     mCurrentFrameSpin->setAlignment(Qt::AlignHCenter);
@@ -702,30 +529,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     connect(mCurrentFrameSpin,
             &FrameSpinBox::wheelValueChanged,
             this, &TimelineDockWidget::gotoFrame);
-
-    const auto prevKeyframeAct = new QAction(QIcon::fromTheme("prev_keyframe"),
-                                             QString(),
-                                             this);
-    prevKeyframeAct->setToolTip(tr("Previous Keyframe"));
-    prevKeyframeAct->setData(prevKeyframeAct->toolTip());
-    connect(prevKeyframeAct, &QAction::triggered,
-            this, [this]() {
-        if (setPrevKeyframe()) {
-            mDocument.actionFinished();
-        }
-    });
-
-    const auto nextKeyframeAct = new QAction(QIcon::fromTheme("next_keyframe"),
-                                             QString(),
-                                             this);
-    nextKeyframeAct->setToolTip(tr("Next Keyframe"));
-    nextKeyframeAct->setData(nextKeyframeAct->toolTip());
-    connect(nextKeyframeAct, &QAction::triggered,
-            this, [this]() {
-        if (setNextKeyframe()) {
-            mDocument.actionFinished();
-        }
-    });
 
     mSetInPointAct = new QAction(QIcon::fromTheme("range-in"),
                                   tr("Set Layer In Point (Alt+[)"),
@@ -751,16 +554,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
         mDocument.actionFinished();
     });
 
-    mSplitClipAct = new QAction(QIcon::fromTheme("cut"),
-                                tr("Split Clip (Ctrl+Shift+D)"),
-                                this);
-    mSplitClipAct->setToolTip(tr("Split Clip at Current Frame"));
-    mSplitClipAct->setData(mSplitClipAct->toolTip());
-    connect(mSplitClipAct, &QAction::triggered, this, [this]() {
-        splitClip();
-        mDocument.actionFinished();
-    });
-
     mToolBar = new QToolBar(this);
     mToolBar->setMovable(false);
 
@@ -774,9 +567,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
         //mRenderProgress->setFixedHeight(eSizesUI::button);
         mToolBar->setIconSize(QSize(size, size));
     });
-
-    // start layout
-    mToolBar->addWidget(mFrameStartSpin);
 
     // timeline zoom slider: logarithmic map over the viewed frame span
     // (right = zoom in), acting on the current scene's timeline
@@ -794,14 +584,11 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     addSpacer();
 
     mToolBar->addAction(mFrameRewindAct);
-    mToolBar->addAction(prevKeyframeAct);
-    mToolBar->addAction(nextKeyframeAct);
     mToolBar->addAction(mFrameFastForwardAct);
 
     mToolBar->addSeparator();
     mToolBar->addAction(mSetInPointAct);
     mToolBar->addAction(mSetOutPointAct);
-    mToolBar->addAction(mSplitClipAct);
     mToolBar->addSeparator();
 
     mRenderProgressAct = mToolBar->addWidget(mRenderProgress);
@@ -818,27 +605,17 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     mToolBar->addAction(mRulersButton);
     mToolBar->addAction(mTransparencyGridButton);
     mToolBar->addSeparator();
-    mToolBar->addAction(mLoopPoseFwdButton);
-    mToolBar->addAction(mLoopPosePingPongButton);
-    mToolBar->addAction(mLoopPoseSkipButton);
-    mToolBar->addSeparator();
     mToolBar->addAction(mMatchCanvasWidthButton);
     mToolBar->addAction(mMatchCanvasHeightButton);
 
-    addSpacer();
-
-    mToolBar->addWidget(mFrameEndSpin);
     // end layout
 
     mRenderProgressAct->setVisible(false);
 
     mMainWindow->cmdAddAction(mFrameRewindAct);
-    mMainWindow->cmdAddAction(prevKeyframeAct);
-    mMainWindow->cmdAddAction(nextKeyframeAct);
     mMainWindow->cmdAddAction(mFrameFastForwardAct);
     mMainWindow->cmdAddAction(mSetInPointAct);
     mMainWindow->cmdAddAction(mSetOutPointAct);
-    mMainWindow->cmdAddAction(mSplitClipAct);
     mMainWindow->cmdAddAction(mPlayFromBeginningButton);
     mMainWindow->cmdAddAction(mPlayButton);
     mMainWindow->cmdAddAction(mStopButton);
@@ -1112,16 +889,6 @@ void TimelineDockWidget::setupNleActions()
 void TimelineDockWidget::updateFrameRange(const FrameRange &range)
 {
     mRenderProgress->setRange(range.fMin, range.fMax);
-    if (range.fMin != mFrameStartSpin->value()) {
-        mFrameStartSpin->blockSignals(true);
-        mFrameStartSpin->setValue(range.fMin);
-        mFrameStartSpin->blockSignals(false);
-    }
-    if (range.fMax != mFrameEndSpin->value()) {
-        mFrameEndSpin->blockSignals(true);
-        mFrameEndSpin->setValue(range.fMax);
-        mFrameEndSpin->blockSignals(false);
-    }
 }
 
 void TimelineDockWidget::handleCurrentFrameChanged(int frame)
@@ -1394,8 +1161,6 @@ void TimelineDockWidget::previewFinished()
         scene->setGizmosSuppressed(false);
     }
     //setPlaying(false);
-    mFrameStartSpin->setEnabled(true);
-    mFrameEndSpin->setEnabled(true);
     mCurrentFrameSpinAct->setEnabled(true);
     showRenderStatus(false);
     mPlayFromBeginningButton->setDisabled(false);
@@ -1412,8 +1177,6 @@ void TimelineDockWidget::previewBeingPlayed()
     if (const auto scene = *mDocument.fActiveScene) {
         scene->setGizmosSuppressed(true);
     }
-    mFrameStartSpin->setEnabled(false);
-    mFrameEndSpin->setEnabled(false);
     mCurrentFrameSpinAct->setEnabled(false);
     showRenderStatus(false);
     mPlayFromBeginningButton->setDisabled(true);
@@ -1427,8 +1190,6 @@ void TimelineDockWidget::previewBeingPlayed()
 
 void TimelineDockWidget::previewBeingRendered()
 {
-    mFrameStartSpin->setEnabled(false);
-    mFrameEndSpin->setEnabled(false);
     mCurrentFrameSpinAct->setEnabled(false);
     showRenderStatus(true);
     mPlayFromBeginningButton->setDisabled(true);
@@ -1447,8 +1208,6 @@ void TimelineDockWidget::previewPaused()
     if (const auto scene = *mDocument.fActiveScene) {
         scene->setGizmosSuppressed(false);
     }
-    mFrameStartSpin->setEnabled(true);
-    mFrameEndSpin->setEnabled(true);
     mCurrentFrameSpinAct->setEnabled(true);
     showRenderStatus(false);
     mPlayFromBeginningButton->setDisabled(true);
@@ -1597,25 +1356,16 @@ void TimelineDockWidget::updateSettingsForCurrentCanvas(Canvas* const canvas)
     handleCurrentFrameChanged(canvas->anim_getCurrentAbsFrame());
 
     mCurrentFrameSpin->setDisplayTimeCode(canvas->getDisplayTimecode());
-    mFrameStartSpin->setDisplayTimeCode(canvas->getDisplayTimecode());
-    mFrameEndSpin->setDisplayTimeCode(canvas->getDisplayTimecode());
 
     mCurrentFrameSpin->updateFps(canvas->getFps());
-    mFrameStartSpin->updateFps(canvas->getFps());
-    mFrameEndSpin->updateFps(canvas->getFps());
 
     connect(canvas, &Canvas::fpsChanged,
             this, [this](const qreal fps) {
         mCurrentFrameSpin->updateFps(fps);
-        mFrameStartSpin->updateFps(fps);
-        mFrameEndSpin->updateFps(fps);
-
     });
     connect(canvas, &Canvas::displayTimeCodeChanged,
             this, [this](const bool enabled) {
         mCurrentFrameSpin->setDisplayTimeCode(enabled);
-        mFrameStartSpin->setDisplayTimeCode(enabled);
-        mFrameEndSpin->setDisplayTimeCode(enabled);
     });
 
     connect(canvas,
@@ -1750,66 +1500,6 @@ void TimelineDockWidget::showAnimatedProperties()
         mMainWindow->statusBar()->showMessage(
                     tr("属性快捷显示已随关键帧时间轴移除，请在属性面板操作"), 4000);
     }
-}
-
-void TimelineDockWidget::applyLoopExpressions(const QString& header)
-{
-    const auto scene = *mDocument.fActiveScene;
-    if (!scene) return;
-    QList<QrealAnimator*> targets;
-    const auto selected = scene->getSelectedBoxesList();
-    for (const auto& box : selected) {
-        collectKeyedQrealAnimators(box, targets);
-    }
-    int applied = 0;
-    for (const auto& anim : targets) {
-        const auto script = header + QStringLiteral("\nreturn value;");
-        try {
-            // the $frame binding is required for playback: it emits
-            // currentValueChanged on every frame change, which is the
-            // only thing that re-evaluates the expression for the
-            // current-frame cache (the $value binding alone never
-            // signals, the canvas would stay frozen)
-            auto expr = Expression::sCreate(
-                        QStringLiteral("value = $value;\nframe = $frame;\n"),
-                        QString(),
-                        script, anim,
-                        Expression::sQrealAnimatorTester);
-            anim->setExpressionAction(expr);
-            applied++;
-        } catch (const std::exception& e) {
-            qWarning() << "[loop] expression failed for"
-                       << anim->prp_getName()
-                       << ":" << e.what();
-        } catch (...) {
-            qWarning() << "[loop] expression failed for"
-                       << anim->prp_getName();
-        }
-    }
-    qWarning() << "[loop] apply" << header
-               << "selected boxes:" << selected.count()
-               << "keyed animators:" << targets.count()
-               << "applied:" << applied;
-    Document::sInstance->actionFinished();
-    scene->updateAllBoxes(UpdateReason::userChange);
-}
-
-void TimelineDockWidget::clearLoopExpressions()
-{
-    const auto scene = *mDocument.fActiveScene;
-    if (!scene) return;
-    QList<QrealAnimator*> targets;
-    for (const auto& box : scene->getSelectedBoxesList()) {
-        collectKeyedQrealAnimators(box, targets);
-    }
-    for (const auto& anim : targets) {
-        if (!anim->hasExpression()) continue;
-        if (!anim->getExpressionScriptString()
-                 .startsWith(QLatin1String("//loop:"))) continue;
-        anim->clearExpressionAction();
-    }
-    Document::sInstance->actionFinished();
-    scene->updateAllBoxes(UpdateReason::userChange);
 }
 
 void TimelineDockWidget::matchSelectedToCanvas(const bool byWidth)
