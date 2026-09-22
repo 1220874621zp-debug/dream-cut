@@ -1279,10 +1279,8 @@ bool AppSupport::hasXDGDesktopIntegration()
     QString desktop = "applications/graphics.dreamcut.DreamCut.desktop";
     files << desktop;
     files << "mime/packages/graphics.dreamcut.DreamCut.xml";
-    files << "icons/hicolor/scalable/apps/graphics.dreamcut.DreamCut.svg";
     files << "icons/hicolor/256x256/apps/graphics.dreamcut.DreamCut.png";
-    files << "icons/hicolor/scalable/mimetypes/application-x-graphics.dreamcut.DreamCut.svg";
-    files << "icons/hicolor/256x256/mimetypes/application-x-graphics.friction.Friction.png";
+    files << "icons/hicolor/256x256/mimetypes/application-x-graphics.dreamcut.DreamCut.png";
 
     for (const auto &file : files) {
         if (!QFile::exists(QString("%1/%2").arg(path, file))) {
@@ -1318,12 +1316,12 @@ bool AppSupport::setupXDGDesktopIntegration()
 
     const QString resDesktop = ":/xdg/friction.desktop";
     const QString resMime = ":/xdg/friction.xml";
-    const QString resSvg = ":/icons/hicolor/scalable/apps/graphics.friction.Friction.svg";
-    const QString resPng = ":/icons/hicolor/256x256/apps/graphics.friction.Friction.png";
+    const QString resPng = ":/icons/hicolor/256x256/apps/graphics.dreamcut.DreamCut.png";
+    const QString resMimePng = ":/icons/hicolor/256x256/mimetypes/application-x-graphics.dreamcut.DreamCut.png";
 
     {
         const QString dirName(QString("%1/applications").arg(path));
-        const QString fileName(QString("%1/graphics.friction.Friction.desktop").arg(dirName));
+        const QString fileName(QString("%1/graphics.dreamcut.DreamCut.desktop").arg(dirName));
         if (!QFile::exists(dirName)) {
             QDir dir(dirName);
             if (!dir.mkpath(dirName)) { return false; }
@@ -1342,7 +1340,7 @@ bool AppSupport::setupXDGDesktopIntegration()
                 const QString appimage = getAppImagePath();
                 if (!appimage.isEmpty() && QFile::exists(appimage)) { appPath = appimage; }
                 if (res.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                    file.write(res.readAll().replace("__FRICTION__",
+                    file.write(res.readAll().replace("__APP__",
                                                      appPath.toUtf8()));
                     res.close();
                 } else { return false; }
@@ -1352,7 +1350,7 @@ bool AppSupport::setupXDGDesktopIntegration()
     }
     {
         const QString dirName(QString("%1/mime/packages").arg(path));
-        const QString fileName(QString("%1/graphics.friction.Friction.xml").arg(dirName));
+        const QString fileName(QString("%1/graphics.dreamcut.DreamCut.xml").arg(dirName));
         if (!QFile::exists(dirName)) {
             QDir dir(dirName);
             if (!dir.mkpath(dirName)) { return false; }
@@ -1370,27 +1368,8 @@ bool AppSupport::setupXDGDesktopIntegration()
         }
     }
     {
-        const QString dirName(QString("%1/icons/hicolor/scalable/apps").arg(path));
-        const QString fileName(QString("%1/graphics.friction.Friction.svg").arg(dirName));
-        if (!QFile::exists(dirName)) {
-            QDir dir(dirName);
-            if (!dir.mkpath(dirName)) { return false; }
-        }
-        if (!QFile::exists(fileName)) {
-            QFile file(fileName);
-            if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-                QFile res(resSvg);
-                if (res.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                    file.write(res.readAll());
-                    res.close();
-                } else { return false; }
-                file.close();
-            } else { return false; }
-        }
-    }
-    {
         const QString dirName(QString("%1/icons/hicolor/256x256/apps").arg(path));
-        const QString fileName(QString("%1/graphics.friction.Friction.png").arg(dirName));
+        const QString fileName(QString("%1/graphics.dreamcut.DreamCut.png").arg(dirName));
         if (!QFile::exists(dirName)) {
             QDir dir(dirName);
             if (!dir.mkpath(dirName)) { return false; }
@@ -1408,27 +1387,8 @@ bool AppSupport::setupXDGDesktopIntegration()
         }
     }
     {
-        const QString dirName(QString("%1/icons/hicolor/scalable/mimetypes").arg(path));
-        const QString fileName(QString("%1/application-x-graphics.friction.Friction.svg").arg(dirName));
-        if (!QFile::exists(dirName)) {
-            QDir dir(dirName);
-            if (!dir.mkpath(dirName)) { return false; }
-        }
-        if (!QFile::exists(fileName)) {
-            QFile file(fileName);
-            if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-                QFile res(resSvg);
-                if (res.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                    file.write(res.readAll());
-                    res.close();
-                } else { return false; }
-                file.close();
-            } else { return false; }
-        }
-    }
-    {
         const QString dirName(QString("%1/icons/hicolor/256x256/mimetypes").arg(path));
-        const QString fileName(QString("%1/application-x-graphics.friction.Friction.png").arg(dirName));
+        const QString fileName(QString("%1/application-x-graphics.dreamcut.DreamCut.png").arg(dirName));
         if (!QFile::exists(dirName)) {
             QDir dir(dirName);
             if (!dir.mkpath(dirName)) { return false; }
@@ -1436,7 +1396,7 @@ bool AppSupport::setupXDGDesktopIntegration()
         if (!QFile::exists(fileName)) {
             QFile file(fileName);
             if (file.open(QIODevice::WriteOnly)) {
-                QFile res(resPng);
+                QFile res(resMimePng);
                 if (res.open(QIODevice::ReadOnly)) {
                     file.write(res.readAll());
                     res.close();
@@ -1459,11 +1419,17 @@ bool AppSupport::removeXDGDesktopIntegration()
         !path.startsWith(QDir::homePath())) { path = QString("%1/.local/share").arg(QDir::homePath()); }
 
     QStringList files;
-    files << "applications/graphics.friction.Friction.desktop";
+    // current dreamcut set + the friction-era leftovers older builds
+    // self-installed (removed so stale icons never win a theme lookup)
+    files << "applications/graphics.dreamcut.DreamCut.desktop";
     files << "mime/packages/graphics.dreamcut.DreamCut.xml";
-    files << "icons/hicolor/scalable/apps/graphics.dreamcut.DreamCut.svg";
     files << "icons/hicolor/256x256/apps/graphics.dreamcut.DreamCut.png";
-    files << "icons/hicolor/scalable/mimetypes/application-x-graphics.dreamcut.DreamCut.svg";
+    files << "icons/hicolor/256x256/mimetypes/application-x-graphics.dreamcut.DreamCut.png";
+    files << "applications/graphics.friction.Friction.desktop";
+    files << "mime/packages/graphics.friction.Friction.xml";
+    files << "icons/hicolor/scalable/apps/graphics.friction.Friction.svg";
+    files << "icons/hicolor/256x256/apps/graphics.friction.Friction.png";
+    files << "icons/hicolor/scalable/mimetypes/application-x-graphics.friction.Friction.svg";
     files << "icons/hicolor/256x256/mimetypes/application-x-graphics.friction.Friction.png";
 
     for (const auto &file : files) {

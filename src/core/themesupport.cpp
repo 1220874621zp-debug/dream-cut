@@ -512,7 +512,7 @@ const QString ThemeSupport::themeDisplayName(const QString &id)
 
 const QString ThemeSupport::getAppIconName(const bool alt)
 {
-    const QString name = alt ? "application-x-graphics.friction.Friction" : "graphics.friction.Friction";
+    const QString name = alt ? "application-x-graphics.dreamcut.DreamCut" : "graphics.dreamcut.DreamCut";
     return name;
 }
 

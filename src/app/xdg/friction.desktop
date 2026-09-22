@@ -1,13 +1,13 @@
 [Desktop Entry]
 Version=1.0
-Name=Friction
-Exec=__FRICTION__ %f
-Icon=graphics.friction.Friction
-Comment=Motion graphics and animation
-GenericName=Friction Graphics
+Name=Dream Cut
+Exec=__APP__ %f
+Icon=graphics.dreamcut.DreamCut
+Comment=Video editing and motion graphics
+GenericName=Dream Cut Editor
 StartupNotify=true
 Terminal=false
 Type=Application
-Categories=Graphics;
+Categories=Graphics;AudioVideo;
 MimeType=application/x-graphics.friction.Friction;
-StartupWMClass=friction
+StartupWMClass=dreamcut
