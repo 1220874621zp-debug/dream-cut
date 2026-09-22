@@ -154,9 +154,17 @@ public:
     // context-menu lane hop to an explicit track (validated: type,
     // lock, overlap), one undo step
     bool requestMoveClipToTrack(const int clipId, const int dstTrackId);
+    // kdenlive "detach audio": pull the VideoBox's embedded sound out
+    // as an independent audio clip (same file, same range, same
+    // speed) parked on the first audio track; the embedded copy goes
+    // silent (visibility = audibility in the sound composition)
+    bool requestDetachAudio(const int clipId);
 
     // ---- tracks (explicit entities, spec ops on the scene) ----
-    bool requestTrackAdd(const bool audio);
+    // returns the new track id (-1 on failure); the panel renders
+    // video specs first, then audio specs, so an appended track lands
+    // at the end of its type group
+    int requestTrackAdd(const bool audio);
     bool requestTrackRemove(const int trackId);
     void requestTrackRename(const int trackId, const QString &name);
     void requestTrackSetLocked(const int trackId, const bool locked);
@@ -200,6 +208,9 @@ signals:
 private:
     void connectPanelScene(Canvas * const scene);
     void connectChildren(Canvas * const scene);
+    // CapCut track lifecycle: every commit drops tracks that lost
+    // their last clip (one lane of each type always survives)
+    void purgeEmptyTracks();
     // one-time legacy migration: freeze the pre-P0 derived lane
     // layout into the scene's persistent track table
     QList<eTrackSpec> deriveTrackSpecs(

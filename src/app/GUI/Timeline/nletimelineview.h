@@ -146,6 +146,11 @@ private:
     // ---- interaction ----
     enum class DragMode { None, MoveClip, TrimLeft, TrimRight, Playhead,
                           TrackHeight, SpacerMove };
+    // candidate track id for the CapCut lane lifecycle: dragging a
+    // clip below every track targets a NEW track of its type, which
+    // materializes on release
+    static constexpr int kGhostTrackId = -2;
+    int ghostLaneTop() const; // y of the to-be-created lane
     int clipAt(const QPoint &pos, QRectF *rectOut = nullptr) const; // id or -1
     // candidate-or-model placement of a clip (snapping considers the
     // live candidate positions of the other moving clips)
@@ -222,6 +227,8 @@ private:
     int mSpacerPressFrame = 0;
     bool mDropIllegal = false; // live overlap feedback during a move
     int mSnapTarget = -1;      // snap guide frame, -1 = none
+    bool mGhostLane = false;   // drop targets a to-be-created track
+    bool mGhostLaneAudio = false;
     QPoint mPressPos;
     int mDragTrackIdx = -1;    // TrackHeight gesture lane
     int mPressTrackHeight = 0;

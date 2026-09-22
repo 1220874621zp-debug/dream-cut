@@ -21,6 +21,8 @@
 #include <climits>
 
 #include "themesupport.h"
+#include "Boxes/videobox.h"
+#include "Sound/evideosound.h"
 
 static const int SNAP_PX = 8;
 static const int TRIM_PX = 6;
@@ -132,9 +134,30 @@ QRectF NleTimelineView::moveRect(const NleTimelineModel::Move &m) const
 {
     const double x = frameToX(m.start);
     const double w = m.duration * mPxPerFrame;
+    int top;
+    if (m.trackId == kGhostTrackId) {
+        top = ghostLaneTop() + 2;
+    } else {
+        top = trackY(mModel->trackIndex(m.trackId)) + 2;
+    }
     const int idx = mModel->trackIndex(m.trackId);
-    const int top = trackY(idx);
-    return QRectF(x, top + 2, w, trackHeight(idx) - 4);
+    const int h = (idx >= 0 ? trackHeight(idx)
+                            : (mGhostLaneAudio ? 52 : 60)) - 4;
+    return QRectF(x, top, w, h);
+}
+
+// y of the lane a to-be-created track will occupy: after the last
+// track of its type (the panel renders video specs first, then audio
+// specs - a new video lane grows at the bottom of the video group)
+int NleTimelineView::ghostLaneTop() const
+{
+    const auto &tracks = mModel->tracks();
+    int idx = 0;
+    while (idx < tracks.size() &&
+           tracks.at(idx).audio != mGhostLaneAudio) { ++idx; }
+    while (idx < tracks.size() &&
+           tracks.at(idx).audio == mGhostLaneAudio) { ++idx; }
+    return trackY(idx);
 }
 
 QRectF NleTimelineView::clipRect(const NleTimelineModel::Clip &c) const
@@ -185,6 +208,23 @@ void NleTimelineView::paintEvent(QPaintEvent *)
         const int x = frameToX(mSnapTarget);
         p.setPen(QPen(QColor(0xff, 0xd1, 0x54), 1, Qt::DashLine));
         p.drawLine(x, rulerHeight(), x, height());
+    }
+
+    // CapCut lane lifecycle preview: the dashed lane a release below
+    // every track will create (with the drop hint)
+    if (mGhostLane && mDrag == DragMode::MoveClip) {
+        const int top = ghostLaneTop();
+        const int h = mGhostLaneAudio ? 52 : 60;
+        const QRect band(headerWidth(), top, width() - headerWidth(), h);
+        p.fillRect(band, QColor(0x1e, 0x24, 0x22));
+        p.setPen(QPen(cAccent, 1, Qt::DashLine));
+        p.drawRect(band.adjusted(0, 0, -1, -1));
+        p.setPen(cAccent);
+        QFont gf = font();
+        gf.setPixelSize(10);
+        p.setFont(gf);
+        p.drawText(band.adjusted(8, 0, -8, 0), Qt::AlignVCenter | Qt::AlignLeft,
+                   tr("松开创建新轨道"));
     }
 
     // rubber band selection overlay
@@ -929,6 +969,7 @@ void NleTimelineView::mousePressEvent(QMouseEvent *e)
         mTangled.clear();
         mSpacerOrig.clear();
         mDropIllegal = false;
+        mGhostLane = false;
         mModel->setGestureActive(false);
     }
 
@@ -1213,15 +1254,26 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
         if (!c) { break; }
         int newStart = qMax(0, curFrame - mGrabOffsetFrames);
 
-        // lane under the cursor, clamped to the nearest same-type
-        // lane: tracks are explicit entities, hovering outside never
-        // spawns a throwaway lane
-        int trIdx = trackAtY(e->pos().y());
-        if (trIdx < 0 || mModel->tracks().value(trIdx).audio != c->audio) {
+        // CapCut lane lifecycle: dragging below every existing track
+        // targets a NEW lane of the clip's type (materializes on
+        // release); anywhere else keeps clamping to the nearest
+        // same-type lane
+        const int nTracks = mModel->tracks().size();
+        const int lastBottom = nTracks
+                ? trackY(nTracks - 1) + trackHeight(nTracks - 1)
+                : rulerHeight();
+        const bool newLaneZone = e->pos().y() > lastBottom + 8;
+        mGhostLane = newLaneZone;
+        mGhostLaneAudio = c->audio;
+        int trIdx = newLaneZone ? -1 : trackAtY(e->pos().y());
+        if (!newLaneZone &&
+                (trIdx < 0 || mModel->tracks().value(trIdx).audio != c->audio)) {
             trIdx = nearestTrackOfType(e->pos().y(), c->audio);
         }
-        const bool laneOk = trIdx >= 0 && !mModel->tracks().value(trIdx).locked;
-        const int trId = laneOk ? mModel->tracks().at(trIdx).id : c->trackId;
+        const bool laneOk = newLaneZone ||
+                (trIdx >= 0 && !mModel->tracks().value(trIdx).locked);
+        const int trId = newLaneZone ? kGhostTrackId
+                : (laneOk ? mModel->tracks().at(trIdx).id : c->trackId);
 
         if (mModel->magnetic()) {
             // kdenlive 方案A: the clip follows the mouse 1:1 on the
@@ -1473,7 +1525,22 @@ void NleTimelineView::finishGestureCommit(const bool insertMode)
     // lands at the mouse, the packs flow around it) - a follow-up
     // compaction would pull it back onto the left pack's tail
     mModel->setGestureActive(false);
-    if (hadMoves) {
+    // CapCut lane lifecycle: a ghost-lane drop materializes the track
+    // first (its refresh runs immediately - the gesture is over),
+    // then the commit lands the clip on it and purges emptied lanes
+    if (mGhostLane && hadMoves && drag == DragMode::MoveClip) {
+        const int newId = mModel->requestTrackAdd(mGhostLaneAudio);
+        if (newId >= 0) {
+            for (auto &mv : moves) {
+                if (mv.trackId == kGhostTrackId) { mv.trackId = newId; }
+            }
+            emit logMessage(tr("已创建新轨道"));
+        } else {
+            moves.clear();
+        }
+    }
+    mGhostLane = false;
+    if (hadMoves && !moves.isEmpty()) {
         mModel->commitMoves(moves, drag != DragMode::MoveClip &&
                                mModel->magnetic());
     }
@@ -1699,6 +1766,7 @@ void NleTimelineView::leaveEvent(QEvent *)
         mDragClipId = -1;
         mSnapTarget = -1;
         mDropIllegal = false;
+        mGhostLane = false;
         mLastFeedback.clear();
         mModel->setGestureActive(false);
     }
@@ -1723,6 +1791,7 @@ void NleTimelineView::hideEvent(QHideEvent *)
     mTangled.clear();
     mSpacerOrig.clear();
     mDropIllegal = false;
+    mGhostLane = false;
     mRubber = false;
     mModel->setGestureActive(false);
 }
@@ -1938,6 +2007,12 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
     QAction *rippleDel = menu.addAction(tr("波纹删除"));
     QAction *freeze = menu.addAction(tr("从此处定格到块尾"));
     QAction *speed = menu.addAction(tr("变速…"));
+    // kdenlive detach-audio: only video-family clips with a live
+    // embedded sound offer it
+    const auto vidBox = enve_cast<VideoBox*>(c->layer.data());
+    const auto embeddedSound = vidBox ? vidBox->sound() : nullptr;
+    QAction *detach = menu.addAction(tr("分离音频"));
+    detach->setEnabled(embeddedSound && embeddedSound->isVisible());
     menu.addSeparator();
     QAction *back = menu.addAction(tr("向左选择本轨"));
     QAction *backAll = menu.addAction(tr("向左选择全部轨道"));
@@ -1963,6 +2038,8 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
         // CapCut 定格: cut here + freeze everything from the cut to
         // the clip's end on the cut frame
         mModel->requestFreeze({clipId}, xToFrame(e->pos().x()));
+    } else if (act == detach) {
+        mModel->requestDetachAudio(clipId);
     } else if (act == speed) {
         bool ok = false;
         const double rate = QInputDialog::getDouble(

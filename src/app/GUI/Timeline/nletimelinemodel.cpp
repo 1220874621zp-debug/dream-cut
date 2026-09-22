@@ -7,6 +7,8 @@
 #include "Animators/eboxorsound.h"
 #include "Sound/esound.h"
 #include "Sound/eindependentsound.h"
+#include "Boxes/videobox.h"
+#include "Sound/evideosound.h"
 #include "Timeline/durationrectangle.h"
 #include "Boxes/animationbox.h"
 #include "smartPointers/ememory.h"
@@ -355,6 +357,8 @@ bool NleTimelineModel::commitMoves(const QVector<Move> &moves,
     // the row reorder must stay inside the writeback guard: its
     // movedObject signal would refresh mid-commit
     stabilizeRowOrder();
+    // CapCut track lifecycle: a lane that lost its last clip goes away
+    purgeEmptyTracks();
     mInWriteback = false;
 
     finishAction();
@@ -404,6 +408,34 @@ void NleTimelineModel::stabilizeRowOrder()
         parent->moveContainedInList(desired.first(), minIdx);
         for (int i = 1; i < desired.size(); ++i) {
             parent->moveContainedBelow(desired.at(i), desired.at(i - 1));
+        }
+    }
+}
+
+void NleTimelineModel::purgeEmptyTracks()
+{
+    const auto scene = mPanelScene.data();
+    if (!scene) { return; }
+    // members per spec id
+    QHash<int, int> members;
+    for (const auto &c : scene->getContained()) {
+        if (c) { members[c->trackId()]++; }
+    }
+    const auto specs = scene->getTrackSpecs();
+    for (int type = 0; type < 2; ++type) {
+        const bool audio = type == 1;
+        int withMembers = 0;
+        for (const auto &s : specs) {
+            if (s.mAudio == audio &&
+                    members.value(s.mId, 0) > 0) { ++withMembers; }
+        }
+        // every lane of this type empty: keep them all (the
+        // one-lane-per-type invariant guards fresh projects)
+        if (withMembers == 0) { continue; }
+        for (const auto &s : specs) {
+            if (s.mAudio == audio && members.value(s.mId, 0) == 0) {
+                scene->removeTrackSpec(s.mId);
+            }
         }
     }
 }
@@ -617,6 +649,8 @@ bool NleTimelineModel::requestDelete(const QSet<int> &clipIds,
 
     mInWriteback = true;
     for (auto *layer : victims) { layer->removeFromParent_k(); }
+    // CapCut track lifecycle: lanes emptied by the deletion go away
+    purgeEmptyTracks();
     mInWriteback = false;
     finishAction();
     return true;
@@ -642,19 +676,72 @@ bool NleTimelineModel::requestMoveClipToTrack(const int clipId,
         emit logMessage(QStringLiteral("目标位置与现有块重叠"));
         return false;
     }
+    // snapshot before commitMoves: it refreshes and the row/track
+    // pointers would dangle
+    const QString clipName = c->name;
+    const QString trackName = dst->name;
     if (!commitMoves({{clipId, dstTrackId, c->start, c->duration}})) {
         return false;
     }
-    emit logMessage(QStringLiteral("移动块“%1”到 %2").arg(c->name, dst->name));
+    emit logMessage(QStringLiteral("移动块“%1”到 %2").arg(clipName, trackName));
+    return true;
+}
+
+// kdenlive-style detach: the embedded eVideoSound stays with the
+// video (muted - visibility drives the sound composition) while a
+// fresh eIndependentSound on the SAME file takes over the audio on
+// an audio track; the shared file cache means no second decode
+bool NleTimelineModel::requestDetachAudio(const int clipId)
+{
+    if (mInWriteback || mGestureActive) { return false; }
+    const auto scene = mPanelScene.data();
+    const auto c = clip(clipId);
+    if (!scene || !c || !c->layer) { return false; }
+    const auto vidBox = enve_cast<VideoBox*>(c->layer.data());
+    const auto embedded = vidBox ? vidBox->sound() : nullptr;
+    if (!embedded) {
+        emit logMessage(QStringLiteral("该块没有内嵌音频"));
+        return false;
+    }
+    const QString path = vidBox->getFilePath();
+    if (path.isEmpty()) { return false; }
+    // snapshot before finishAction: the refresh rebuilds the clip
+    // table, the row pointers (c) would dangle
+    const QString clipName = c->name;
+
+    scene->pushUndoRedoName(tr("Detach Audio"));
+
+    const auto snd = enve::make_shared<eIndependentSound>();
+    snd->setFilePath(path);
+    scene->addContained(snd);
+    snd->prp_setName(c->name + QStringLiteral(" 音频"));
+    snd->setStretch(embedded->getStretch());
+    const auto dur = snd->getDurationRectangle();
+    if (dur) {
+        // same visible window as the video clip (the file handler is
+        // already cached from the import, so the length is final and
+        // the range sticks)
+        dur->setMinAbsFrame(c->start);
+        dur->setMaxAbsFrame(c->start + c->duration - 1);
+    }
+    // park on the first audio track (type completeness guarantees
+    // one exists)
+    for (const auto &t : mTracks) {
+        if (t.audio) { snd->setTrackId(t.id); break; }
+    }
+    embedded->setVisible(false);
+
+    finishAction();
+    emit logMessage(QStringLiteral("已分离“%1”的音频到音频轨").arg(clipName));
     return true;
 }
 
 // ---------------------------------------------------------------- tracks
 
-bool NleTimelineModel::requestTrackAdd(const bool audio)
+int NleTimelineModel::requestTrackAdd(const bool audio)
 {
     const auto scene = mPanelScene.data();
-    if (!scene) { return false; }
+    if (!scene) { return -1; }
     int sameType = 0;
     for (const auto &t : mTracks) {
         if (t.audio == audio) { ++sameType; }
@@ -662,9 +749,9 @@ bool NleTimelineModel::requestTrackAdd(const bool audio)
     const QString name = audio
             ? QStringLiteral("A%1").arg(sameType + 1)
             : QStringLiteral("V%1").arg(sameType + 1);
-    scene->addTrackSpec(audio, name);
+    const int id = scene->addTrackSpec(audio, name);
     finishAction();
-    return true;
+    return id;
 }
 
 bool NleTimelineModel::requestTrackRemove(const int trackId)
