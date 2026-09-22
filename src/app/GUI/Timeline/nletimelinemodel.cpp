@@ -749,12 +749,12 @@ void NleTimelineModel::requestMarkerRemove(const int frame)
 
 // ---------------------------------------------------------------- magnetic
 
-void NleTimelineModel::setMagnetic(const bool on)
+void NleTimelineModel::setMagnetic(const bool on, const bool compact)
 {
     if (mMagnetic == on) { return; }
     mMagnetic = on;
     emit magneticChanged(on);
-    if (!on) { return; }
+    if (!on || !compact) { return; }
     // turning it on enforces the no-gap invariant right away
     // (undoable through the commit)
     const auto moves = compactGapsPlan();
@@ -764,6 +764,55 @@ void NleTimelineModel::setMagnetic(const bool on)
     } else {
         emit logMessage(QStringLiteral("磁吸开启：轨道已无间隙"));
     }
+}
+
+QVector<NleTimelineModel::Move> NleTimelineModel::magneticRearrangePlan(
+        const int trackId, const int draggedId, const int dropStart,
+        const QSet<int> &movingIds) const
+{
+    // kdenlive 方案A: dragged clip = drop frame 1:1; left package (end
+    // <= drop) compacts toward 0; everything else chains tightly after
+    // the dragged clip's new out point. Existing overlaps inside a
+    // package keep their relative layout (compaction closes gaps
+    // only, the right chain serializes). A clip straddling the drop
+    // point belongs to the right package and moves as a whole.
+    QVector<Move> moves;
+    const auto dragged = clip(draggedId);
+    if (!dragged) { return moves; }
+    const int dur = dragged->duration;
+    const int drop = qMax(0, dropStart);
+
+    QList<const Clip*> left, right;
+    for (const auto &c : mClips) {
+        if (c.clipId == draggedId || movingIds.contains(c.clipId)) { continue; }
+        if (c.trackId != trackId) { continue; }
+        if (c.start + c.duration <= drop) { left << &c; }
+        else { right << &c; }
+    }
+    const auto byStart = [](const Clip * const a, const Clip * const b) {
+        return a->start < b->start;
+    };
+    std::sort(left.begin(), left.end(), byStart);
+    std::sort(right.begin(), right.end(), byStart);
+
+    int cursor = 0;
+    for (const Clip *c : left) {
+        if (cursor != c->start) {
+            moves.append({c->clipId, trackId, cursor, c->duration});
+        }
+        cursor = cursor + c->duration; // kdenlive compaction: cursor
+                                       // advances by playtime, old
+                                       // gaps never re-enter the pack
+    }
+    moves.append({draggedId, trackId, drop, dur});
+    cursor = drop + dur;
+    for (const Clip *c : right) {
+        if (cursor != c->start) {
+            moves.append({c->clipId, trackId, cursor, c->duration});
+        }
+        cursor = cursor + c->duration; // tight chain: no gaps
+    }
+    return moves;
 }
 
 // ---------------------------------------------------------------- undo

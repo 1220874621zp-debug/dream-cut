@@ -102,6 +102,15 @@ public:
     // magnetic (CapCut): close every genuine gap, keep overlaps;
     // returns only the clips that actually move
     QVector<Move> compactGapsPlan() const;
+    // kdenlive-style magnetic drag rearrange (方案A): the dragged clip
+    // lands at the drop frame 1:1; clips fully left of the drop
+    // compact toward 0; every other same-track clip chains tightly
+    // after the dragged clip's new out point - the whole track makes
+    // room live, a horizontal drag across neighbours is a reorder
+    QVector<Move> magneticRearrangePlan(const int trackId,
+                                        const int draggedId,
+                                        const int dropStart,
+                                        const QSet<int> &movingIds) const;
 
     // ---- selection ----
     QSet<int> selection() const { return mSelected; }
@@ -157,8 +166,10 @@ public:
 
     // ---- magnetic mode ----
     bool magnetic() const { return mMagnetic; }
-    // enabling compacts every track right away (undoable)
-    void setMagnetic(const bool on);
+    // enabling compacts every track right away (undoable); compact =
+    // false only restores the flag (session start: a loaded project
+    // must not be rewritten just because magnetic defaults on)
+    void setMagnetic(const bool on, const bool compact = true);
 
     // ---- undo ----
     void undo();

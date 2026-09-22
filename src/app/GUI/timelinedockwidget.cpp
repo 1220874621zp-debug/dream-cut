@@ -302,6 +302,12 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     // the timeline model exists from the start so the toolbar (zoom
     // slider, NLE cluster) can wire to it before the page is built
     mNleModel = new NleTimelineModel(mDocument, this);
+    // magnetic (kdenlive-style) dragging is the default; the saved
+    // state restores the flag WITHOUT compacting - a loaded project
+    // must not be rewritten just because magnetic defaults on
+    mNleModel->setMagnetic(AppSupport::getSettings(
+                QStringLiteral("ui"),
+                QStringLiteral("timelineMagnetic"), true).toBool(), false);
     connect(mNleModel, &NleTimelineModel::logMessage, this,
             [this](const QString &msg) {
         if (mMainWindow) { mMainWindow->statusBar()->showMessage(msg, 4000); }
@@ -1043,8 +1049,23 @@ void TimelineDockWidget::setupNleActions()
     mMagneticAct = new QAction(
                 QIcon(nleMagneticPixmap(QColor(0xc8, 0xc8, 0xc8))), QString(), this);
     mMagneticAct->setCheckable(true);
-    mMagneticAct->setChecked(false);
-    mMagneticAct->setToolTip(tr("磁吸：开启后同轨块贴紧无间隙"));
+    // the button mirrors the model flag restored in the ctor (no
+    // toggled side effects during the sync)
+    mMagneticAct->blockSignals(true);
+    mMagneticAct->setChecked(mNleModel->magnetic());
+    mMagneticAct->blockSignals(false);
+    // blockSignals skipped the toggled handler: sync the glyph too
+    {
+        const QColor accent = ThemeSupport::getThemeHighlightColor();
+        QColor onGlyph(0xff, 0xff, 0xff);
+        if (accent.lightness() > 150) {
+            onGlyph = ThemeSupport::getThemeHighlightDarkerColor().darker(160);
+        }
+        mMagneticAct->setIcon(QIcon(nleMagneticPixmap(
+                    mNleModel->magnetic() ? onGlyph
+                                          : QColor(0xc8, 0xc8, 0xc8))));
+    }
+    mMagneticAct->setToolTip(tr("磁吸（kdenlive 式）：拖拽块时其余块实时让位重排，轨道保持无间隙"));
     connect(mMagneticAct, &QAction::toggled, this, [this](const bool on) {
         if (!mMagneticAct) { return; }
         const QColor accent = ThemeSupport::getThemeHighlightColor();
@@ -1054,6 +1075,8 @@ void TimelineDockWidget::setupNleActions()
         }
         mMagneticAct->setIcon(QIcon(nleMagneticPixmap(
                         on ? onGlyph : QColor(0xc8, 0xc8, 0xc8))));
+        AppSupport::setSettings(QStringLiteral("ui"),
+                                QStringLiteral("timelineMagnetic"), on);
         if (mNleModel) { mNleModel->setMagnetic(on); }
     });
     insertAct(mMagneticAct);

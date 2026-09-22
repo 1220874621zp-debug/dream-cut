@@ -1108,9 +1108,6 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
         const auto c = mModel->clip(mDragClipId);
         if (!c) { break; }
         int newStart = qMax(0, curFrame - mGrabOffsetFrames);
-        bool snapped = false;
-        const int sT = snapFrame(newStart, {mDragClipId}, &snapped);
-        if (snapped) { newStart = sT; mSnapTarget = sT; }
 
         // lane under the cursor, clamped to the nearest same-type
         // lane: tracks are explicit entities, hovering outside never
@@ -1121,6 +1118,38 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
         }
         const bool laneOk = trIdx >= 0 && !mModel->tracks().value(trIdx).locked;
         const int trId = laneOk ? mModel->tracks().at(trIdx).id : c->trackId;
+
+        if (mModel->magnetic()) {
+            // kdenlive 方案A: the clip follows the mouse 1:1 on the
+            // frame grid - no edge snapping, no refusals - and the
+            // whole track rearranges around the drop live (left pack
+            // compacts to 0, the rest chains tightly after)
+            if (laneOk) {
+                QHash<int, NleTimelineModel::Move> cand;
+                for (const auto &m : mModel->magneticRearrangePlan(
+                         trId, mDragClipId, newStart, mMovingIds)) {
+                    cand.insert(m.clipId, m);
+                }
+                // riders on other tracks keep riding the time delta
+                const int delta = newStart - c->start;
+                for (const int id : mMovingIds) {
+                    if (id == mDragClipId) { continue; }
+                    const auto oc = mModel->clip(id);
+                    if (!oc) { continue; }
+                    cand.insert(id, {id, oc->trackId,
+                                     qMax(0, oc->start + delta), oc->duration});
+                }
+                mCandidates = cand;
+                mDropIllegal = false;
+            } else {
+                mDropIllegal = true;
+            }
+            break;
+        }
+
+        bool snapped = false;
+        const int sT = snapFrame(newStart, {mDragClipId}, &snapped);
+        if (snapped) { newStart = sT; mSnapTarget = sT; }
 
         // overlap hard constraint: an illegal candidate keeps the last
         // legal state and flags the dragged clip red. Ctrl = insert
@@ -1232,7 +1261,10 @@ void NleTimelineView::finishGestureCommit(const bool insertMode)
     for (auto it = mCandidates.constBegin(); it != mCandidates.constEnd(); ++it) {
         moves.append(it.value());
     }
-    if (insertMode && mDrag == DragMode::MoveClip && mDragClipId >= 0) {
+    // the Ctrl insert-mode push-aside belongs to overwrite dragging;
+    // magnetic mode already rearranged the whole track live
+    if (insertMode && !mModel->magnetic() &&
+            mDrag == DragMode::MoveClip && mDragClipId >= 0) {
         const auto pm = mCandidates.value(mDragClipId);
         if (pm.clipId == mDragClipId) {
             const auto extra = mModel->insertShiftPlan(
@@ -1255,10 +1287,13 @@ void NleTimelineView::finishGestureCommit(const bool insertMode)
     mDropIllegal = false;
     // releasing the gesture flushes queued rebuilds first (the doc is
     // still pristine - the gesture never wrote anything), then the
-    // commit writes everything in one undoable pass
+    // commit writes everything in one undoable pass. A magnetic move
+    // commit IS the final layout (kdenlive 方案A: the dragged clip
+    // lands at the mouse, the packs flow around it) - a follow-up
+    // compaction would pull it back onto the left pack's tail
     mModel->setGestureActive(false);
     if (hadMoves) {
-        mModel->commitMoves(moves, drag != DragMode::TrackHeight &&
+        mModel->commitMoves(moves, drag != DragMode::MoveClip &&
                                mModel->magnetic());
     }
 }
