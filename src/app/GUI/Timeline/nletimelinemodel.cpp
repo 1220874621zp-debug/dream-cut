@@ -1,0 +1,1050 @@
+#include "nletimelinemodel.h"
+
+#include "Private/document.h"
+#include "canvas.h"
+#include "Boxes/containerbox.h"
+#include "Boxes/boundingbox.h"
+#include "Animators/eboxorsound.h"
+#include "Sound/esound.h"
+#include "Timeline/durationrectangle.h"
+#include "Boxes/animationbox.h"
+#include "smartPointers/ememory.h"
+
+#include <QDebug>
+#include <algorithm>
+#include <climits>
+
+NleTimelineModel::NleTimelineModel(Document &document,
+                                   QObject * const parent)
+    : QObject(parent)
+    , mDocument(document)
+{
+    connect(&mDocument, qOverload<Canvas*>(&Document::sceneCreated),
+            this, &NleTimelineModel::refreshFromDocument);
+    connect(&mDocument, qOverload<Canvas*>(&Document::sceneRemoved),
+            this, &NleTimelineModel::refreshFromDocument);
+    connect(&mDocument, &Document::activeSceneSet,
+            this, &NleTimelineModel::refreshFromDocument);
+}
+
+// ---------------------------------------------------------------- state
+
+const NleTimelineModel::Clip *NleTimelineModel::clip(const int clipId) const
+{
+    for (const auto &c : mClips) {
+        if (c.clipId == clipId) { return &c; }
+    }
+    return nullptr;
+}
+
+int NleTimelineModel::trackIndex(const int trackId) const
+{
+    for (int i = 0; i < mTracks.size(); ++i) {
+        if (mTracks.at(i).id == trackId) { return i; }
+    }
+    return -1;
+}
+
+const NleTimelineModel::Track *NleTimelineModel::track(const int trackId) const
+{
+    const int idx = trackIndex(trackId);
+    return idx < 0 ? nullptr : &mTracks.at(idx);
+}
+
+QList<int> NleTimelineModel::clipIdsOnTrack(const int trackId) const
+{
+    QList<QPair<int, int>> byStart; // start, id
+    for (const auto &c : mClips) {
+        if (c.trackId == trackId) { byStart.append({c.start, c.clipId}); }
+    }
+    std::sort(byStart.begin(), byStart.end());
+    QList<int> ids;
+    for (const auto &p : byStart) { ids << p.second; }
+    return ids;
+}
+
+bool NleTimelineModel::trackLocked(const int trackId) const
+{
+    const auto t = track(trackId);
+    return t ? t->locked : false;
+}
+
+int NleTimelineModel::minClipFrames() const
+{
+    return qMax(1, qRound(0.2 * mFps));
+}
+
+Canvas *NleTimelineModel::panelScene() const
+{
+    return mPanelScene.data();
+}
+
+// ------------------------------------------------- validation & planning
+
+bool NleTimelineModel::rangesOverlap(const int aStart, const int aDur,
+                                     const int bStart, const int bDur)
+{
+    return aStart < bStart + bDur && bStart < aStart + aDur;
+}
+
+bool NleTimelineModel::overlapOutside(const int trackId,
+                                      const int start, const int dur,
+                                      const QSet<int> &moving,
+                                      const QSet<int> &exempt) const
+{
+    for (const auto &o : mClips) {
+        if (moving.contains(o.clipId)) { continue; }
+        if (exempt.contains(o.clipId)) { continue; }
+        if (o.trackId != trackId) { continue; }
+        if (rangesOverlap(start, dur, o.start, o.duration)) { return true; }
+    }
+    return false;
+}
+
+QSet<int> NleTimelineModel::collectTangleExemptions(
+        const QSet<int> &moving) const
+{
+    QSet<int> tangled;
+    for (const auto &o : mClips) {
+        if (moving.contains(o.clipId)) { continue; }
+        for (const auto &m : mClips) {
+            if (!moving.contains(m.clipId)) { continue; }
+            if (m.trackId != o.trackId) { continue; }
+            if (rangesOverlap(m.start, m.duration, o.start, o.duration)) {
+                tangled.insert(o.clipId);
+                break;
+            }
+        }
+    }
+    return tangled;
+}
+
+void NleTimelineModel::trimBounds(const int clipId,
+                                  const QSet<int> &moving,
+                                  int *lo, int *hi) const
+{
+    const auto c = clip(clipId);
+    if (!c) { return; }
+    int l = 0;
+    int h = INT_MAX;
+    for (const auto &o : mClips) {
+        if (o.clipId == clipId || moving.contains(o.clipId)) { continue; }
+        if (o.trackId != c->trackId) { continue; }
+        const int oEnd = o.start + o.duration;
+        if (oEnd <= c->start) { l = qMax(l, oEnd); }
+        if (o.start >= c->start) { h = qMin(h, o.start); }
+    }
+    if (lo) { *lo = l; }
+    if (hi) { *hi = h; }
+}
+
+QVector<NleTimelineModel::Move> NleTimelineModel::insertShiftPlan(
+        const int targetTrackId, const int dropStart, const int dropDur,
+        const QSet<int> &moving) const
+{
+    QVector<Move> moves;
+    // the run = every same-track clip the drop touches (or that starts
+    // right of it); it slides right as one rigid block keeping its
+    // internal spacing
+    int firstStart = -1;
+    for (const auto &o : mClips) {
+        if (moving.contains(o.clipId)) { continue; }
+        if (o.trackId != targetTrackId) { continue; }
+        if (o.start + o.duration <= dropStart) { continue; } // fully left
+        firstStart = firstStart < 0 ? o.start : qMin(firstStart, o.start);
+    }
+    const int dropEnd = dropStart + dropDur;
+    if (firstStart < 0 || firstStart >= dropEnd) { return moves; }
+    const int shift = dropEnd - firstStart;
+    for (const auto &o : mClips) {
+        if (moving.contains(o.clipId)) { continue; }
+        if (o.trackId != targetTrackId) { continue; }
+        if (o.start >= firstStart) {
+            moves.append({o.clipId, o.trackId, o.start + shift, o.duration});
+        }
+    }
+    return moves;
+}
+
+QVector<NleTimelineModel::Move> NleTimelineModel::compactGapsPlan() const
+{
+    // per track, in start order: a clip that begins after the previous
+    // one ends slides left onto that out point; overlaps (merged
+    // layouts) are kept as-is, so only genuine gaps close
+    QVector<Move> moves;
+    for (const auto &t : mTracks) {
+        QList<QPair<int, int>> order; // start, clipId
+        for (const auto &c : mClips) {
+            if (c.trackId == t.id) { order.append({c.start, c.clipId}); }
+        }
+        if (order.size() < 2) { continue; }
+        std::sort(order.begin(), order.end());
+        int cursor = -1;
+        for (const auto &p : order) {
+            const auto c = clip(p.second);
+            if (!c) { continue; }
+            int newStart = c->start;
+            if (cursor >= 0 && c->start > cursor) { newStart = cursor; }
+            if (newStart != c->start) {
+                moves.append({c->clipId, c->trackId, newStart, c->duration});
+            }
+            cursor = qMax(cursor, newStart + c->duration);
+        }
+    }
+    return moves;
+}
+
+// ---------------------------------------------------------------- selection
+
+bool NleTimelineModel::isSelected(const int clipId) const
+{
+    return mSelected.contains(clipId);
+}
+
+void NleTimelineModel::setSelection(const QSet<int> &ids)
+{
+    if (mSelected == ids) { return; }
+    mSelected = ids;
+    emit selectionChanged();
+}
+
+void NleTimelineModel::addToSelection(const QSet<int> &ids)
+{
+    if (ids.isEmpty()) { return; }
+    mSelected.unite(ids);
+    emit selectionChanged();
+}
+
+void NleTimelineModel::toggleInSelection(const int clipId)
+{
+    if (mSelected.contains(clipId)) { mSelected.remove(clipId); }
+    else { mSelected.insert(clipId); }
+    emit selectionChanged();
+}
+
+void NleTimelineModel::clearSelection()
+{
+    if (mSelected.isEmpty()) { return; }
+    mSelected.clear();
+    emit selectionChanged();
+}
+
+void NleTimelineModel::selectAll()
+{
+    QSet<int> ids;
+    for (const auto &c : mClips) { ids.insert(c.clipId); }
+    setSelection(ids);
+}
+
+// ---------------------------------------------------------------- gestures
+
+void NleTimelineModel::setGestureActive(const bool active)
+{
+    if (mGestureActive == active) { return; }
+    mGestureActive = active;
+    if (!active && mRebuildQueued) {
+        mRebuildQueued = false;
+        refreshFromDocument();
+    }
+}
+
+// ---------------------------------------------------------------- commit
+
+void NleTimelineModel::setLayerRange(eBoxOrSound * const layer,
+                                     const int start, const int duration)
+{
+    if (!layer) { return; }
+    const auto dur = layer->getDurationRectangle();
+    if (!dur) { return; }
+    const int newMin = start;
+    const int newMax = start + duration - 1;
+    const int oldMin = dur->getMinAbsFrame();
+    const int oldMax = dur->getMaxAbsFrame();
+    // rel/abs shift is constant, so abs deltas are valid rel moves
+    if (newMin != oldMin) {
+        dur->startMinFramePosTransform();
+        dur->moveMinFrame(newMin - oldMin);
+        dur->finishMinFramePosTransform();
+    }
+    if (newMax != oldMax) {
+        dur->startMaxFramePosTransform();
+        dur->moveMaxFrame(newMax - oldMax);
+        dur->finishMaxFramePosTransform();
+    }
+}
+
+void NleTimelineModel::shiftLayer(eBoxOrSound * const layer,
+                                  const int frameDelta)
+{
+    if (!layer || frameDelta == 0) { return; }
+    const auto dur = layer->getDurationRectangle();
+    if (!dur) { return; }
+    dur->startMinFramePosTransform();
+    dur->moveMinFrame(frameDelta);
+    dur->finishMinFramePosTransform();
+    dur->startMaxFramePosTransform();
+    dur->moveMaxFrame(frameDelta);
+    dur->finishMaxFramePosTransform();
+}
+
+bool NleTimelineModel::commitMoves(const QVector<Move> &moves,
+                                   const bool compactAfter)
+{
+    const auto scene = mPanelScene.data();
+    if (!scene || mFps <= 0. || moves.isEmpty()) { return false; }
+
+    // working copy with the moves applied: compaction (if requested)
+    // plans on the post-move state so one commit carries both
+    QVector<Move> all = moves;
+    QVector<Clip> work = mClips;
+    bool anyKnown = false;
+    const auto applyToWork = [&work](const Move &m) {
+        for (auto &c : work) {
+            if (c.clipId != m.clipId) { continue; }
+            c.trackId = m.trackId;
+            c.start = qMax(0, m.start);
+            c.duration = qMax(1, m.duration);
+            return true;
+        }
+        return false;
+    };
+    for (const auto &m : all) { anyKnown = applyToWork(m) || anyKnown; }
+    if (!anyKnown) { return false; }
+    if (compactAfter && mMagnetic) {
+        // compactGapsPlan over the working table
+        for (const auto &t : mTracks) {
+            QList<QPair<int, const Clip*>> order;
+            for (const auto &c : work) {
+                if (c.trackId == t.id) { order.append({c.start, &c}); }
+            }
+            if (order.size() < 2) { continue; }
+            std::sort(order.begin(), order.end(),
+                      [](const auto &a, const auto &b) {
+                          if (a.first != b.first) { return a.first < b.first; }
+                          return a.second->clipId < b.second->clipId;
+                      });
+            int cursor = -1;
+            for (const auto &p : order) {
+                const Clip *c = p.second;
+                int newStart = c->start;
+                if (cursor >= 0 && c->start > cursor) { newStart = cursor; }
+                if (newStart != c->start) {
+                    const Move m{c->clipId, c->trackId, newStart, c->duration};
+                    all.append(m);
+                    applyToWork(m);
+                }
+                cursor = qMax(cursor, newStart + c->duration);
+            }
+        }
+    }
+
+    mInWriteback = true;
+    for (const auto &m : all) {
+        const auto orig = clip(m.clipId);
+        if (!orig || !orig->layer) { continue; }
+        auto * const layer = orig->layer.data();
+        // track type is a hard constraint on every write
+        const auto tr = track(m.trackId);
+        if (!tr || tr->audio != orig->audio) { continue; }
+        if (layer->trackId() != m.trackId) { layer->setTrackId(m.trackId); }
+        setLayerRange(layer, m.start, m.duration);
+    }
+    // the row reorder must stay inside the writeback guard: its
+    // movedObject signal would refresh mid-commit
+    stabilizeRowOrder();
+    mInWriteback = false;
+
+    finishAction();
+    return true;
+}
+
+void NleTimelineModel::stabilizeRowOrder()
+{
+    const auto scene = mPanelScene.data();
+    if (!scene || mTracks.isEmpty()) { return; }
+
+    // keep each track's members contiguous with the tracks in spec
+    // order (the compositing-order invariant), but keep the CURRENT
+    // relative order within a track - a same-lane time slide
+    // reorders nothing. Reorder only when membership moved
+    for (const bool isAudio : {false, true}) {
+        QList<eBoxOrSound*> members; // in current contained order
+        for (const auto &c : scene->getContained()) {
+            const auto l = c.data();
+            if (!l) { continue; }
+            const bool audio = enve_cast<eSound*>(l) != nullptr;
+            if (audio != isAudio) { continue; }
+            members << l;
+        }
+        if (members.size() < 2) { continue; }
+        QList<eBoxOrSound*> desired = members;
+        std::stable_sort(desired.begin(), desired.end(),
+                [this](eBoxOrSound * const a, eBoxOrSound * const b) {
+            return trackIndex(a->trackId()) < trackIndex(b->trackId());
+        });
+        bool changed = false;
+        for (int i = 0; i < members.size(); ++i) {
+            if (members.at(i) != desired.at(i)) { changed = true; break; }
+        }
+        if (!changed) { continue; }
+        const auto parent = members.first()->getParentGroup();
+        if (!parent || parent->getParentScene() != scene) { continue; }
+        int minIdx = INT_MAX;
+        bool stale = false;
+        for (const auto *m : members) {
+            const int idx = parent->getContainedIndex(
+                        const_cast<eBoxOrSound*>(m));
+            if (idx < 0) { stale = true; break; }
+            minIdx = qMin(minIdx, idx);
+        }
+        if (stale || minIdx == INT_MAX) { continue; }
+        parent->moveContainedInList(desired.first(), minIdx);
+        for (int i = 1; i < desired.size(); ++i) {
+            parent->moveContainedBelow(desired.at(i), desired.at(i - 1));
+        }
+    }
+}
+
+void NleTimelineModel::finishAction()
+{
+    if (Document::sInstance) { Document::sInstance->actionFinished(); }
+    refreshFromDocument();
+}
+
+// ---------------------------------------------------------------- doc ops
+
+bool NleTimelineModel::splitBoxes(const QList<BoundingBox*> &boxes,
+                                  const int frame)
+{
+    const auto scene = mPanelScene.data();
+    if (!scene || boxes.isEmpty()) { return false; }
+    scene->clearBoxesSelection();
+    for (auto *b : boxes) { scene->addBoxToSelection(b); }
+    scene->splitBoxesAtFrame(frame);
+    finishAction();
+    return true;
+}
+
+bool NleTimelineModel::requestSplitAtFrame(const int frame)
+{
+    if (mInWriteback || mGestureActive) { return false; }
+    const auto scene = mPanelScene.data();
+    if (!scene || mFps <= 0.) { return false; }
+    // the split operates at the scene's current frame: park the panel
+    // scene on the requested frame first (active scenes route through
+    // the document so the change propagates everywhere)
+    if (scene == mDocument.fActiveScene.data()) {
+        if (frame != mDocument.getActiveSceneFrame()) {
+            mDocument.setActiveSceneFrame(frame);
+        }
+    } else if (frame != scene->anim_getCurrentAbsFrame()) {
+        scene->anim_setAbsFrame(frame);
+    }
+
+    QList<BoundingBox*> boxes;
+    for (const int id : mSelected) {
+        const auto c = clip(id);
+        if (!c || !c->layer) { continue; }
+        const auto box = enve_cast<BoundingBox*>(c->layer.data());
+        if (box) { boxes << box; }
+    }
+    // CapCut-style fallback: no selection cuts EVERY unlocked-track
+    // clip under the frame in one press
+    if (boxes.isEmpty()) {
+        for (const auto &c : mClips) {
+            if (!(c.start <= frame && frame < c.start + c.duration)) { continue; }
+            if (trackLocked(c.trackId)) { continue; }
+            if (!c.layer) { continue; }
+            const auto box = enve_cast<BoundingBox*>(c.layer.data());
+            if (box) { boxes << box; }
+        }
+    }
+    if (boxes.isEmpty()) { return false; }
+    return splitBoxes(boxes, frame);
+}
+
+bool NleTimelineModel::requestRazorCut(const QSet<int> &clipIds,
+                                       const int frame)
+{
+    if (mInWriteback || mGestureActive) { return false; }
+    const auto scene = mPanelScene.data();
+    if (!scene || mFps <= 0.) { return false; }
+
+    QList<BoundingBox*> boxes;
+    int skippedSounds = 0;
+    int skippedEdges = 0;
+    for (const int id : clipIds) {
+        const auto c = clip(id);
+        if (!c || !c->layer) { continue; }
+        const auto box = enve_cast<BoundingBox*>(c->layer.data());
+        if (!box) { ++skippedSounds; continue; }
+        // the cut must leave at least one frame on both sides
+        if (!(c->start < frame && frame < c->start + c->duration - 1)) {
+            ++skippedEdges;
+            continue;
+        }
+        boxes << box;
+    }
+    if (skippedSounds > 0) {
+        emit logMessage(QStringLiteral("剪刀暂不支持音频块，已跳过 %1 块").arg(skippedSounds));
+    }
+    if (skippedEdges > 0) {
+        emit logMessage(QStringLiteral("%1 块在切点边缘，无需分割").arg(skippedEdges));
+    }
+    if (boxes.isEmpty()) { return false; }
+    return splitBoxes(boxes, frame);
+}
+
+bool NleTimelineModel::requestFreeze(const QSet<int> &clipIds,
+                                     const int frame)
+{
+    if (mInWriteback || mGestureActive) { return false; }
+    const auto scene = mPanelScene.data();
+    if (!scene || mFps <= 0.) { return false; }
+
+    // video-family clips only: freezing is frame remapping
+    QList<AnimationBox*> animBoxes;
+    for (const int id : clipIds) {
+        const auto c = clip(id);
+        if (!c || !c->layer) { continue; }
+        if (!(c->start < frame && frame < c->start + c->duration - 1)) { continue; }
+        const auto box = enve_cast<BoundingBox*>(c->layer.data());
+        if (!box) { continue; }
+        const auto animBox = dynamic_cast<AnimationBox*>(box);
+        if (animBox) { animBoxes << animBox; }
+    }
+    if (animBoxes.isEmpty()) {
+        emit logMessage(QStringLiteral("定格仅支持视频/序列类块"));
+        return false;
+    }
+
+    // freezeFrameAction freezes the CURRENT scene frame: park the
+    // playhead on the cut frame for the freeze, then restore it
+    const int savedFrame = scene->anim_getCurrentAbsFrame();
+    scene->anim_setAbsFrame(frame);
+    scene->clearBoxesSelection();
+    for (auto *b : animBoxes) { scene->addBoxToSelection(b); }
+    // split: the ORIGINAL boxes become the right halves [frame..max]
+    scene->splitBoxesAtFrame(frame);
+    for (auto *b : animBoxes) { b->freezeFrameAction(); }
+    scene->anim_setAbsFrame(savedFrame);
+    finishAction();
+    return true;
+}
+
+bool NleTimelineModel::requestSpeed(const int clipId, const qreal rate)
+{
+    if (mInWriteback || mGestureActive) { return false; }
+    const auto scene = mPanelScene.data();
+    if (!scene) { return false; }
+    const auto c = clip(clipId);
+    if (!c || !c->layer) { return false; }
+    const auto box = enve_cast<BoundingBox*>(c->layer.data());
+    const auto animBox = box ? dynamic_cast<AnimationBox*>(box) : nullptr;
+    if (!animBox) {
+        emit logMessage(QStringLiteral("变速仅支持视频/序列类块"));
+        return false;
+    }
+    // stretch > 1 = slower, so rate 2x maps to stretch 0.5; VideoBox
+    // overrides the setter and carries its embedded audio along
+    animBox->setStretch(1.0 / rate);
+    finishAction();
+    return true;
+}
+
+bool NleTimelineModel::requestDelete(const QSet<int> &clipIds,
+                                     const bool ripple)
+{
+    if (mInWriteback || mGestureActive) { return false; }
+    const auto scene = mPanelScene.data();
+    if (!scene || mFps <= 0.) { return false; }
+
+    QList<eBoxOrSound*> victims;
+    QSet<int> victimIds;
+    for (const int id : clipIds) {
+        const auto c = clip(id);
+        if (!c || !c->layer) { continue; }
+        victims << c->layer.data();
+        victimIds << id;
+    }
+    if (victims.isEmpty()) { return false; }
+
+    if (ripple) {
+        // per track: every later clip slides left by the total length
+        // of the removed clips that started before it (exact for
+        // chains, in frames)
+        QSet<int> affectedTracks;
+        for (const int id : victimIds) {
+            const auto c = clip(id);
+            if (c) { affectedTracks.insert(c->trackId); }
+        }
+        for (const int trackId : affectedTracks) {
+            for (const auto &c : mClips) {
+                if (victimIds.contains(c.clipId)) { continue; }
+                if (c.trackId != trackId || !c.layer) { continue; }
+                int removedBefore = 0;
+                for (const int vid : victimIds) {
+                    const auto v = clip(vid);
+                    if (v && v->trackId == trackId && v->start < c.start) {
+                        removedBefore += v->duration;
+                    }
+                }
+                if (removedBefore > 0) { shiftLayer(c.layer.data(), -removedBefore); }
+            }
+        }
+    }
+
+    mInWriteback = true;
+    for (auto *layer : victims) { layer->removeFromParent_k(); }
+    mInWriteback = false;
+    finishAction();
+    return true;
+}
+
+bool NleTimelineModel::requestMoveClipToTrack(const int clipId,
+                                              const int dstTrackId)
+{
+    const auto c = clip(clipId);
+    if (!c || !c->layer) { return false; }
+    const auto dst = track(dstTrackId);
+    if (!dst) { return false; }
+    if (dst->audio != c->audio) {
+        emit logMessage(QStringLiteral("目标轨道类型不符"));
+        return false;
+    }
+    if (dst->locked) {
+        emit logMessage(QStringLiteral("目标轨道已锁定"));
+        return false;
+    }
+    const QSet<int> moving{clipId};
+    if (overlapOutside(dstTrackId, c->start, c->duration, moving, {})) {
+        emit logMessage(QStringLiteral("目标位置与现有块重叠"));
+        return false;
+    }
+    if (!commitMoves({{clipId, dstTrackId, c->start, c->duration}})) {
+        return false;
+    }
+    emit logMessage(QStringLiteral("移动块“%1”到 %2").arg(c->name, dst->name));
+    return true;
+}
+
+// ---------------------------------------------------------------- tracks
+
+bool NleTimelineModel::requestTrackAdd(const bool audio)
+{
+    const auto scene = mPanelScene.data();
+    if (!scene) { return false; }
+    int sameType = 0;
+    for (const auto &t : mTracks) {
+        if (t.audio == audio) { ++sameType; }
+    }
+    const QString name = audio
+            ? QStringLiteral("A%1").arg(sameType + 1)
+            : QStringLiteral("V%1").arg(sameType + 1);
+    scene->addTrackSpec(audio, name);
+    finishAction();
+    return true;
+}
+
+bool NleTimelineModel::requestTrackRemove(const int trackId)
+{
+    const auto scene = mPanelScene.data();
+    const auto t = track(trackId);
+    if (!scene || !t) { return false; }
+    // the last lane of a type must survive: fresh layers of that type
+    // would have no legal home
+    int sameType = 0;
+    for (const auto &o : mTracks) {
+        if (o.audio == t->audio) { ++sameType; }
+    }
+    if (sameType <= 1) {
+        emit logMessage(QStringLiteral("最后一个%1轨不可删除")
+                        .arg(t->audio ? QStringLiteral("音频")
+                                      : QStringLiteral("视频")));
+        return false;
+    }
+    if (scene->removeTrackSpec(trackId)) {
+        finishAction();
+        return true;
+    }
+    emit logMessage(QStringLiteral("轨道非空或不存在，未删除"));
+    return false;
+}
+
+void NleTimelineModel::requestTrackRename(const int trackId,
+                                          const QString &name)
+{
+    const auto scene = mPanelScene.data();
+    if (!scene) { return; }
+    scene->setTrackSpecName(trackId, name);
+    refreshFromDocument();
+}
+
+void NleTimelineModel::requestTrackSetLocked(const int trackId,
+                                             const bool locked)
+{
+    const auto scene = mPanelScene.data();
+    if (!scene) { return; }
+    scene->setTrackSpecLocked(trackId, locked);
+    refreshFromDocument();
+}
+
+void NleTimelineModel::requestTrackSetHeight(const int trackId,
+                                             const int height)
+{
+    const auto scene = mPanelScene.data();
+    if (!scene) { return; }
+    scene->setTrackSpecHeight(trackId, height);
+    refreshFromDocument();
+}
+
+void NleTimelineModel::requestTrackToggleMute(const int trackId,
+                                              const bool allSameType)
+{
+    if (mInWriteback || mGestureActive) { return; }
+    const auto scene = mPanelScene.data();
+    const auto t = track(trackId);
+    if (!scene || !t) { return; }
+    // target lanes: one, or every lane of the same type (kdenlive Shift)
+    QList<int> lanes{trackId};
+    if (allSameType) {
+        lanes.clear();
+        for (const auto &o : mTracks) {
+            if (o.audio == t->audio) { lanes << o.id; }
+        }
+    }
+    // lane layers: every clip currently parked on the target lanes
+    QList<eBoxOrSound*> laneLayers;
+    for (const auto &c : mClips) {
+        if (!lanes.contains(c.trackId)) { continue; }
+        if (c.layer) { laneLayers << c.layer.data(); }
+    }
+    if (laneLayers.isEmpty()) { return; }
+    // one press = one common state: any visible member -> hide all
+    const bool anyVisible = std::any_of(
+                laneLayers.cbegin(), laneLayers.cend(),
+                [](eBoxOrSound * const l) { return l->isVisible(); });
+    mInWriteback = true;
+    for (auto *l : laneLayers) { l->setVisible(!anyVisible); }
+    mInWriteback = false;
+    finishAction();
+}
+
+// ---------------------------------------------------------------- guides
+
+void NleTimelineModel::requestMarkerAdd(const int frame)
+{
+    const auto scene = mPanelScene.data();
+    if (!scene) { return; }
+    scene->setMarker(frame);
+    refreshFromDocument();
+}
+
+void NleTimelineModel::requestMarkerRemove(const int frame)
+{
+    const auto scene = mPanelScene.data();
+    if (!scene) { return; }
+    if (scene->removeMarker(frame)) { refreshFromDocument(); }
+}
+
+// ---------------------------------------------------------------- magnetic
+
+void NleTimelineModel::setMagnetic(const bool on)
+{
+    if (mMagnetic == on) { return; }
+    mMagnetic = on;
+    emit magneticChanged(on);
+    if (!on) { return; }
+    // turning it on enforces the no-gap invariant right away
+    // (undoable through the commit)
+    const auto moves = compactGapsPlan();
+    if (!moves.isEmpty()) {
+        emit logMessage(QStringLiteral("磁吸开启：%1 块左移贴紧").arg(moves.size()));
+        commitMoves(moves, false);
+    } else {
+        emit logMessage(QStringLiteral("磁吸开启：轨道已无间隙"));
+    }
+}
+
+// ---------------------------------------------------------------- undo
+
+void NleTimelineModel::undo()
+{
+    const auto scene = mDocument.fActiveScene.data();
+    if (!scene) { return; }
+    scene->undo();
+    finishAction();
+}
+
+void NleTimelineModel::redo()
+{
+    const auto scene = mDocument.fActiveScene.data();
+    if (!scene) { return; }
+    scene->redo();
+    finishAction();
+}
+
+// ---------------------------------------------------------------- doc sync
+
+void NleTimelineModel::connectPanelScene(Canvas * const scene)
+{
+    if (scene == mPanelScene.data()) { return; }
+    for (const auto &conn : mSceneConns) { disconnect(conn); }
+    mSceneConns.clear();
+    mPanelScene = scene;
+    if (!scene) { return; }
+
+    mSceneConns << connect(scene, &Canvas::ca_childAdded,
+                           this, [this](Property*) { refreshFromDocument(); });
+    mSceneConns << connect(scene, &Canvas::ca_childRemoved,
+                           this, [this](Property*) { refreshFromDocument(); });
+    // native row reorder (drag in the layer panel / track writebacks /
+    // undo) changes the lane order derived from the specs
+    mSceneConns << connect(scene, &ContainerBox::movedObject,
+                           this, [this](const int, const int, eBoxOrSound*) {
+        refreshFromDocument();
+    });
+    mSceneConns << connect(scene, &Canvas::prp_currentFrameChanged,
+                           this, [this](const UpdateReason) {
+        if (mInWriteback) { return; }
+        const auto s = mPanelScene.data();
+        if (s) { emit playheadFrameChanged(s->anim_getCurrentAbsFrame()); }
+    });
+    mSceneConns << connect(scene, &Canvas::fpsChanged,
+                           this, [this](const qreal) { refreshFromDocument(); });
+}
+
+void NleTimelineModel::connectChildren(Canvas * const scene)
+{
+    for (const auto &conn : mChildConns) { disconnect(conn); }
+    mChildConns.clear();
+    if (!scene) { return; }
+    for (const auto &child : scene->getContained()) {
+        const auto layer = child.data();
+        if (!layer) { continue; }
+        mChildConns << connect(layer, &eBoxOrSound::prp_nameChanged,
+                               this, [this](const QString&) { refreshFromDocument(); });
+        // native track merge / split (layer-panel drags, context
+        // menus, undo) must re-map the lanes
+        mChildConns << connect(layer, &eBoxOrSound::trackIdChanged,
+                               this, [this](const int) { refreshFromDocument(); });
+        const auto dur = layer->getDurationRectangle();
+        if (dur) {
+            mChildConns << connect(dur, &DurationRectangle::minRelFrameChanged,
+                                   this, [this](const int, const int) { refreshFromDocument(); });
+            mChildConns << connect(dur, &DurationRectangle::maxRelFrameChanged,
+                                   this, [this](const int, const int) { refreshFromDocument(); });
+        }
+    }
+}
+
+QList<eTrackSpec> NleTimelineModel::deriveTrackSpecs(
+        Canvas * const scene,
+        const QList<QPair<eBoxOrSound*, bool>> &items)
+{
+    // pre-P0 panel derivation, frozen into the persistent table:
+    // siblings sharing a trackId share a lane (first-seen order),
+    // every other layer owns one; ids come from the layers' own space
+    struct Lane { int tid; QList<eBoxOrSound*> members; };
+    QList<Lane> lanes[2]; // 0 = video, 1 = audio
+    for (const auto &it : items) {
+        const int audioIdx = it.second ? 1 : 0;
+        const int tid = it.first->trackId();
+        bool joined = false;
+        if (tid >= 0) {
+            for (auto &ln : lanes[audioIdx]) {
+                if (ln.tid == tid) {
+                    ln.members << it.first;
+                    joined = true;
+                    break;
+                }
+            }
+        }
+        if (!joined) { lanes[audioIdx].append({tid, {it.first}}); }
+    }
+    int nextId = scene->newTrackId(scene);
+    QList<eTrackSpec> specs;
+    for (int a = 0; a < 2; ++a) {
+        const int total = lanes[a].size();
+        for (int i = 0; i < total; ++i) {
+            eTrackSpec spec;
+            spec.mId = nextId++;
+            spec.mAudio = a == 1;
+            spec.mName = a == 0
+                    ? QStringLiteral("V%1").arg(total - i)
+                    : QStringLiteral("A%1").arg(total - i);
+            specs.append(spec);
+            for (auto *l : lanes[a][i].members) {
+                if (l->trackId() != spec.mId) { l->setTrackId(spec.mId); }
+            }
+        }
+    }
+    // type completeness: the table must always hold at least one lane
+    // of EACH type, otherwise a fresh sound/visual layer would have no
+    // legal home
+    const auto ensureType = [&](const bool audio) {
+        for (const auto &s : specs) { if (s.mAudio == audio) { return; } }
+        eTrackSpec spec;
+        spec.mId = nextId++;
+        spec.mAudio = audio;
+        spec.mName = audio ? QStringLiteral("A1") : QStringLiteral("V1");
+        specs.append(spec);
+    };
+    ensureType(false);
+    ensureType(true);
+
+    scene->initTrackSpecs(specs);
+    qDebug("[NLE] track migration: %d tracks installed", specs.size());
+    return specs;
+}
+
+void NleTimelineModel::refreshFromDocument()
+{
+    if (mInWriteback) { return; }
+    if (mGestureActive) { mRebuildQueued = true; return; }
+
+    // panel scene: follow the active scene, but when it has nothing
+    // to edit (e.g. the user dove into a child scene), keep showing
+    // the last scene that had blocks instead of blanking the panel
+    const auto activeScene = mDocument.fActiveScene.data();
+    QList<QPair<eBoxOrSound*, bool>> items;
+    const auto collect = [&items](Canvas * const s) {
+        items.clear();
+        if (!s) { return; }
+        // mirror the native timeline: EVERY child layer shows here.
+        // Sounds become audio clips; every visual layer (scene links,
+        // vectors, images, text, groups, ...) becomes a video clip
+        for (const auto &child : s->getContained()) {
+            const auto layer = child.data();
+            if (!layer) { continue; }
+            const bool audio = enve_cast<eSound*>(layer) != nullptr;
+            items.append({layer, audio});
+        }
+    };
+    collect(activeScene);
+    auto scene = activeScene;
+    if (items.isEmpty()) {
+        const auto fallback = mPanelScene.data();
+        if (fallback && fallback != activeScene) {
+            collect(fallback);
+            if (!items.isEmpty()) { scene = fallback; }
+        }
+    }
+
+    connectPanelScene(scene);
+    connectChildren(scene);
+
+    // selection survives rebuilds by layer name (collected from the
+    // outgoing table before it is replaced)
+    mSelectionNames.clear();
+    for (const int id : mSelected) {
+        const auto c = clip(id);
+        if (c) { mSelectionNames.insert(c->name); }
+    }
+    mSelected.clear();
+
+    // tracks are explicit persistent entities: video specs first (top
+    // lane = first video spec), then audio specs. A virgin scene (or
+    // a pre-P0 project) installs the derived legacy layout once
+    auto specs = scene ? scene->getTrackSpecs() : QList<eTrackSpec>();
+    if (scene && specs.isEmpty()) {
+        // the setTrackId calls inside must not re-enter the refresh,
+        // and must not leave undo entries (a load-time migration must
+        // not be the user's first Ctrl+Z)
+        mInWriteback = true;
+        const auto undoBlock = scene->blockUndoRedo();
+        specs = deriveTrackSpecs(scene, items);
+        mInWriteback = false;
+    }
+
+    QHash<int, int> laneById;
+    mTracks.clear();
+    for (const auto &s : specs) {
+        if (s.mAudio) { continue; }
+        laneById.insert(s.mId, mTracks.size());
+        mTracks.append({s.mId, s.mName, false, s.mLocked, false, s.mHeight});
+    }
+    const int videoCount = mTracks.size();
+    for (const auto &s : specs) {
+        if (!s.mAudio) { continue; }
+        laneById.insert(s.mId, mTracks.size());
+        mTracks.append({s.mId, s.mName, true, s.mLocked, false, s.mHeight});
+    }
+
+    // lane membership: the layer's trackId; unknown ids (fresh layers)
+    // park on the topmost track of their type until the next commit
+    // materializes the id - the refresh itself never mutates the doc
+    const int trackCount = mTracks.size();
+    QVector<int> lane(items.size(), 0);
+    QVector<QList<eBoxOrSound*>> laneMembers(trackCount);
+    for (int i = 0; i < items.size(); ++i) {
+        int laneIdx = laneById.value(items[i].first->trackId(), -1);
+        if (laneIdx < 0) {
+            for (int t = 0; t < trackCount; ++t) {
+                if (mTracks.at(t).audio == items[i].second) { laneIdx = t; break; }
+            }
+        }
+        if (laneIdx < 0) { laneIdx = 0; }
+        lane[i] = laneIdx;
+        laneMembers[laneIdx].append(items[i].first);
+    }
+    // mute mirror + default numbering for unnamed specs
+    for (int t = 0; t < trackCount; ++t) {
+        bool allHidden = !laneMembers[t].isEmpty();
+        for (const auto *l : laneMembers[t]) {
+            if (l->isVisible()) { allHidden = false; break; }
+        }
+        mTracks[t].muted = allHidden;
+        if (mTracks[t].name.isEmpty()) {
+            mTracks[t].name = mTracks[t].audio
+                    ? QStringLiteral("A%1").arg(trackCount - t)
+                    : QStringLiteral("V%1").arg(videoCount - t);
+        }
+    }
+
+    // rebuild the clip table with stable ids: a layer keeps its clip
+    // id across refreshes so the view's media caches survive (stale
+    // dead-pointer keys are harmless bookkeeping)
+    const qreal fps = scene ? scene->getFps() : 0.;
+    if (fps > 0.) { mFps = fps; }
+    const int fallbackLen = scene ? scene->getFrameRange().fMax : 0;
+    mClips.clear();
+    for (int i = 0; i < items.size(); ++i) {
+        const auto &it = items[i];
+        const auto dur = it.first->getDurationRectangle();
+        int start = 0;
+        int length = qMax(1, fallbackLen);
+        if (dur) {
+            // absolute frames: the native timeline draws and hit-tests
+            // the duration bar in abs space
+            const int minF = dur->getMinAbsFrame();
+            const int maxF = dur->getMaxAbsFrame();
+            start = minF;
+            length = maxF - minF + 1;
+        }
+        Clip c;
+        c.layer = it.first;
+        c.clipId = mLayerToClipId.value(it.first, 0);
+        if (c.clipId == 0) {
+            c.clipId = mNextClipId++;
+            mLayerToClipId.insert(it.first, c.clipId);
+        }
+        c.name = it.first->prp_getName();
+        c.audio = it.second;
+        c.trackId = mTracks.value(lane[i]).id;
+        c.start = qMax(0, start);
+        c.duration = qMax(1, length);
+        mClips.append(c);
+        if (mSelectionNames.contains(c.name)) { mSelected.insert(c.clipId); }
+    }
+
+    qDebug("[NLE] refresh panel=%s clips=%d video=%d audio=%d active=%s",
+           scene ? scene->prp_getName().toUtf8().constData() : "-",
+           items.size(), videoCount, trackCount - videoCount,
+           mDocument.fActiveScene ?
+               mDocument.fActiveScene->prp_getName().toUtf8().constData() : "-");
+
+    emit modelChanged();
+    emit guidesChanged();
+    if (scene) { emit playheadFrameChanged(scene->anim_getCurrentAbsFrame()); }
+}

@@ -20,7 +20,7 @@
 
 namespace {
 // SkImage -> QImage copy (BGRA/RGBA premul), same conversion as the
-// EditorTimelineSync midpoint thumbnails
+// NleTimelineController midpoint thumbnails
 QImage skImageToQImage(const sk_sp<SkImage> &src)
 {
     QImage img;

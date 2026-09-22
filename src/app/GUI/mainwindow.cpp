@@ -70,8 +70,6 @@
 #include "effectspresetspanel.h"
 #include "quickeffectsearchdialog.h"
 #include "projectpanel.h"
-#include "editortimelinewidget.h"
-#include "editortimelinesync.h"
 #include <QShortcut>
 #include "textanimpresetpanel.h"
 #include "scriptmanager.h"

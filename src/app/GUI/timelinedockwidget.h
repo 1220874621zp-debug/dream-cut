@@ -48,13 +48,11 @@
 
 #include "smartPointers/ememory.h"
 #include "framerange.h"
-#include "timelinebasewrappernode.h"
 #include "widgets/qdoubleslider.h"
 #include "renderhandler.h"
 #include "widgets/framespinbox.h"
 
 class FrameScrollBar;
-class TimelineWidget;
 class MainWindow;
 class AnimationDockWidget;
 class RenderWidget;
@@ -63,8 +61,9 @@ class Canvas;
 class Document;
 class LayoutHandler;
 class BrushContexedWrapper;
-class EditorTimelineWidget;
-class EditorTimelineSync;
+class NleTimelineModel;
+class NleTimelineView;
+class NleTimelineController;
 class DirectPlayer;
 
 enum class CanvasMode : short;
@@ -117,8 +116,9 @@ private:
     void interruptPreview();
     void jumpToIntermediateFrame(bool forward);
 
-    // AE-like property reveal shortcuts: expand the matching
-    // property row of every selected layer in the timeline tree
+    // AE-like property reveal shortcuts: expanded property rows of
+    // the selected layers in the old classic timeline; the properties
+    // panel is their home now (status-bar notice kept for the keys)
     void showTransformProperty(const int which); // 0 pivot 1 pos 2 scale 3 rot 4 opacity
     void showAnimatedProperties();               // U key behavior
     void setupPropertyShortcuts();
@@ -152,15 +152,16 @@ private:
     void addSpacer();
     void addBlankAction();
 
-    // the editing timeline is the dock's only content (classic
-    // keyframe stack retired, kdenlive alignment)
+    // the kdenlive-style editing timeline (model + view + controller)
+    // is the dock's only content (classic keyframe stack retired)
     void setupNleActions();
 
     Document& mDocument;
     MainWindow* const mMainWindow;
     QWidget *mNlePage = nullptr;
-    EditorTimelineWidget *mEditorTimeline = nullptr;
-    EditorTimelineSync *mEditorSync = nullptr;
+    NleTimelineModel *mNleModel = nullptr;
+    NleTimelineView *mNleView = nullptr;
+    NleTimelineController *mNleController = nullptr;
     DirectPlayer *mDirectPlayer = nullptr;
 
     QToolBar *mToolBar;
@@ -196,7 +197,7 @@ private:
 
     // NLE mode toolbar group
     // PR/CapCut-style editing tools (checkable, exclusive): order
-    // matches EditorTimelineWidget::EditTool (5 tools incl. spacer)
+    // matches NleTimelineView::EditTool (5 tools incl. spacer)
     class QActionGroup *mToolGroup = nullptr;
     QAction *mToolActs[5] = { nullptr, nullptr, nullptr, nullptr, nullptr };
     QAction *mNleToolSeps[3] = { nullptr, nullptr, nullptr };
@@ -211,9 +212,6 @@ private:
 
     QAction *mRenderProgressAct;
     QProgressBar *mRenderProgress;
-
-
-    //AnimationDockWidget *mAnimationDockWidget;
 
     QPair<bool,int> mPausedPreviewState;
 

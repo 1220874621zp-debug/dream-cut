@@ -1,0 +1,227 @@
+#ifndef NLETIMELINEVIEW_H
+#define NLETIMELINEVIEW_H
+
+#include <QWidget>
+#include <QVector>
+#include <QPixmap>
+#include <QImage>
+#include <QHash>
+#include <QSet>
+#include <QPair>
+
+#include "nletimelinemodel.h"
+
+class QScrollBar;
+
+// kdenlive-style timeline view: pure rendering + gestures over
+// NleTimelineModel. The view holds NO document state - tracks, clips
+// and selection are read from the model, and a running drag never
+// mutates anything: candidate placements are computed against the
+// model (which therefore stays the press-time snapshot) and painted
+// as an overlay; the release turns them into one model commit.
+// Everything works in absolute frames on the scene frame grid.
+class NleTimelineView : public QWidget
+{
+    Q_OBJECT
+public:
+    explicit NleTimelineView(NleTimelineModel * const model,
+                             QWidget * const parent = nullptr);
+
+    void setScrollBar(QScrollBar * const bar);
+    int playheadFrame() const { return mPlayheadFrame; }
+
+    // editing tools (PR/CapCut style): the tool changes what a plain
+    // left click on a clip does; Select keeps the classic
+    // move/trim/rubber-band interactions
+    enum class EditTool { Select, Razor, TrackBackward, TrackForward,
+                          Spacer };
+    void setTool(const EditTool tool);
+    EditTool tool() const { return mTool; }
+
+    // toolbar zoom slider (0-100, right = zoom in), playhead-anchored
+    void setZoomLevel(const int level);
+
+    // ruler markers (abs frames + titles) and the scene in/out band
+    // (frames; negative = disabled), fed by the controller
+    void setMarkers(const QVector<QPair<int, QString>> &markers);
+    void setRangeBand(const int inFrame, const int outFrame);
+
+    // media delivered by the controller: real rendered frame per
+    // video-family clip (midpoint thumbnail / decoded filmstrip tiles
+    // keyed by abs frame) and real waveform peaks per abs second
+    void setClipThumbnail(const int clipId, const QImage &image);
+    void setClipThumbFrame(const int clipId, const int absFrame,
+                           const QImage &image);
+    void setClipWave(const int clipId, const int absSecond,
+                     const QVector<qreal> &peaks);
+
+    // visible range in frames (the controller culls media requests)
+    int viewStartFrame() const;
+    int viewEndFrame() const;
+    double pxPerFrame() const { return mPxPerFrame; }
+
+public slots:
+    void zoomIn();
+    void zoomOut();
+    void zoomFit();
+    void setPlayheadFrame(const int frame);
+    // CapCut 分割 at the view playhead (toolbar button / S key)
+    void splitAtPlayhead();
+    // CapCut 定格: freeze the selection at the playhead
+    void freezeAtPlayhead();
+    void requestDelete(const bool ripple = false);
+
+signals:
+    // zoom / scroll / resize changed the visible range
+    void viewChanged();
+    // the user dragged/clicked the playhead to this frame
+    void playheadDragged(const int frame);
+    // active editing tool changed (int = EditTool); the dock keeps
+    // its checkable toolbar actions in sync
+    void toolChanged(const int tool);
+    // view-side refusals (status bar feedback)
+    void logMessage(const QString &msg);
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
+    void contextMenuEvent(QContextMenuEvent *event) override;
+    void wheelEvent(QWheelEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
+    void leaveEvent(QEvent *event) override;
+    void hideEvent(QHideEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
+
+private:
+    // ---- layout / mapping (frames <-> pixels) ----
+    int rulerHeight() const { return 30; }
+    int headerWidth() const { return 132; }
+    int trackHeight(const int trackIdx) const; // live preview aware
+    int trackY(const int trackIdx) const;      // top y of track content
+    int trackAtY(const int y) const;           // -1 if none
+    int xToFrame(const int x) const;
+    int frameToX(const int frame) const;
+    int contentFrames() const; // right edge of content (frames)
+    QRectF clipRect(const NleTimelineModel::Clip &c) const;
+    QRectF moveRect(const NleTimelineModel::Move &m) const;
+
+    // ---- painting ----
+    void drawRuler(QPainter &p);
+    void drawTrackHeaders(QPainter &p);
+    void drawTrackBodies(QPainter &p);
+    void drawClip(QPainter &p, const NleTimelineModel::Clip &c,
+                  bool ghost = false);
+    void drawMove(QPainter &p, const NleTimelineModel::Move &m);
+    void drawPlayhead(QPainter &p);
+    QPixmap thumbnailTile(const int clipId, const int hueSeed, const int h);
+    QString timecode(const int frame) const;
+
+    // ---- interaction ----
+    enum class DragMode { None, MoveClip, TrimLeft, TrimRight, Playhead,
+                          TrackHeight, SpacerMove };
+    int clipAt(const QPoint &pos, QRectF *rectOut = nullptr) const; // id or -1
+    // candidate-or-model placement of a clip (snapping considers the
+    // live candidate positions of the other moving clips)
+    NleTimelineModel::Move effectiveMove(const int clipId) const;
+    int snapFrame(const int frame, const QSet<int> &ignoreIds,
+                  bool *snappedOut) const;
+    void applyZoom(const double factor, const int anchorX);
+    void clampView();
+    void updateScrollBar();
+    void applyToolCursor(const QPoint &pos);
+
+    // ---- move/trim/spacer gesture helpers ----
+    // drop legality: no collision with anything outside the moving
+    // set (tangle exemptions apply); riders shift on their own tracks
+    bool dropLegal(const int primaryId, const int targetTrackId,
+                   const int newStart) const;
+    // magnetic follow (CapCut): trimming the out point slides every
+    // same-track clip that started at/after the old out point by the
+    // same delta; returns their candidate moves for this newEnd
+    QVector<NleTimelineModel::Move> magneticFollowMoves(
+            const int clipId, const int oldEnd, const int newEnd) const;
+    // plain-click actions of the non-select tools (also reused by the
+    // clip context menu)
+    void razorCutAt(const QPoint &pos, const int clipId,
+                    const bool allTracks);
+    void trackSelectAt(const QPoint &pos, const int clipId,
+                       const bool backward);
+    void trackSelectAll(const QPoint &pos, const bool backward);
+
+    // ---- track header interactions ----
+    QRect addTrackRect(const bool audio) const;  // corner +V / +A buttons
+    QRect muteBadgeRect(const int trackIdx) const;
+    QRect lockBadgeRect(const int trackIdx) const;
+    int nearestTrackOfType(const int y, const bool audio) const;
+    void renameTrackDialog(const int trackIdx);
+    // end an editing gesture: flush candidates into one model commit
+    // (insert-mode push-aside + magnetic follow rides along), then
+    // reset the gesture state
+    void finishGestureCommit(const bool insertMode);
+
+    NleTimelineModel * const mModel;
+
+    // ---- view state ----
+    double mPxPerFrame = 2.4;  // zoom (px per frame, fps-dependent)
+    int mScrollFrame = 0;      // left edge frame
+    int mPlayheadFrame = 50;
+    QVector<QPair<int, QString>> mMarkers; // abs frame, title
+    int mRangeIn = -1;         // scene in/out band (frames, <0 = off)
+    int mRangeOut = -1;
+    QHash<int, int> mHeightPreview; // track height gesture preview
+
+    // ---- editing tools ----
+    EditTool mTool = EditTool::Select;
+    QCursor mRazorCursor;      // procedural blade cursor, built once
+
+    // ---- gesture state (candidates only - the model stays pristine
+    // and doubles as the press-time snapshot) ----
+    DragMode mDrag = DragMode::None;
+    int mDragClipId = -1;      // primary clip of the gesture
+    int mGrabOffsetFrames = 0; // move: cursor frame - clip start
+    QHash<int, NleTimelineModel::Move> mCandidates;
+    QSet<int> mMovingIds;      // selection riding the gesture
+    QSet<int> mTangled;        // press-time exemption set
+    struct Snap { int clipId; int start; };
+    QVector<Snap> mSpacerOrig; // spacer press snapshot (ids + starts)
+    int mSpacerPressFrame = 0;
+    bool mDropIllegal = false; // live overlap feedback during a move
+    int mSnapTarget = -1;      // snap guide frame, -1 = none
+    QPoint mPressPos;
+    int mDragTrackIdx = -1;    // TrackHeight gesture lane
+    int mPressTrackHeight = 0;
+
+    int mHoverId = -1;
+    QPoint mHoverPos;          // live cursor pos for the razor guide
+    bool mRubber = false;      // rubber band selection in progress
+    QPoint mRubberStart;
+
+    QScrollBar *mScrollBar = nullptr;
+    // media caches (clip ids are stable across rebuilds, so these
+    // survive model changes)
+    QHash<QString, QPixmap> mThumbCache;   // procedural placeholder tiles
+    QHash<int, QImage> mRealThumbs;        // clipId -> rendered frame
+    QHash<int, QPixmap> mRealScaled;       // clipId -> height-matched pm
+    QHash<int, QMap<int, QImage>> mFilm;   // clipId -> abs frame -> tile
+    QHash<int, QHash<int, QVector<qreal>>> mWaves; // clipId -> sec -> peaks
+
+    // theme
+    QColor cBg       {0x1b,0x1b,0x1b};
+    QColor cBgAlt    {0x22,0x22,0x22};
+    QColor cRuler    {0x1d,0x1d,0x1d};
+    QColor cHeader   {0x24,0x24,0x26};
+    QColor cGridLine {0x2c,0x2c,0x2c};
+    QColor cText     {0xc8,0xc8,0xc8};
+    QColor cTextDim  {0x77,0x77,0x77};
+    QColor cAccent   {0x08,0xa5,0x81}; // selection/highlight (theme)
+    QColor cPlayhead {0xe8,0x4c,0x4c};
+    QColor cVideoBar {0x0e,0x7d,0x6c}; // clip name bar (theme dark)
+    QColor cAudioBody{0x1d,0x33,0x52};
+    QColor cAudioWave{0x4f,0x8f,0xd6};
+    void refreshThemeColors();
+};
+
+#endif // NLETIMELINEVIEW_H

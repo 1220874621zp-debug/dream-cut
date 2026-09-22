@@ -232,8 +232,9 @@ set(
     GUI/ewidgetsimpl.cpp
     GUI/layouthandler.cpp
     GUI/projectpanel.cpp
-    GUI/editortimelinewidget.cpp
-    GUI/editortimelinesync.cpp
+    GUI/Timeline/nletimelinemodel.cpp
+    GUI/Timeline/nletimelineview.cpp
+    GUI/Timeline/nletimelinecontroller.cpp
     GUI/timelinethumbprovider.cpp
     GUI/directplayer.cpp
     GUI/textanimpresetpanel.cpp
@@ -303,8 +304,9 @@ set(
     GUI/textanimpresetpanel.h
     GUI/timelinebasewrappernode.h
     GUI/timelinedockwidget.h
-    GUI/editortimelinewidget.h
-    GUI/editortimelinesync.h
+    GUI/Timeline/nletimelinemodel.h
+    GUI/Timeline/nletimelineview.h
+    GUI/Timeline/nletimelinecontroller.h
     GUI/timelinethumbprovider.h
     GUI/directplayer.h
     GUI/timelinehighlightwidget.h

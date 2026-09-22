@@ -74,8 +74,9 @@
 #include "layouthandler.h"
 #include "memoryhandler.h"
 #include "appsupport.h"
-#include "editortimelinewidget.h"
-#include "editortimelinesync.h"
+#include "GUI/Timeline/nletimelinemodel.h"
+#include "GUI/Timeline/nletimelineview.h"
+#include "GUI/Timeline/nletimelinecontroller.h"
 #include "directplayer.h"
 #include "Sound/audiohandler.h"
 
@@ -297,6 +298,14 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     setLayout(mMainLayout);
     mMainLayout->setSpacing(0);
     mMainLayout->setContentsMargins(0, 0, 0, 0);
+
+    // the timeline model exists from the start so the toolbar (zoom
+    // slider, NLE cluster) can wire to it before the page is built
+    mNleModel = new NleTimelineModel(mDocument, this);
+    connect(mNleModel, &NleTimelineModel::logMessage, this,
+            [this](const QString &msg) {
+        if (mMainWindow) { mMainWindow->statusBar()->showMessage(msg, 4000); }
+    });
 
     mFrameRewindAct = new QAction(QIcon::fromTheme("rewind"),
                                   tr("Rewind"),
@@ -769,7 +778,7 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     mZoomSlider->setMaximumHeight(18);
     mZoomSlider->setToolTip(tr("时间轴缩放（右=放大，等价 Ctrl+滚轮）"));
     connect(mZoomSlider, &QSlider::valueChanged, this, [this](const int v) {
-        if (mEditorTimeline) { mEditorTimeline->setZoomLevel(v); }
+        if (mNleView) { mNleView->setZoomLevel(v); }
     });
     mToolBar->addWidget(mZoomSlider);
 
@@ -840,27 +849,33 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
         mStopButton->setEnabled(scene);
     });
 
-    // the editing timeline IS the timeline now: the classic per-scene
-    // keyframe stack is retired (kdenlive alignment), the NLE page is
-    // the dock's only content. The LayoutHandler timeline stack is left
-    // unparented and never shown
+    // the kdenlive-style editing timeline IS the timeline now: the
+    // classic per-scene keyframe stack is retired, the NLE view is
+    // the dock's only content. The LayoutHandler timeline stack is
+    // left unparented and never shown
     mNlePage = new QWidget(this);
     {
         auto nleLay = new QVBoxLayout(mNlePage);
         nleLay->setContentsMargins(0, 0, 0, 0);
         nleLay->setSpacing(0);
-        mEditorTimeline = new EditorTimelineWidget(mNlePage);
+        mNleView = new NleTimelineView(mNleModel, mNlePage);
         auto hbar = new QScrollBar(Qt::Horizontal, mNlePage);
         hbar->setFixedHeight(12);
-        mEditorTimeline->setScrollBar(hbar);
-        nleLay->addWidget(mEditorTimeline, 1);
+        mNleView->setScrollBar(hbar);
+        nleLay->addWidget(mNleView, 1);
         nleLay->addWidget(hbar, 0);
+        connect(mNleView, &NleTimelineView::logMessage, this,
+                [this](const QString &msg) {
+            if (mMainWindow) { mMainWindow->statusBar()->showMessage(msg, 4000); }
+        });
     }
     mMainLayout->addWidget(mNlePage);
 
-    mEditorSync = new EditorTimelineSync(mDocument, mEditorTimeline, this);
+    mNleController = new NleTimelineController(mDocument, mNleModel,
+                                               mNleView, this);
+    mNleModel->refreshFromDocument();
 
-    // NLE toolbar group must be created after the timeline widget
+    // NLE toolbar group must be created after the timeline view
     setupNleActions();
 
     previewFinished();
@@ -878,10 +893,7 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     connect(mDirectPlayer, &DirectPlayer::frameChanged,
             this, [this](const int frame) {
         // NLE playhead follows playback without a panel rebuild
-        if (!mEditorTimeline) { return; }
-        const auto scene = mDocument.fActiveScene.data();
-        const qreal fps = scene ? scene->getFps() : 25.;
-        if (fps > 0.) { mEditorTimeline->setPlayheadSec(frame / fps); }
+        if (mNleView) { mNleView->setPlayheadFrame(frame); }
     });
 
     setupPropertyShortcuts();
@@ -889,7 +901,7 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
 
 void TimelineDockWidget::setupNleActions()
 {
-    if (!mToolBar || !mEditorTimeline) { return; }
+    if (!mToolBar || !mNleView || !mNleModel) { return; }
 
     // ---- editing tool cluster at the left of the toolbar: the tool
     // decides what a plain click on a clip does (PR toolbox style) ----
@@ -909,7 +921,7 @@ void TimelineDockWidget::setupNleActions()
 
     mToolGroup = new QActionGroup(this);
     mToolGroup->setExclusive(true);
-    using ET = EditorTimelineWidget::EditTool;
+    using ET = NleTimelineView::EditTool;
     const auto addToolAct = [this, &insertAct](
             const QString &text, const char * const svg,
             const ET tool, const int slot) {
@@ -932,7 +944,7 @@ void TimelineDockWidget::setupNleActions()
             }
             a->setIcon(QIcon(nleGlyphPixmap(
                         svg, on ? onGlyph : QColor(0xc8, 0xc8, 0xc8))));
-            if (on && mEditorTimeline) { mEditorTimeline->setTool(tool); }
+            if (on && mNleView) { mNleView->setTool(tool); }
         });
         if (slot >= 0 && slot < 5) { mToolActs[slot] = a; }
         return a;
@@ -949,7 +961,7 @@ void TimelineDockWidget::setupNleActions()
                static_cast<int>(ET::Spacer));
     // keyboard tool switches stay in sync with the buttons (setTool
     // no-ops on the same tool, so the re-check cannot loop)
-    connect(mEditorTimeline, &EditorTimelineWidget::toolChanged, this,
+    connect(mNleView, &NleTimelineView::toolChanged, this,
             [this](const int tool) {
         if (tool < 0 || tool > 4) { return; }
         auto * const a = mToolActs[tool];
@@ -958,7 +970,7 @@ void TimelineDockWidget::setupNleActions()
     mNleToolSeps[1] = insertSep();
 
     // split at the playhead (CapCut 分割): selected clips, or every
-    // unlocked-lane clip under the playhead when nothing is selected
+    // unlocked-track clip under the playhead when nothing is selected
     mNleSplitAtAct = new QAction(
                 QIcon(nleGlyphPixmap(kNleSplitSvg, QColor(0xc8, 0xc8, 0xc8))),
                 tr("分割"), this);
@@ -966,7 +978,7 @@ void TimelineDockWidget::setupNleActions()
                 tr("在播放头分割选中块；未选中时分割播放头下所有块（S）"));
     mNleSplitAtAct->setData(mNleSplitAtAct->toolTip());
     connect(mNleSplitAtAct, &QAction::triggered, this, [this]() {
-        if (mEditorTimeline) { mEditorTimeline->requestSplitAtPlayhead(); }
+        if (mNleView) { mNleView->splitAtPlayhead(); }
     });
     insertAct(mNleSplitAtAct);
     mMainWindow->cmdAddAction(mNleSplitAtAct);
@@ -978,23 +990,20 @@ void TimelineDockWidget::setupNleActions()
     mNleFreezeAct->setToolTip(
                 tr("在播放头处定格选中块：切点起冻结为静止画面到块尾"));
     mNleFreezeAct->setData(mNleFreezeAct->toolTip());
-    connect(mNleFreezeAct, &QAction::triggered, mEditorTimeline,
-            &EditorTimelineWidget::requestFreezeAtPlayhead);
+    connect(mNleFreezeAct, &QAction::triggered, mNleView,
+            &NleTimelineView::freezeAtPlayhead);
     insertAct(mNleFreezeAct);
     mMainWindow->cmdAddAction(mNleFreezeAct);
 
-    // undo / redo right on the timeline toolbar (CapCut layout)
+    // undo / redo right on the timeline toolbar (CapCut layout); the
+    // model refreshes itself after the scene undo
     mNleUndoAct = new QAction(
                 QIcon(nleGlyphPixmap(kNleUndoSvg, QColor(0xc8, 0xc8, 0xc8))),
                 tr("撤销"), this);
     mNleUndoAct->setToolTip(tr("撤销上一步（Ctrl+Z）"));
     mNleUndoAct->setData(mNleUndoAct->toolTip());
     connect(mNleUndoAct, &QAction::triggered, this, [this]() {
-        const auto scene = *mDocument.fActiveScene;
-        if (!scene) { return; }
-        scene->undo();
-        if (Document::sInstance) { Document::sInstance->actionFinished(); }
-        if (mEditorSync) { mEditorSync->rebuild(); }
+        if (mNleModel) { mNleModel->undo(); }
     });
     insertAct(mNleUndoAct);
     mMainWindow->cmdAddAction(mNleUndoAct);
@@ -1005,11 +1014,7 @@ void TimelineDockWidget::setupNleActions()
     mNleRedoAct->setToolTip(tr("重做下一步（Ctrl+Shift+Z）"));
     mNleRedoAct->setData(mNleRedoAct->toolTip());
     connect(mNleRedoAct, &QAction::triggered, this, [this]() {
-        const auto scene = *mDocument.fActiveScene;
-        if (!scene) { return; }
-        scene->redo();
-        if (Document::sInstance) { Document::sInstance->actionFinished(); }
-        if (mEditorSync) { mEditorSync->rebuild(); }
+        if (mNleModel) { mNleModel->redo(); }
     });
     insertAct(mNleRedoAct);
     mMainWindow->cmdAddAction(mNleRedoAct);
@@ -1020,8 +1025,8 @@ void TimelineDockWidget::setupNleActions()
     mNleDeleteAct = new QAction(tr("删除块"), this);
     mNleDeleteAct->setToolTip(tr("删除选中的块（Delete）；Shift=波纹删除，后续块左移补洞"));
     mNleDeleteAct->setData(mNleDeleteAct->toolTip());
-    connect(mNleDeleteAct, &QAction::triggered, mEditorTimeline, [this]() {
-        if (mEditorTimeline) { mEditorTimeline->requestDelete(false); }
+    connect(mNleDeleteAct, &QAction::triggered, this, [this]() {
+        if (mNleView) { mNleView->requestDelete(false); }
     });
     insertAct(mNleDeleteAct);
     mMainWindow->cmdAddAction(mNleDeleteAct);
@@ -1029,8 +1034,8 @@ void TimelineDockWidget::setupNleActions()
     mNleRippleAct = new QAction(tr("波纹删除"), this);
     mNleRippleAct->setToolTip(tr("删除选中的块并让同轨后续块左移补洞（Shift+Delete）"));
     mNleRippleAct->setData(mNleRippleAct->toolTip());
-    connect(mNleRippleAct, &QAction::triggered, mEditorTimeline, [this]() {
-        if (mEditorTimeline) { mEditorTimeline->requestDelete(true); }
+    connect(mNleRippleAct, &QAction::triggered, this, [this]() {
+        if (mNleView) { mNleView->requestDelete(true); }
     });
     insertAct(mNleRippleAct);
     mMainWindow->cmdAddAction(mNleRippleAct);
@@ -1049,7 +1054,7 @@ void TimelineDockWidget::setupNleActions()
         }
         mMagneticAct->setIcon(QIcon(nleMagneticPixmap(
                         on ? onGlyph : QColor(0xc8, 0xc8, 0xc8))));
-        if (mEditorTimeline) { mEditorTimeline->setMagnetic(on); }
+        if (mNleModel) { mNleModel->setMagnetic(on); }
     });
     insertAct(mMagneticAct);
     mMainWindow->cmdAddAction(mMagneticAct);
@@ -1058,7 +1063,7 @@ void TimelineDockWidget::setupNleActions()
     mNleZoomFitAct->setToolTip(tr("时间轴缩放适配窗口宽度"));
     mNleZoomFitAct->setData(mNleZoomFitAct->toolTip());
     connect(mNleZoomFitAct, &QAction::triggered,
-            mEditorTimeline, &EditorTimelineWidget::zoomFit);
+            mNleView, &NleTimelineView::zoomFit);
     insertAct(mNleZoomFitAct);
     mMainWindow->cmdAddAction(mNleZoomFitAct);
 }
@@ -1642,9 +1647,12 @@ void TimelineDockWidget::setMarker()
 
 void TimelineDockWidget::splitClip()
 {
-    const auto scene = *mDocument.fActiveScene;
-    if (!scene) { return; }
-    scene->splitAction();
+    // unified with the NLE timeline split (CapCut semantics: selected
+    // clips at the current frame, fallback every unlocked-track clip
+    // under it)
+    if (mNleModel) {
+        mNleModel->requestSplitAtFrame(mDocument.getActiveSceneFrame());
+    }
 }
 
 void TimelineDockWidget::jumpToIntermediateFrame(bool forward) {

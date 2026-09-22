@@ -30,7 +30,7 @@ class eTask;
 // global frame cache (AnimationFrameHandler::scheduleFrameLoad): no
 // render-pipeline involvement, the HDD task thread rate-limits itself,
 // and decoded frames stay in the shared cache for playback reuse.
-// Non-video blocks keep the WYSIWYG midpoint render in EditorTimelineSync.
+// Non-video blocks keep the WYSIWYG midpoint render in NleTimelineController.
 //
 // Delivery pattern (FileThumbStore / effects panel style): request
 // returns immediately (cache hit emits synchronously), worker results
