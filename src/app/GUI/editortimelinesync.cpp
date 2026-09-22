@@ -87,6 +87,14 @@ EditorTimelineSync::EditorTimelineSync(Document &document,
                 this, [this](const QList<int> &ids, const double sec) {
             razorCut(ids, sec);
         });
+        connect(mWidget, &EditorTimelineWidget::freezeRequested,
+                this, [this](const QList<int> &ids, const double sec) {
+            freezeClips(ids, sec);
+        });
+        connect(mWidget, &EditorTimelineWidget::speedChangeRequested,
+                this, [this](const int id, const double rate) {
+            speedClip(id, rate);
+        });
         connect(mWidget, &EditorTimelineWidget::trackMuteToggleRequested,
                 this, [this](const int idx, const bool allType) {
             toggleTrackMute(idx, allType);
@@ -331,12 +339,19 @@ void EditorTimelineSync::rebuild()
     const qreal fps = scene->getFps();
     if (fps > 0.) { mWidget->setFps(fps); }
     {
-        // ruler markers from the scene (abs frames + titles)
+        // ruler markers from the scene (abs frames + titles) and the
+        // render in/out band
         QVector<QPair<int, QString>> marks;
         for (const auto &m : scene->getMarkers()) {
             if (m.enabled) { marks.append({m.frame, m.title}); }
         }
         mWidget->setMarkers(marks);
+        if (scene->inOutEnabled() && fps > 0.) {
+            mWidget->setRangeBand(scene->inFrame() / fps,
+                                  scene->outFrame() / fps);
+        } else {
+            mWidget->setRangeBand(-1.0, -1.0);
+        }
     }
     const double fallbackLen = fps > 0. ?
                 scene->getFrameRange().fMax / fps : 0.;
@@ -915,6 +930,69 @@ void EditorTimelineSync::razorCut(const QList<int> &clipIds, const double sec)
     }
     if (boxes.isEmpty()) { return; }
     splitBoxes(boxes, frame);
+}
+
+void EditorTimelineSync::freezeClips(const QList<int> &clipIds,
+                                     const double sec)
+{
+    if (!mWidget || mInWriteback || mDragging) { return; }
+    const auto scene = mPanelScene.data();
+    if (!scene) { return; }
+    const qreal fps = scene->getFps();
+    if (fps <= 0.) { return; }
+    const int frame = qRound(sec * fps);
+
+    // video-family clips only: freezing is frame remapping
+    QList<AnimationBox*> animBoxes;
+    for (const int id : clipIds) {
+        const auto layer = mClipToLayer.value(id).data();
+        if (!layer) { continue; }
+        const auto box = enve_cast<BoundingBox*>(layer);
+        if (!box) { continue; }
+        const auto dur = box->getDurationRectangle();
+        if (!dur) { continue; }
+        if (!(dur->getMinAbsFrame() < frame &&
+              frame < dur->getMaxAbsFrame())) { continue; }
+        const auto animBox = dynamic_cast<AnimationBox*>(box);
+        if (animBox) { animBoxes << animBox; }
+    }
+    if (animBoxes.isEmpty()) {
+        mWidget->log(QStringLiteral("定格仅支持视频/序列类块"));
+        return;
+    }
+
+    // freezeFrameAction freezes the CURRENT scene frame: park the
+    // playhead on the cut frame for the freeze, then restore it
+    const int savedFrame = scene->anim_getCurrentAbsFrame();
+    scene->anim_setAbsFrame(frame);
+    scene->clearBoxesSelection();
+    for (auto *b : animBoxes) { scene->addBoxToSelection(b); }
+    // split: the ORIGINAL boxes become the right halves [frame..max]
+    scene->splitBoxesAtFrame(frame);
+    for (auto *b : animBoxes) { b->freezeFrameAction(); }
+    scene->anim_setAbsFrame(savedFrame);
+    if (Document::sInstance) { Document::sInstance->actionFinished(); }
+    rebuild();
+}
+
+void EditorTimelineSync::speedClip(const int clipId, const double rate)
+{
+    if (!mWidget || mInWriteback || mDragging) { return; }
+    const auto scene = mPanelScene.data();
+    if (!scene) { return; }
+    const auto layer = mClipToLayer.value(clipId).data();
+    if (!layer) { return; }
+    const auto box = enve_cast<BoundingBox*>(layer);
+    const auto animBox = box ? dynamic_cast<AnimationBox*>(box) : nullptr;
+    if (!animBox) {
+        mWidget->log(QStringLiteral("变速仅支持视频/序列类块"));
+        return;
+    }
+    // stretch > 1 = slower, so rate 2x maps to stretch 0.5; VideoBox
+    // overrides the setter and carries its embedded audio along
+    animBox->setStretch(1.0 / rate);
+    if (Document::sInstance) { Document::sInstance->actionFinished(); }
+    rebuild();
 }
 
 void EditorTimelineSync::toggleTrackMute(const int trackIdx,

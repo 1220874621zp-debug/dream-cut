@@ -349,9 +349,13 @@ public:
     // derived from the layers' trackIds on the fly - they ARE these
     // specs, so a track survives with no members, moving a clip only
     // writes its trackId, and lock/name/height persist per track ----
+    // render in/out band accessors for the editing timeline ruler
+    bool inOutEnabled() const { return mIn.enabled && mOut.enabled; }
+    int inFrame() const { return mIn.frame; }
+    int outFrame() const { return mOut.frame; }
+
     const QList<eTrackSpec> &getTrackSpecs() const { return mTrackSpecs; }
-    bool hasTrackSpec(const int id) const;
-    // one-time legacy migration: install the derived lane layout as
+    bool hasTrackSpec(const int id) const;    // one-time legacy migration: install the derived lane layout as
     // the scene's track table (not undoable, runs during panel load)
     void initTrackSpecs(const QList<eTrackSpec> &specs);
     // undoable add/remove (id allocation reuses the per-parent trackId

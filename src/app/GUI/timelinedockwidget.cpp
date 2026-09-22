@@ -206,6 +206,21 @@ const char* kNleToolFwdSvg =
         "<path fill=\"none\" stroke=\"%1\" stroke-width=\"2.2\""
         " stroke-linecap=\"round\" stroke-linejoin=\"round\""
         " d=\"M12.5 6 L18.5 12 L12.5 18 M5.5 6 L11.5 12 L5.5 18\"/></svg>";
+// spacer tool: two blocks with a double arrow in the gap
+const char* kNleToolSpacerSvg =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
+        "<path fill=\"none\" stroke=\"%1\" stroke-width=\"1.9\""
+        " d=\"M2.5 8 H8.5 V16 H2.5 Z M15.5 8 H21.5 V16 H15.5 Z\"/>"
+        "<path fill=\"none\" stroke=\"%1\" stroke-width=\"1.9\""
+        " stroke-linecap=\"round\" stroke-linejoin=\"round\""
+        " d=\"M10.6 12 H13.4 M12.8 10.4 L10.6 12 L12.8 13.6"
+        " M11.2 10.4 L13.4 12 L11.2 13.6\"/></svg>";
+// freeze: snowflake-ish asterisk
+const char* kNleFreezeSvg =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
+        "<path fill=\"none\" stroke=\"%1\" stroke-width=\"1.9\""
+        " stroke-linecap=\"round\" d=\"M12 3 V21 M4.2 7.5 L19.8 16.5"
+        " M19.8 7.5 L4.2 16.5\"/></svg>";
 // split at playhead: two half blocks cut by a dashed line
 const char* kNleSplitSvg =
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
@@ -252,7 +267,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     : QWidget(parent)
     , mDocument(document)
     , mMainWindow(parent)
-    , mTimelineLayout(layoutH->timelineLayout())
     , mToolBar(nullptr)
     , mFrameStartSpin(nullptr)
     , mFrameEndSpin(nullptr)
@@ -264,6 +278,7 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     , mRenderProgress(nullptr)
     , mPausedPreviewState({false, 0})
 {
+    Q_UNUSED(layoutH) // classic timeline stack retired; handler unused
     connect(RenderHandler::sInstance, &RenderHandler::previewFinished,
             this, &TimelineDockWidget::previewFinished);
     connect(RenderHandler::sInstance, &RenderHandler::previewBeingPlayed,
@@ -754,18 +769,7 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     mZoomSlider->setMaximumHeight(18);
     mZoomSlider->setToolTip(tr("时间轴缩放（右=放大，等价 Ctrl+滚轮）"));
     connect(mZoomSlider, &QSlider::valueChanged, this, [this](const int v) {
-        const auto scene = *mDocument.fActiveScene;
-        if (!scene) return;
-        const int maxSpan = qMax(20, scene->getFrameRange().span());
-        const int minSpan = 10;
-        const qreal t = 1. - v/100.;
-        const int span = qBound(minSpan,
-                                qRound(minSpan*std::pow(1.*maxSpan/minSpan, t)),
-                                maxSpan);
-        const auto tw = mTimelineLayout->currentWidget() ?
-                    mTimelineLayout->currentWidget()->findChild<TimelineWidget*>() :
-                    nullptr;
-        if (tw) tw->setTimelineZoomSpan(span);
+        if (mEditorTimeline) { mEditorTimeline->setZoomLevel(v); }
     });
     mToolBar->addWidget(mZoomSlider);
 
@@ -836,9 +840,10 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
         mStopButton->setEnabled(scene);
     });
 
-    // dual-mode content stack: 0 = NLE editing timeline (default),
-    // 1 = classic per-scene keyframe stack (reparented; the LayoutHandler
-    // pointer stays valid, only the QObject parent moves)
+    // the editing timeline IS the timeline now: the classic per-scene
+    // keyframe stack is retired (kdenlive alignment), the NLE page is
+    // the dock's only content. The LayoutHandler timeline stack is left
+    // unparented and never shown
     mNlePage = new QWidget(this);
     {
         auto nleLay = new QVBoxLayout(mNlePage);
@@ -851,19 +856,12 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
         nleLay->addWidget(mEditorTimeline, 1);
         nleLay->addWidget(hbar, 0);
     }
-    mModeStack = new QStackedWidget(this);
-    mModeStack->addWidget(mNlePage);
-    mModeStack->addWidget(mTimelineLayout);
-    mMainLayout->addWidget(mModeStack);
+    mMainLayout->addWidget(mNlePage);
 
     mEditorSync = new EditorTimelineSync(mDocument, mEditorTimeline, this);
 
     // NLE toolbar group must be created after the timeline widget
     setupNleActions();
-
-    setNleMode(AppSupport::getSettings(
-                   QStringLiteral("ui"), QStringLiteral("timelineNle"),
-                   true).toBool());
 
     previewFinished();
 
@@ -893,25 +891,10 @@ void TimelineDockWidget::setupNleActions()
 {
     if (!mToolBar || !mEditorTimeline) { return; }
 
-    // mode toggle: leftmost, drives the whole content stack
-    mNleModeAct = new QAction(tr("剪辑时间轴"), this);
-    mNleModeAct->setCheckable(true);
-    mNleModeAct->setChecked(true);
-    mNleModeAct->setToolTip(tr("剪辑 / 关键帧视图切换（NLE 模式显示块、缩略图与波形）"));
-    connect(mNleModeAct, &QAction::toggled,
-            this, [this](const bool on) {
-        setNleMode(on);
-        AppSupport::setSettings(QStringLiteral("ui"),
-                                QStringLiteral("timelineNle"), on);
-    });
+    // ---- editing tool cluster at the left of the toolbar: the tool
+    // decides what a plain click on a clip does (PR toolbox style) ----
     const auto first = mToolBar->actions().isEmpty() ?
                 nullptr : mToolBar->actions().constFirst();
-    if (first) { mToolBar->insertAction(first, mNleModeAct); }
-    else { mToolBar->addAction(mNleModeAct); }
-    mMainWindow->cmdAddAction(mNleModeAct);
-
-    // ---- editing tool cluster, right of the mode toggle: the tool
-    // decides what a plain click on a clip does (PR toolbox style) ----
     QAction *anchor = first; // fixed anchor: sequential inserts keep order
     const auto insertAct = [this, anchor](QAction * const a) {
         if (anchor) { mToolBar->insertAction(anchor, a); }
@@ -951,7 +934,7 @@ void TimelineDockWidget::setupNleActions()
                         svg, on ? onGlyph : QColor(0xc8, 0xc8, 0xc8))));
             if (on && mEditorTimeline) { mEditorTimeline->setTool(tool); }
         });
-        if (slot >= 0 && slot < 4) { mToolActs[slot] = a; }
+        if (slot >= 0 && slot < 5) { mToolActs[slot] = a; }
         return a;
     };
     addToolAct(tr("选择工具 (V)"), kNleToolSelectSvg, ET::Select,
@@ -962,11 +945,13 @@ void TimelineDockWidget::setupNleActions()
                static_cast<int>(ET::TrackBackward));
     addToolAct(tr("向前选择工具 (A)"), kNleToolFwdSvg, ET::TrackForward,
                static_cast<int>(ET::TrackForward));
+    addToolAct(tr("间隔工具 (D)"), kNleToolSpacerSvg, ET::Spacer,
+               static_cast<int>(ET::Spacer));
     // keyboard tool switches stay in sync with the buttons (setTool
     // no-ops on the same tool, so the re-check cannot loop)
     connect(mEditorTimeline, &EditorTimelineWidget::toolChanged, this,
             [this](const int tool) {
-        if (tool < 0 || tool > 3) { return; }
+        if (tool < 0 || tool > 4) { return; }
         auto * const a = mToolActs[tool];
         if (a && !a->isChecked()) { a->setChecked(true); }
     });
@@ -985,6 +970,18 @@ void TimelineDockWidget::setupNleActions()
     });
     insertAct(mNleSplitAtAct);
     mMainWindow->cmdAddAction(mNleSplitAtAct);
+
+    // freeze the selection at the playhead (CapCut 定格)
+    mNleFreezeAct = new QAction(
+                QIcon(nleGlyphPixmap(kNleFreezeSvg, QColor(0xc8, 0xc8, 0xc8))),
+                tr("定格"), this);
+    mNleFreezeAct->setToolTip(
+                tr("在播放头处定格选中块：切点起冻结为静止画面到块尾"));
+    mNleFreezeAct->setData(mNleFreezeAct->toolTip());
+    connect(mNleFreezeAct, &QAction::triggered, mEditorTimeline,
+            &EditorTimelineWidget::requestFreezeAtPlayhead);
+    insertAct(mNleFreezeAct);
+    mMainWindow->cmdAddAction(mNleFreezeAct);
 
     // undo / redo right on the timeline toolbar (CapCut layout)
     mNleUndoAct = new QAction(
@@ -1064,32 +1061,6 @@ void TimelineDockWidget::setupNleActions()
             mEditorTimeline, &EditorTimelineWidget::zoomFit);
     insertAct(mNleZoomFitAct);
     mMainWindow->cmdAddAction(mNleZoomFitAct);
-}
-
-void TimelineDockWidget::setNleMode(const bool nle)
-{
-    if (!mModeStack) { return; }
-    mModeStack->setCurrentIndex(nle ? 0 : 1);
-    if (mNleModeAct) {
-        QSignalBlocker block(mNleModeAct);
-        mNleModeAct->setChecked(nle);
-        mNleModeAct->setText(nle ? tr("剪辑时间轴") : tr("关键帧视图"));
-    }
-    const auto nleActs = QList<QAction*>{ mNleSplitAtAct, mNleUndoAct,
-                                          mNleRedoAct, mNleDeleteAct,
-                                          mNleRippleAct, mMagneticAct,
-                                          mNleZoomFitAct,
-                                          mToolActs[0], mToolActs[1],
-                                          mToolActs[2], mToolActs[3],
-                                          mNleToolSeps[0], mNleToolSeps[1],
-                                          mNleToolSeps[2] };
-    for (auto *a : nleActs) { if (a) { a->setVisible(nle); } }
-    if (nle && mEditorSync) { mEditorSync->rebuild(); }
-}
-
-bool TimelineDockWidget::isNleMode() const
-{
-    return mModeStack ? mModeStack->currentIndex() == 0 : true;
 }
 
 void TimelineDockWidget::updateFrameRange(const FrameRange &range)
@@ -1712,126 +1683,24 @@ void TimelineDockWidget::jumpToIntermediateFrame(bool forward) {
 }
 
 
-namespace {
-
-// map which -> the transform sub-property (AE: A anchor/pivot,
-// P position, S scale, R rotation, T opacity)
-Property *transformSubProp(BoundingBox * const box, const int which)
-{
-    const auto trans = box->getBoxTransformAnimator();
-    if (!trans) { return nullptr; }
-    switch (which) {
-    case 0: return trans->getPivotAnimator();
-    case 1: return trans->getPosAnimator();
-    case 2: return trans->getScaleAnimator();
-    case 3: return trans->getRotAnimator();
-    case 4: return trans->getOpacityAnimator();
-    default: return nullptr;
-    }
-}
-
-// make the property row visible in the timeline layer tree and
-// expand every collapsed ancestor (transform group, box, groups)
-void revealPropertyRow(TimelineWidget * const tw, Property * const prop)
-{
-    if (!tw || !prop) { return; }
-    const auto list = tw->boxesListWidget();
-    if (!list) { return; }
-    const int widId = list->swtWidgetId();
-    prop->SWT_show();
-    const auto abs = prop->SWT_getAbstractionForWidget(widId);
-    if (!abs) { return; }
-    for (auto p = abs->getParent(); p; p = p->getParent()) {
-        if (!p->contentVisible()) { p->setContentVisible(true); }
-    }
-}
-
-// fold the transform group row so the solo property row hides
-// inside it (second shortcut press = fold back)
-void collapsePropertyRow(TimelineWidget * const tw, Property * const prop)
-{
-    if (!tw || !prop) { return; }
-    const auto list = tw->boxesListWidget();
-    if (!list) { return; }
-    const auto abs = prop->SWT_getAbstractionForWidget(list->swtWidgetId());
-    if (!abs) { return; }
-    const auto parent = abs->getParent();
-    if (parent) { parent->setContentVisible(false); }
-}
-
-// recursively collect properties that have animation keys
-void collectAnimatedProps(ComplexAnimator * const ca,
-                          QList<Property*> &out)
-{
-    const int n = ca->ca_getNumberOfChildren();
-    for (int i = 0; i < n; i++) {
-        const auto child = ca->ca_getChildAt(i);
-        if (!child) { continue; }
-        const auto anim = enve_cast<Animator*>(child);
-        if (anim && anim->anim_hasKeys()) { out.append(child); }
-        const auto complex = enve_cast<ComplexAnimator*>(child);
-        if (complex) { collectAnimatedProps(complex, out); }
-    }
-}
-
-} // namespace
 
 void TimelineDockWidget::showTransformProperty(const int which)
 {
-    const auto scene = *mDocument.fActiveScene;
-    // the stack holds one TimelineWrapperNode per scene; the actual
-    // TimelineWidget is its central widget
-    const auto tw = mTimelineLayout->currentWidget() ?
-                mTimelineLayout->currentWidget()->findChild<TimelineWidget*>() :
-                nullptr;
-    if (!scene || !tw) { return; }
-    // when keys are selected and the cursor is over the keys view,
-    // S/G mean "move keys" in KeysView; let that win
-    const auto kv = tw->keysView();
-    if (kv && kv->hasSelectedKeysForShortcut() &&
-            kv->underMouse()) { return; }
-    const auto boxes = scene->getSelectedBoxesList();
-    if (boxes.isEmpty()) { return; }
-    for (const auto box : boxes) {
-        const auto prop = transformSubProp(box, which);
-        if (!prop) continue;
-        if (box->swtSoloActiveProp() == prop) {
-            // second press on the same key: fold back and restore
-            // all rows hidden by the solo display
-            box->swtRestoreSoloHidden();
-            collapsePropertyRow(tw, prop);
-        } else {
-            // expand first (may trigger solo restore), then solo-hide
-            revealPropertyRow(tw, prop);
-            box->swtSoloHideAllExcept(prop);
-        }
+    Q_UNUSED(which)
+    // property-row reveal lived in the classic keyframe timeline, which
+    // is retired; the properties panel stays the home for property rows
+    if (mMainWindow) {
+        mMainWindow->statusBar()->showMessage(
+                    tr("属性快捷显示已随关键帧时间轴移除，请在属性面板操作"), 4000);
     }
-    mDocument.actionFinished();
 }
 
 void TimelineDockWidget::showAnimatedProperties()
 {
-    const auto scene = *mDocument.fActiveScene;
-    if (!scene || !mTimelineLayout->currentWidget()) { return; }
-    const auto tw = mTimelineLayout->currentWidget()
-            ->findChild<TimelineWidget*>();
-    if (!tw) { return; }
-    const auto kv = tw->keysView();
-    if (kv && kv->hasSelectedKeysForShortcut() &&
-            kv->underMouse()) { return; }
-    const auto boxes = scene->getSelectedBoxesList();
-    if (boxes.isEmpty()) { return; }
-    for (const auto box : boxes) {
-        // AE U behavior: show only properties with keyframes;
-        // expand first (may trigger solo restore), then hide rest
-        QList<Property*> animated;
-        collectAnimatedProps(box, animated);
-        for (const auto prop : animated) {
-            revealPropertyRow(tw, prop);
-        }
-        box->swtHideWithoutKeys();
+    if (mMainWindow) {
+        mMainWindow->statusBar()->showMessage(
+                    tr("属性快捷显示已随关键帧时间轴移除，请在属性面板操作"), 4000);
     }
-    mDocument.actionFinished();
 }
 
 void TimelineDockWidget::applyLoopExpressions(const QString& header)

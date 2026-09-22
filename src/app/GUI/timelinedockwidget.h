@@ -152,16 +152,12 @@ private:
     void addSpacer();
     void addBlankAction();
 
-    // dual-mode content: index 0 = NLE editing timeline (default),
-    // index 1 = the classic per-scene keyframe stack
-    void setNleMode(const bool nle);
-    bool isNleMode() const;
+    // the editing timeline is the dock's only content (classic
+    // keyframe stack retired, kdenlive alignment)
     void setupNleActions();
 
     Document& mDocument;
     MainWindow* const mMainWindow;
-    QStackedWidget* const mTimelineLayout;
-    QStackedWidget *mModeStack = nullptr;
     QWidget *mNlePage = nullptr;
     EditorTimelineWidget *mEditorTimeline = nullptr;
     EditorTimelineSync *mEditorSync = nullptr;
@@ -199,13 +195,13 @@ private:
     QSlider *mZoomSlider = nullptr;
 
     // NLE mode toolbar group
-    QAction *mNleModeAct = nullptr;
     // PR/CapCut-style editing tools (checkable, exclusive): order
-    // matches EditorTimelineWidget::EditTool
+    // matches EditorTimelineWidget::EditTool (5 tools incl. spacer)
     class QActionGroup *mToolGroup = nullptr;
-    QAction *mToolActs[4] = { nullptr, nullptr, nullptr, nullptr };
+    QAction *mToolActs[5] = { nullptr, nullptr, nullptr, nullptr, nullptr };
     QAction *mNleToolSeps[3] = { nullptr, nullptr, nullptr };
     QAction *mNleSplitAtAct = nullptr;
+    QAction *mNleFreezeAct = nullptr;
     QAction *mNleUndoAct = nullptr;
     QAction *mNleRedoAct = nullptr;
     QAction *mMagneticAct = nullptr;
@@ -217,7 +213,6 @@ private:
     QProgressBar *mRenderProgress;
 
 
-    QList<TimelineWidget*> mTimelineWidgets;
     //AnimationDockWidget *mAnimationDockWidget;
 
     QPair<bool,int> mPausedPreviewState;

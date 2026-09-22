@@ -30,6 +30,11 @@ public:
     double fps() const { return m_fps; }
     // ruler markers (abs frames + titles), painted as amber guides
     void setMarkers(const QVector<QPair<int, QString>> &markers);
+    // scene render in/out band (seconds; negative = disabled), painted
+    // as a dim band under the ruler ticks
+    void setRangeBand(const double inSec, const double outSec);
+    // toolbar zoom slider (0-100, right = zoom in), playhead-anchored
+    void setZoomLevel(const int level);
     int trackCount() const { return m_tracks.size(); }
     // persistent track id of a lane (eTrackSpec id, -1 = none)
     int trackIdAt(const int trackIdx) const
@@ -46,10 +51,11 @@ public:
     bool isTrackLocked(const int trackIdx) const;
 
     // ---- editing tools (PR/CapCut style): select, razor,
-    // track-select backward/forward. The tool changes what a plain
-    // left click on a clip does; Select keeps the classic
+    // track-select backward/forward, spacer. The tool changes what a
+    // plain left click on a clip does; Select keeps the classic
     // move/trim/rubber-band interactions
-    enum class EditTool { Select, Razor, TrackBackward, TrackForward };
+    enum class EditTool { Select, Razor, TrackBackward, TrackForward,
+                          Spacer };
     void setTool(const EditTool tool);
     EditTool tool() const { return m_tool; }
 
@@ -59,6 +65,8 @@ public slots:
     void zoomOut();
     void zoomFit();
     void requestSplitAtPlayhead();
+    // freeze the current selection at the playhead (toolbar button)
+    void requestFreezeAtPlayhead();
 
 signals:
     // document-side operation requests (implemented by EditorTimelineSync)
@@ -71,6 +79,12 @@ signals:
     // active editing tool changed (int = EditTool); the dock keeps its
     // checkable toolbar actions in sync with keyboard switches
     void toolChanged(int tool);
+    // freeze: cut the clips at sec and freeze everything from the cut
+    // to each clip's end on the cut frame (CapCut 定格)
+    void freezeRequested(const QList<int> &clipIds, double sec);
+    // clip playback rate (1 = original); the doc side maps it to the
+    // layer stretch (video layers move their audio with them)
+    void speedChangeRequested(int clipId, double rate);
     // track lifecycle / state: tracks are explicit entities (P0), so
     // adding/removing/locking/resizing a lane is a spec operation on
     // the scene; a new video track lands on top of the video block, a
@@ -146,7 +160,7 @@ private:
 
     // ---- interaction ----
     enum class DragMode { None, MoveClip, TrimLeft, TrimRight, Playhead,
-                          TrackHeight };
+                          TrackHeight, SpacerMove };
     int clipAt(const QPoint &pos, QRectF *rectOut = nullptr) const; // index or -1
     double snapTime(double t, int ignoreClipIdx, bool *snappedOut) const;
     void applyZoom(double factor, int anchorX);
@@ -158,11 +172,27 @@ private:
     // ---- overlap hard constraint (kdenlive semantics): a drop is
     // legal when no clip OUTSIDE the moving set collides on its lane;
     // clips already tangled with the moving set at press time (legacy
-    // overlap layouts) are exempt so they can still be dragged apart
+    // overlap layouts) are exempt so they can still be dragged apart.
+    // The spacer set is the moving set while a spacer drag runs
     bool dropLegal(const int dragIdx, const double newStart) const;
     bool overlapsOutsideMoving(const int dragIdx, const int track,
                                const double start, const double len) const;
     QSet<int> m_tangled;   // press-time exemption set (see dropLegal)
+    // snapshot the tangle set for the CURRENT moving set (selection)
+    void collectTangles();
+
+    // ---- spacer tool (kdenlive): press collects everything right of
+    // the click on the lane (Shift: every lane), the drag slides the
+    // whole run as one rigid block
+    struct GroupSnap { int idx; double origStart; };
+    bool spacerLegal(const double delta) const;
+    QVector<GroupSnap> m_spacerOrig;
+    double m_spacerPressT = 0.0;
+
+    // ---- Ctrl insert drop: push the same-lane run starting at the
+    // earliest affected clip right so the dragged clip fits (kdenlive
+    // insert mode; a clip straddling the drop point moves as a whole)
+    void insertPushAside(const int dragIdx);
 
     // ---- track header interactions ----
     QRect addTrackRect(const bool audio) const;  // corner +V / +A buttons
@@ -207,10 +237,12 @@ private:
     // NLE upgrades
     double m_fps = 25.0;         // scene fps, drives timecode + frame snap
     QVector<QPair<int, QString>> m_markers; // ruler markers (abs frame, title)
+    double m_rangeIn = -1.0;     // scene in/out band (seconds, <0 = off)
+    double m_rangeOut = -1.0;
     bool m_rubber = false;       // rubber band selection in progress
     QPoint m_rubberStart;
     // group move snapshot: the other selected clips ride the same delta
-    struct GroupSnap { int idx; double origStart; };
+    // (GroupSnap is declared with the spacer block above)
     QVector<GroupSnap> m_groupOrig;
     void emitSelectionSummary();
 

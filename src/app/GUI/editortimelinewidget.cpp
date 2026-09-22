@@ -196,6 +196,20 @@ void EditorTimelineWidget::drawRuler(QPainter &p)
 {
     p.fillRect(headerWidth(), 0, width() - headerWidth(), rulerHeight(), cRuler);
 
+    // scene in/out band (dim stripe over the whole timeline height)
+    if (m_rangeIn >= 0.0 && m_rangeOut > m_rangeIn) {
+        const int x0 = qMax(headerWidth(), timeToX(m_rangeIn));
+        const int x1 = qMin(width(), timeToX(m_rangeOut));
+        if (x1 > x0) {
+            p.fillRect(QRect(x0, rulerHeight(), x1 - x0,
+                             height() - rulerHeight()),
+                       QColor(0xff, 0xd1, 0x54, 14));
+            p.setPen(QPen(QColor(0xff, 0xd1, 0x54, 120), 1));
+            p.drawLine(x0, rulerHeight(), x0, height());
+            p.drawLine(x1, rulerHeight(), x1, height());
+        }
+    }
+
     // choose tick step so labels stay readable
     double steps[] = {0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 300};
     double step = 1;
@@ -642,6 +656,75 @@ int EditorTimelineWidget::nearestLaneOfType(const int y,
     return best;
 }
 
+// press-time tangle snapshot for the current selection (moving set):
+// clips outside it that already overlap a member are exempt from the
+// drop legality check, so legacy overlap knots can still be dragged
+// apart (shared by the move drag and the spacer drag)
+void EditorTimelineWidget::collectTangles()
+{
+    m_tangled.clear();
+    for (const Clip &o : m_clips) {
+        if (m_selectedIds.contains(o.id)) { continue; }
+        for (const Clip &m : m_clips) {
+            if (!m_selectedIds.contains(m.id)) { continue; }
+            if (m.track != o.track) { continue; }
+            if (m.start < o.start + o.length - 1e-9 &&
+                    o.start < m.start + m.length - 1e-9) {
+                m_tangled.insert(o.id);
+                break;
+            }
+        }
+    }
+}
+
+// ---- spacer tool (kdenlive): press collects the run right of the
+// click on the lane (Shift: every lane), the drag slides it rigidly
+bool EditorTimelineWidget::spacerLegal(const double delta) const
+{
+    for (const auto &s : m_spacerOrig) {
+        if (s.idx < 0 || s.idx >= m_clips.size()) { continue; }
+        const Clip &c = m_clips[s.idx];
+        const double ns = qMax(0.0, s.origStart + delta);
+        for (int i = 0; i < m_clips.size(); ++i) {
+            if (m_selectedIds.contains(m_clips[i].id)) { continue; }
+            if (m_tangled.contains(m_clips[i].id)) { continue; }
+            const Clip &o = m_clips[i];
+            if (o.track != c.track) { continue; }
+            if (ns < o.start + o.length - 1e-9 &&
+                    o.start < ns + c.length - 1e-9) { return false; }
+        }
+    }
+    return true;
+}
+
+// Ctrl insert drop (kdenlive insert mode): everything the dropped clip
+// touches (or that starts right of it) on the lane slides right as one
+// rigid run, keeping the run's internal spacing
+void EditorTimelineWidget::insertPushAside(const int dragIdx)
+{
+    if (dragIdx < 0 || dragIdx >= m_clips.size()) { return; }
+    const Clip d = m_clips[dragIdx];
+    const double dropEnd = d.start + d.length;
+    double firstStart = -1;
+    for (int i = 0; i < m_clips.size(); ++i) {
+        if (i == dragIdx || m_selectedIds.contains(m_clips[i].id)) { continue; }
+        const Clip &o = m_clips[i];
+        if (o.track != d.track) { continue; }
+        if (o.start + o.length <= d.start + 1e-9) { continue; } // fully left
+        firstStart = (firstStart < 0) ? o.start : qMin(firstStart, o.start);
+    }
+    if (firstStart < 0 || firstStart >= dropEnd - 1e-9) { return; }
+    const double shift = dropEnd - firstStart;
+    for (int i = 0; i < m_clips.size(); ++i) {
+        if (i == dragIdx || m_selectedIds.contains(m_clips[i].id)) { continue; }
+        Clip &o = m_clips[i];
+        if (o.track == d.track && o.start >= firstStart - 1e-9) {
+            o.start += shift;
+        }
+    }
+    emitLog(QStringLiteral("插入模式：右侧整段右移 %1").arg(timecode(shift)));
+}
+
 // ---------------------------------------------------------------- events
 
 // ---- editing tools ----
@@ -668,6 +751,12 @@ void EditorTimelineWidget::requestSplitAtPlayhead()
     emit splitAtPlayheadRequested();
 }
 
+void EditorTimelineWidget::requestFreezeAtPlayhead()
+{
+    if (m_selectedIds.isEmpty()) { return; }
+    emit freezeRequested(m_selectedIds.values(), m_playhead);
+}
+
 void EditorTimelineWidget::applyToolCursor(const QPoint &pos)
 {
     // header area interactions come first: +V/+A buttons, lane height
@@ -689,6 +778,11 @@ void EditorTimelineWidget::applyToolCursor(const QPoint &pos)
     }
     if (m_tool == EditTool::Razor) {
         setCursor(m_razorCursor);
+        return;
+    }
+    if (m_tool == EditTool::Spacer) {
+        setCursor(pos.x() >= headerWidth() && pos.y() > rulerHeight()
+                      ? Qt::SizeAllCursor : Qt::ArrowCursor);
         return;
     }
     if (m_tool != EditTool::Select) {
@@ -850,6 +944,39 @@ void EditorTimelineWidget::mousePressEvent(QMouseEvent *e)
         return;
     }
 
+    if (m_tool == EditTool::Spacer && e->pos().x() >= headerWidth()) {
+        // spacer press works anywhere on a lane (clips or empty space):
+        // everything right of the click joins one rigid run
+        const double t = xToTime(e->pos().x());
+        const int lane = trackAtY(e->pos().y());
+        if (lane >= 0) {
+            const bool allTracks = e->modifiers() & Qt::ShiftModifier;
+            m_selectedIds.clear();
+            m_spacerOrig.clear();
+            for (int i = 0; i < m_clips.size(); ++i) {
+                const Clip &sc = m_clips[i];
+                if (sc.start + sc.length <= t + 1e-9) { continue; }
+                if (!allTracks && sc.track != lane) { continue; }
+                m_selectedIds.insert(sc.id);
+                m_spacerOrig.append({i, sc.start});
+            }
+            if (!m_spacerOrig.isEmpty()) {
+                collectTangles();
+                m_drag = DragMode::SpacerMove;
+                m_dragClip = -1;
+                m_dropIllegal = false;
+                m_spacerPressT = qRound(t * m_fps) / m_fps;
+                emitSelectionSummary();
+                emitLog(QStringLiteral("间隔工具：选中 %1 块（%2）")
+                        .arg(m_spacerOrig.size())
+                        .arg(allTracks ? QStringLiteral("全部轨道")
+                                       : m_tracks.value(lane).name));
+            }
+        }
+        update();
+        return;
+    }
+
     if (idx >= 0 && m_tool != EditTool::Select) {
         // editing tools replace the plain-click clip interaction
         if (m_tool == EditTool::Razor) {
@@ -893,28 +1020,7 @@ void EditorTimelineWidget::mousePressEvent(QMouseEvent *e)
         // press-time tangle snapshot: clips outside the moving set that
         // already overlap it (legacy overlap layouts) are exempt from
         // the drop legality check, so knots can still be dragged apart
-        m_tangled.clear();
-        {
-            const auto tangleOn = [this](const int lane, const double s,
-                                         const double l) {
-                for (const Clip &o : m_clips) {
-                    if (m_selectedIds.contains(o.id)) { continue; }
-                    if (o.track != lane) { continue; }
-                    if (s < o.start + o.length - 1e-9 &&
-                            o.start < s + l - 1e-9) {
-                        m_tangled.insert(o.id);
-                    }
-                }
-            };
-            tangleOn(c.track, c.start, c.length);
-            for (const auto &g : m_groupOrig) {
-                if (g.idx >= 0 && g.idx < m_clips.size()) {
-                    tangleOn(m_clips[g.idx].track,
-                             m_clips[g.idx].start,
-                             m_clips[g.idx].length);
-                }
-            }
-        }
+        collectTangles();
 
         if (laneLocked) {
             m_drag = DragMode::None; // selectable but not editable
@@ -1005,6 +1111,33 @@ void EditorTimelineWidget::mouseMoveEvent(QMouseEvent *e)
         update();
         return; // header gestures never auto-scroll the content
     }
+    case DragMode::SpacerMove: {
+        double delta = qRound((t - m_spacerPressT) * m_fps) / m_fps;
+        // snap the run's leftmost edge like a normal drag would
+        double minOrig = -1;
+        for (const auto &s : m_spacerOrig) { minOrig = minOrig < 0 ? s.origStart : qMin(minOrig, s.origStart); }
+        if (minOrig >= 0) {
+            bool snapped = false;
+            const double edge = qMax(0.0, minOrig + delta);
+            const double sT = snapTime(edge, -1, &snapped);
+            if (snapped) {
+                delta = sT - minOrig;
+                m_snapTarget = sT;
+            }
+        }
+        if (!spacerLegal(delta)) {
+            m_dropIllegal = true;
+            m_snapTarget = -1.0;
+        } else {
+            m_dropIllegal = false;
+            for (const auto &s : m_spacerOrig) {
+                if (s.idx >= 0 && s.idx < m_clips.size()) {
+                    m_clips[s.idx].start = qMax(0.0, s.origStart + delta);
+                }
+            }
+        }
+        break;
+    }
     case DragMode::MoveClip: {
         Clip &c = m_clips[m_dragClip];
         double newStart = qMax(0.0, t - m_grabOffsetSec);
@@ -1022,12 +1155,15 @@ void EditorTimelineWidget::mouseMoveEvent(QMouseEvent *e)
         const bool laneOk = tr >= 0 && !m_tracks[tr].locked;
 
         // overlap hard constraint: an illegal candidate keeps the last
-        // legal state and flags the dragged clip red
+        // legal state and flags the dragged clip red. Ctrl = insert
+        // mode (kdenlive): overlapping drops are allowed live and the
+        // release pushes the run right instead
+        const bool insertMode = e->modifiers() & Qt::ControlModifier;
         const int prevTrack = c.track;
         const double prevStart = c.start;
         if (laneOk) { c.track = tr; }
         c.start = newStart;
-        if (!(laneOk && dropLegal(m_dragClip, newStart))) {
+        if (!(laneOk && (insertMode || dropLegal(m_dragClip, newStart)))) {
             c.track = prevTrack;
             c.start = prevStart;
             m_dropIllegal = true;
@@ -1100,7 +1236,7 @@ void EditorTimelineWidget::mouseMoveEvent(QMouseEvent *e)
     // edge auto-scroll while dragging clips (never for the playhead or
     // header gestures)
     if (m_drag == DragMode::MoveClip || m_drag == DragMode::TrimLeft ||
-            m_drag == DragMode::TrimRight) {
+            m_drag == DragMode::TrimRight || m_drag == DragMode::SpacerMove) {
         if (e->pos().x() > width() - 24) m_scrollSec += 20 / m_pxPerSec;
         else if (e->pos().x() < headerWidth() + 24) m_scrollSec = qMax(0.0, m_scrollSec - 20 / m_pxPerSec);
         updateScrollBar();
@@ -1127,6 +1263,14 @@ void EditorTimelineWidget::mouseReleaseEvent(QMouseEvent *e)
         if (changed) { emitSelectionSummary(); }
         update();
         return;
+    }
+
+    // Ctrl insert drop: the pushed-aside state rides the normal
+    // writeback that follows the release
+    if (m_drag == DragMode::MoveClip && m_dragClip >= 0 &&
+            m_dragClip < m_clips.size() &&
+            (e->modifiers() & Qt::ControlModifier)) {
+        insertPushAside(m_dragClip);
     }
 
     if (m_drag == DragMode::TrackHeight) {
@@ -1159,6 +1303,7 @@ void EditorTimelineWidget::mouseReleaseEvent(QMouseEvent *e)
     m_dropIllegal = false;
     m_tangled.clear();
     m_groupOrig.clear();
+    m_spacerOrig.clear();
     update();
 }
 
@@ -1231,6 +1376,11 @@ void EditorTimelineWidget::keyPressEvent(QKeyEvent *e)
     }
     if (e->key() == Qt::Key_A && e->modifiers() == Qt::ShiftModifier) {
         setTool(EditTool::TrackBackward);
+        return;
+    }
+    // spacer tool (kdenlive 间隔工具): slide a whole run at once
+    if (e->key() == Qt::Key_D && e->modifiers() == Qt::NoModifier) {
+        setTool(EditTool::Spacer);
         return;
     }
     QWidget::keyPressEvent(e);
@@ -1483,6 +1633,8 @@ void EditorTimelineWidget::contextMenuEvent(QContextMenuEvent *e)
     QAction *splitHere = menu.addAction(tr("在此处分割"));
     QAction *del = menu.addAction(tr("删除"));
     QAction *rippleDel = menu.addAction(tr("波纹删除"));
+    QAction *freeze = menu.addAction(tr("从此处定格到块尾"));
+    QAction *speed = menu.addAction(tr("变速…"));
     menu.addSeparator();
     QAction *back = menu.addAction(tr("向左选择本轨"));
     QAction *backAll = menu.addAction(tr("向左选择全部轨道"));
@@ -1502,6 +1654,18 @@ void EditorTimelineWidget::contextMenuEvent(QContextMenuEvent *e)
     if (act == splitHere) { razorCutAt(e->pos(), idx, false); }
     else if (act == del) { requestDelete(false); }
     else if (act == rippleDel) { requestDelete(true); }
+    else if (act == freeze) {
+        // CapCut 定格: cut here + freeze everything from the cut to the
+        // clip's end on the cut frame (doc side)
+        emit freezeRequested(QList<int>{c.id}, xToTime(e->pos().x()));
+    }
+    else if (act == speed) {
+        bool ok = false;
+        const double rate = QInputDialog::getDouble(
+                    this, tr("变速"), tr("播放速率（倍速，1=原速）"),
+                    1.0, 0.1, 10.0, 2, &ok);
+        if (ok && rate > 0.01) { emit speedChangeRequested(c.id, rate); }
+    }
     else if (act == back) { trackSelectAt(e->pos(), idx, true); }
     else if (act == backAll) { trackSelectAll(e->pos(), true); }
     else if (act == fwd) { trackSelectAt(e->pos(), idx, false); }
@@ -1679,6 +1843,24 @@ void EditorTimelineWidget::setMarkers(const QVector<QPair<int, QString>> &marker
 {
     m_markers = markers;
     update();
+}
+
+void EditorTimelineWidget::setRangeBand(const double inSec,
+                                        const double outSec)
+{
+    m_rangeIn = inSec;
+    m_rangeOut = outSec;
+    update();
+}
+
+void EditorTimelineWidget::setZoomLevel(const int level)
+{
+    // toolbar zoom slider: 0-100 maps logarithmically over the zoom
+    // range (10..600 px/s), anchored on the playhead
+    const double target = 10.0 * std::pow(60.0, qBound(0, level, 100) / 100.0);
+    if (qAbs(target - m_pxPerSec) < 0.01) { return; }
+    const int anchor = qBound(headerWidth(), timeToX(m_playhead), width());
+    applyZoom(target / m_pxPerSec, anchor);
 }
 
 void EditorTimelineWidget::setClipThumbFrame(const int clipId,

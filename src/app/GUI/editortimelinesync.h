@@ -62,6 +62,13 @@ public:
     // inside each clip, at least one frame on both sides); sounds are
     // skipped (the doc-side split only supports visual layers)
     void razorCut(const QList<int> &clipIds, const double sec);
+    // CapCut 定格: cut the clips at sec, then freeze everything from
+    // the cut to each clip's end on the cut frame (frame remapping)
+    void freezeClips(const QList<int> &clipIds, const double sec);
+    // clip playback rate (1 = original): maps to the layer stretch
+    // (video layers carry their audio along); visual non-video layers
+    // have no rate and are refused with a log line
+    void speedClip(const int clipId, const double rate);
     // toggle the lane's layer visibility (mute); allSameType extends
     // the toggle to every track of the same type (kdenlive Shift)
     void toggleTrackMute(const int trackIdx, const bool allSameType);
