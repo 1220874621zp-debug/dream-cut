@@ -1784,7 +1784,7 @@ bool NleTimelineView::KFT_keyPressEvent(QKeyEvent *e)
         }
         return true;
     }
-    if ((key == Qt::Key_S || key == Qt::Key_Slash) &&
+    if ((key == Qt::Key_C || key == Qt::Key_Slash) &&
             mods == Qt::NoModifier) {
         // no-selection press still splits: the model falls back to
         // every unlocked-lane clip under the playhead

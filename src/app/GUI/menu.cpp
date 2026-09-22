@@ -648,7 +648,9 @@ void MainWindow::setupMenuBar()
         tr("Clip to Scene", "MenuBar_View"));
     mClipViewToCanvas->setCheckable(true);
     //mClipViewToCanvas->setChecked(true);
-    mClipViewToCanvas->setShortcut(QKeySequence(Qt::Key_C));
+    // 裸 C 让位给时间轴的播放头切割（剪映习惯）；这里改为组合键
+    mClipViewToCanvas->setShortcut(
+                QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C));
     cmdAddAction(mClipViewToCanvas);
     connect(mClipViewToCanvas, &QAction::triggered,
             &mActions, &Actions::setClipToCanvas);

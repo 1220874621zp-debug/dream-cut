@@ -246,9 +246,11 @@ eSettings::eSettings(const int cpuThreads,
                      fPathControlScaling,
                      "pathControlScaling", 1.);
 
+    // 默认自动匹配：导入首个视频时场景宽高/帧率/时长跟随视频
+    // （CapCut 语义）；旧偏好文件里已保存过值的用户不受影响
     gSettings << std::make_shared<eIntSetting>(fAdjustSceneFromFirstClip,
                                                "AdjustSceneFromFirstClip",
-                                               AdjustSceneAsk);
+                                               AdjustSceneAlways);
 
     gSettings << std::make_shared<eIntSetting>(fDefaultFillStrokeIndex,
                                               "DefaultFillStrokeIndex",

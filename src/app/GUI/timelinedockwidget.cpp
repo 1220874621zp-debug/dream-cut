@@ -443,7 +443,7 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
         }
         mClipCanvasButton->setCheckable(true);
         mClipCanvasButton->setToolTip(tr(
-                "遮蔽掉画布之外的内容（同视图菜单 Clip to Scene，快捷键 C）"));
+                "遮蔽掉画布之外的内容（同视图菜单 Clip to Scene，快捷键 Ctrl+Shift+C）"));
         connect(mClipCanvasButton, &QAction::triggered,
                 this, [this](const bool checked) {
             const auto scene = *mDocument.fActiveScene;
@@ -906,6 +906,7 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     });
 
     setupPropertyShortcuts();
+
 }
 
 void TimelineDockWidget::setupNleActions()
@@ -984,7 +985,7 @@ void TimelineDockWidget::setupNleActions()
                 QIcon(nleGlyphPixmap(kNleSplitSvg, QColor(0xc8, 0xc8, 0xc8))),
                 tr("分割"), this);
     mNleSplitAtAct->setToolTip(
-                tr("在播放头分割选中块；未选中时分割播放头下所有块（S）"));
+                tr("在播放头分割选中块；未选中时分割播放头下所有块（C）"));
     mNleSplitAtAct->setData(mNleSplitAtAct->toolTip());
     connect(mNleSplitAtAct, &QAction::triggered, this, [this]() {
         if (mNleView) { mNleView->splitAtPlayhead(); }
