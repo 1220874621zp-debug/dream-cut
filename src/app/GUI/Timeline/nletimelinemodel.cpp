@@ -1452,6 +1452,47 @@ void NleTimelineModel::refreshFromDocument()
         }
     }
 
+    // ---- 主轨磁吸常驻兜底（CapCut 语义）：普通删除、变速缩短、
+    // 旧工程等任何来源在主轨留下的缺口，随本次刷新立即闭合，不再
+    // 等下一次拖拽提交。拖拽路径 commitMoves 已自带压实，这里通常
+    // 空转。锚定在移动块头部的覆盖块随动；锚点消失（落在被删缺口
+    // 里）则不随。写入走 writeback 守卫+blockUndoRedo（UI 态）
+    if (mMagnetic && scene) {
+        const int mainId = mainTrackId();
+        if (mainId >= 0) {
+            const auto moves = compactGapsPlan();
+            if (!moves.isEmpty()) {
+                QHash<int, int> deltas;
+                for (const auto &m : moves) {
+                    const auto oc = clip(m.clipId);
+                    if (oc) { deltas.insert(m.clipId, m.start - oc->start); }
+                }
+                mInWriteback = true;
+                const auto undoBlock = scene->blockUndoRedo();
+                for (const auto &m : moves) {
+                    const auto oc = clip(m.clipId);
+                    if (oc && oc->layer) { shiftLayer(oc->layer.data(), m.start - oc->start); }
+                }
+                for (const auto &o : mClips) {
+                    if (o.audio || o.trackId == mainId || !o.layer) { continue; }
+                    const Clip *anchor = nullptr;
+                    for (const auto &mc : mClips) {
+                        if (mc.audio || mc.trackId != mainId) { continue; }
+                        if (mc.start <= o.start &&
+                                o.start < mc.start + mc.duration) {
+                            anchor = &mc;
+                            break;
+                        }
+                    }
+                    if (!anchor) { continue; }
+                    const int delta = deltas.value(anchor->clipId, 0);
+                    if (delta != 0) { shiftLayer(o.layer.data(), delta); }
+                }
+                mInWriteback = false;
+            }
+        }
+    }
+
     emit modelChanged();
     emit guidesChanged();
     if (scene) { emit playheadFrameChanged(scene->anim_getCurrentAbsFrame()); }
