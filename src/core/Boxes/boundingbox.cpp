@@ -24,7 +24,6 @@
 // Fork of enve - Copyright (C) 2016-2020 Maurycy Liebner
 
 #include "Boxes/boundingbox.h"
-#include "Boxes/bone.h"
 #include "Boxes/cameralayer.h"
 #include "Animators/motionpathhandler.h"
 #include "Boxes/containerbox.h"
@@ -739,12 +738,6 @@ void BoundingBox::prp_updateCanvasProps() {
                     getBoxTransformAnimator());
     }
     mCanvasProps.append(mMotionPathHandler.get());
-    // FK bone tail joint overlay (draggable rotation handle)
-    if(const auto bone = enve_cast<class Bone*>(this)) {
-        if(const auto overlay = bone->ensureBoneOverlay()) {
-            mCanvasProps.append(overlay);
-        }
-    }
     const auto parentScene = getParentScene();
     if(parentScene) parentScene->requestUpdate();
 }

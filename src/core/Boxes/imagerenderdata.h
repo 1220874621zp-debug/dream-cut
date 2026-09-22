@@ -39,14 +39,6 @@ struct CORE_EXPORT ImageRenderData : public BoxRenderData {
 
     sk_sp<SkImage> fImage;
 
-    // ---- bone skin bind (mesh deformation) ----
-    // built on the GUI thread in ImageBox::setupRenderData: the
-    // assembled drawVertices payload plus the deformed bounds;
-    // updateRelBoundingRect/drawSk only read them
-    sk_sp<SkVertices> fSkinVertices;
-    SkRect fSkinBounds = SkRect::MakeEmpty();
-    bool fSkinned = false;
-
     // true when the image data is ready; a null image here means the
     // container was evicted to tmp (or dropped) and the caller must
     // wait for its loader instead of compositing an imageless frame

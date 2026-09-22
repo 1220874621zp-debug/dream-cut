@@ -215,43 +215,8 @@ TimelineWidget::TimelineWidget(Document &document,
     mMenuLayout->addWidget(mBoxesListMenuBar);
     mMenuLayout->addWidget(mSearchLine);
 
-    // quick actions next to the search box: new bone layer (bone tool
-    // icon) and a "new layer" dropdown hosting the special layer types
-    {
-        QFile boneSvg(QStringLiteral(":/icons/bone.svg"));
-        QIcon boneIcon;
-        if(boneSvg.open(QIODevice::ReadOnly)) {
-            QSvgRenderer rnd(boneSvg.readAll());
-            if(rnd.isValid()) {
-                const int isz = ThemeSupport::getIconSize(48).width();
-                QPixmap pm(isz, isz);
-                pm.fill(Qt::transparent);
-                QPainter pp(&pm);
-                rnd.render(&pp, QRectF(0, 0, isz, isz));
-                pp.end();
-                // white tint: the timeline bar is dark
-                QPainter pw(&pm);
-                pw.setCompositionMode(QPainter::CompositionMode_SourceIn);
-                pw.fillRect(pm.rect(), Qt::white);
-                pw.end();
-                boneIcon = QIcon(pm);
-            }
-        }
-        const auto boneBtn = new QToolButton(mBoxesListMenuBar);
-        boneBtn->setIcon(boneIcon.isNull() ?
-                             QIcon::fromTheme("group") : boneIcon);
-        boneBtn->setToolTip(tr("New Bone Layer"));
-        boneBtn->setAutoRaise(true);
-        connect(boneBtn, &QToolButton::clicked, this, [this]() {
-            const auto scroller = mBoxesListWidget ?
-                        mBoxesListWidget->getBoxScroller() : nullptr;
-            if(const auto scene = scroller ?
-                        scroller->currentScene() : nullptr) {
-                scene->addBoneLayerAction();
-            }
-        });
-        mMenuLayout->addWidget(boneBtn);
-
+    // quick action next to the search box: a "new layer" dropdown
+    // hosting the special layer types
         const auto layerBtn = new QToolButton(mBoxesListMenuBar);
         layerBtn->setIcon(QIcon::fromTheme("newLayer"));
         layerBtn->setToolTip(tr("New Layer"));
@@ -303,7 +268,6 @@ TimelineWidget::TimelineWidget(Document &document,
         });
         layerBtn->setMenu(layerMenu);
         mMenuLayout->addWidget(layerBtn);
-    }
 
     mMenuLayout->addWidget(mCornerMenuBar);
     mMenuLayout->addWidget(menu);

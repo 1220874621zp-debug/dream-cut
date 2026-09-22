@@ -25,8 +25,6 @@
 
 #include "canvas.h"
 #include "Boxes/adjustmentlayer.h"
-#include "Boxes/bone.h"
-#include "Boxes/bonelayer.h"
 #include "Boxes/cameralayer.h"
 
 #include "eevent.h"
@@ -100,13 +98,6 @@ void Canvas::addActionsToMenu(QMenu *const menu)
         const auto adj = enve::make_shared<AdjustmentLayer>();
         mCurrentContainer->addContained(adj);
         adj->planUpdate(UpdateReason::userChange);
-        Document::sInstance->actionFinished();
-    });
-
-    // new bone layer (FK rig container; use the bone tool inside it)
-    menu->addAction(QObject::tr("New Bone Layer"), [this]() {
-        const auto layer = enve::make_shared<BoneLayer>();
-        mCurrentContainer->addContained(layer);
         Document::sInstance->actionFinished();
     });
 
@@ -242,159 +233,6 @@ void Canvas::handleMovePointMousePressEvent(const eMouseEvent& e)
 }
 
 
-// bone tool: pressing near the tail of the last (or any) bone continues
-// the chain with a child bone; pressing farther away starts a new,
-// independent bone at the click point. The draft bone's length/rotation
-// then follow the cursor until the next click (see updateDraftBone in
-// the mouse-move path)
-void Canvas::boneCreatePress(const eMouseEvent& e) {
-    clearBoxesSelection();
-    // screen-pixel pick radius so the connect feel stays the same at
-    // every zoom level (same style as pickBoneAt's 12*e.fScale)
-    const qreal pickDist = 20*e.fScale;
-    // branching: pressing near ANOTHER bone's tail re-targets the
-    // chain there (fork a new branch from that bone)
-    for(const auto bone : mBones) {
-        if(!bone || bone == mDraftBone) continue;
-        if(QLineF(e.fPos, bone->getTailAbsPos()).length() < pickDist) {
-            mDraftBone = bone->addChildBone();
-            mChainTail = mDraftBone; // continue the fork from the new bone
-            addBoxToSelection(bone);
-            // orient the fresh bone towards the press point RIGHT AWAY:
-            // without this it briefly renders at the parent's ORIGIN
-            // with the default length/rotation (visible jump; and it
-            // stays there on a click without any drag)
-            updateDraftBone(e.fPos);
-            return;
-        }
-    }
-    // continue the chain ONLY when the press hugs the chain tail - a
-    // distant press means the user is drawing a separate bone and must
-    // not be yanked back onto the chain; Ctrl forces a new chain too
-    if(mChainTail && !e.ctrlMod()
-            && QLineF(e.fPos, mChainTail->getTailAbsPos()).length() < pickDist) {
-        mDraftBone = mChainTail->addChildBone();
-        // advance the chain tail to the fresh bone, otherwise every
-        // subsequent bone keeps branching off the FIRST one
-        mChainTail = mDraftBone;
-        addBoxToSelection(mChainTail);
-        updateDraftBone(e.fPos);
-    } else {
-        startBoneChain(e.fPos);
-        mChainTail = mDraftBone;
-        updateDraftBone(e.fPos);
-    }
-}
-
-void Canvas::updateDraftBone(const QPointF& absPos) {
-    if(!mDraftBone) return;
-    const auto parent = mDraftBone->getParentGroup();
-    const QPointF pRel = parent ? parent->mapAbsPosToRel(absPos) : absPos;
-    const QPointF bonePos = mDraftBone->getBoxTransformAnimator()->
-            getPosAnimator()->getEffectiveValue();
-    const QPointF rel = pRel - bonePos;
-    const qreal len = qBound(10., pointToLen(rel), 2000.);
-    mDraftBone->lengthAnimator()->setCurrentBaseValue(len);
-    if(len > 10) {
-        const qreal deg = qRadiansToDegrees(qAtan2(rel.y(), rel.x()));
-        mDraftBone->getBoxTransformAnimator()->getRotAnimator()->
-                setCurrentBaseValue(deg);
-    }
-    mDraftBone->planUpdate(UpdateReason::userChange);
-}
-
-// nearest visible bone whose head-tail segment passes within maxDist
-// of the given scene position (shared by the pose/bind tools)
-Bone* Canvas::pickBoneAt(const QPointF& absPos, const qreal maxDist) {
-    Bone* best = nullptr;
-    qreal bestDist = maxDist;
-    for(const auto bone : mBones) {
-        if(!bone || !bone->isVisible()) continue;
-        const QPointF head = bone->getHeadAbsPos();
-        const QPointF tail = bone->getTailAbsPos();
-        const QPointF d = tail - head;
-        const qreal denom = d.x()*d.x() + d.y()*d.y();
-        const qreal u = denom > 0 ? qBound(0., ((absPos.x()-head.x())*d.x() +
-                                                (absPos.y()-head.y())*d.y()) /
-                                      denom, 1.) : 0.;
-        const QPointF proj(head.x() + u*d.x(), head.y() + u*d.y());
-        const qreal dist = QLineF(absPos, proj).length();
-        if(dist < bestDist) { bestDist = dist; best = bone; }
-    }
-    return best;
-}
-
-// bone parent-link tool: with a bone selected (object tool), clicking
-// another bone makes that bone its parent - the hierarchy re-links in
-// place, world positions of the whole sub-chain are preserved
-void Canvas::boneParentPress(const eMouseEvent& e) {
-    const auto target = pickBoneAt(e.fPos, 12*e.fScale);
-    if(!target) { clearBoxesSelection(); return; }
-    // NOTE: Canvas IS the scene - getParentScene() returns null here
-    // (an early bug that made the tool silently do nothing)
-    const auto& sel = getSelectedBoxesList();
-    if(sel.isEmpty()) return;
-    const auto selected = enve_cast<Bone*>(sel.last());
-    if(!selected || selected == target) return;
-    Bone::diag(QStringLiteral("parentLink %1 under %2")
-         .arg(selected->prp_getName(), target->prp_getName()));
-    selected->setParentBone(target);
-}
-
-// bone bind tool (Moho flow): with one or more layers selected (done in
-// the object tool), clicking a bone re-parents them into it; clicking
-// empty space just clears the selection
-void Canvas::boneBindPress(const eMouseEvent& e) {
-    const auto bone = pickBoneAt(e.fPos, 12*e.fScale);
-    if(!bone) { clearBoxesSelection(); return; }
-    bone->bindSelectedLayers();
-    clearBoxesSelection();
-    addBoxToSelection(bone);
-}
-
-// bone select tool: bones only - handy in dense scenes where clicking
-// through stacked artwork would otherwise pick graphics
-void Canvas::boneSelectPress(const eMouseEvent& e) {
-    const auto bone = pickBoneAt(e.fPos, 12*e.fScale);
-    if(bone) {
-        if(e.shiftMod()) {
-            // shift-click toggles membership like the object tool
-            if(bone->isSelected()) removeBoxFromSelection(bone);
-            else addBoxToSelection(bone);
-        } else {
-            clearBoxesSelection();
-            addBoxToSelection(bone);
-        }
-    } else {
-        // empty space: begin a marquee (shift keeps the current pick)
-        if(!e.shiftMod()) clearBoxesSelection();
-        startSelectionAtPoint(e.fPos);
-    }
-}
-
-// skin pin tool: click an image layer to place a puppet pin right
-// there (direct mesh deformation, no bones needed); the layer becomes
-// the selection so the fresh pin is immediately visible and draggable
-void Canvas::skinPinPress(const eMouseEvent& e) {
-    // pixel-accurate pick with the camera-projected fallback the
-    // object tool uses (transparent pixels of a top image fall
-    // through to the image actually seen there)
-    auto box = mCurrentContainer->getBoxAtPixel(e.fPos);
-    if(!box && sceneHasActiveCamera()) {
-        box = mCurrentContainer->getBoxAtPixel(
-                    mapCameraScreenToWorld(e.fPos));
-    }
-    if(!box) box = mCurrentContainer->getBoxAt(e.fPos);
-    if(!box) return;
-    const auto img = enve_cast<ImageBox*>(box);
-    if(!img) return;
-    if(!img->isSelected()) {
-        clearBoxesSelection();
-        addBoxToSelection(img);
-    }
-    img->addSkinPin(img->mapAbsPosToRel(e.fPos));
-}
-
 // scene camera tool (AE-like, Blender-flavoured): LMB drag orbits the
 // composition (tilt X/Y), Shift+LMB pans, Ctrl+LMB drags zoom. AE
 // flow: a camera LAYER must exist - auto-created on first use; the
@@ -492,129 +330,6 @@ void Canvas::cameraCancel() {
     cameraRelease();
 }
 
-// bone pose tool (Moho-style): pick the nearest bone under the cursor.
-// Pressing near the head joint grabs a MOVE (translate the bone, the
-// chain follows); pressing anywhere else on the body grabs a ROTATION
-// around the head joint. Recording auto-keys the touched animator.
-void Canvas::bonePosePress(const eMouseEvent& e) {
-    const qreal pickPx = 12*e.fScale;
-    Bone* best = pickBoneAt(e.fPos, pickPx);
-    if(!best) { clearBoxesSelection(); return; }
-
-    // the first pose of a skeleton is the natural moment the rig is
-    // complete: auto-bind any still-free pins of the images inside
-    // this bone layer BEFORE the pose applies (the captured bind pose
-    // is the pre-pose skeleton)
-    for (auto p = best->getParentGroup(); p; p = p->getParentGroup()) {
-        if (enve_cast<BoneLayer*>(p)) {
-            ImageBox::autoBindFreePinsUnder(p);
-            break;
-        }
-    }
-
-    clearBoxesSelection();
-    addBoxToSelection(best);
-    mPoseBone = best;
-    mPoseMoved = false;
-    const auto transform = best->getBoxTransformAnimator();
-    const QPointF head = best->getHeadAbsPos();
-    if(QLineF(e.fPos, head).length() < 10*e.fScale) {
-        mPoseMode = PoseDragMode::move;
-        mPoseMoveLast = e.fPos;
-        transform->getPosAnimator()->prp_startTransform();
-    } else {
-        mPoseMode = PoseDragMode::rotate;
-        mPoseStartAngle = qAtan2(e.fPos.y() - head.y(),
-                                 e.fPos.x() - head.x());
-        mPoseLastAngle = mPoseStartAngle;
-        mPoseAccumDeg = 0;
-        const auto rot = transform->getRotAnimator();
-        mPoseStartRot = rot->getEffectiveValue();
-        rot->prp_startTransform();
-    }
-}
-
-void Canvas::bonePoseMove(const eMouseEvent& e) {
-    if(!mPoseBone || mPoseMode == PoseDragMode::none) return;
-    const auto transform = mPoseBone->getBoxTransformAnimator();
-    if(mPoseMode == PoseDragMode::rotate) {
-        const QPointF head = mPoseBone->getHeadAbsPos();
-        const qreal cur = qAtan2(e.fPos.y() - head.y(),
-                                 e.fPos.x() - head.x());
-        // wrap each INCREMENT to (-180, 180]: dragging across the
-        // atan2 +/-pi boundary must accumulate smoothly instead of
-        // jumping ~360 (keys interpolating the long way = reversed
-        // rotation direction)
-        qreal incr = qRadiansToDegrees(cur - mPoseLastAngle);
-        while(incr > 180.) incr -= 360.;
-        while(incr < -180.) incr += 360.;
-        mPoseAccumDeg += incr;
-        mPoseLastAngle = cur;
-        transform->getRotAnimator()->setCurrentBaseValue(
-                    mPoseStartRot + mPoseAccumDeg);
-    } else {
-        const QPointF delta = e.fPos - mPoseMoveLast;
-        mPoseMoveLast = e.fPos;
-        // the position animator stores PARENT-space values: a scene-
-        // space drag delta must be carried through the parent's
-        // inverse transform first. Without this, a bone linked under
-        // a rotated parent (Bone Parent tool) drifts along the wrong
-        // axes - e.g. a 90-degree parent turns a left-drag into an
-        // up/down move. Mapping two points cancels the translation
-        // and yields the linear-part inverse for the delta.
-        QPointF relDelta = delta;
-        if(const auto parent = mPoseBone->getParentGroup()) {
-            relDelta = parent->mapAbsPosToRel(e.fPos) -
-                       parent->mapAbsPosToRel(e.fPos - delta);
-        }
-        transform->translate(relDelta.x(), relDelta.y());
-    }
-    mPoseMoved = true;
-    mPoseBone->planUpdate(UpdateReason::userChange);
-}
-
-void Canvas::bonePoseRelease() {
-    if(!mPoseBone) return;
-    const auto transform = mPoseBone->getBoxTransformAnimator();
-    if(mPoseMode == PoseDragMode::rotate) {
-        transform->getRotAnimator()->prp_finishTransform();
-        // Moho-style auto-keyframing: posing a bone records a key at
-        // the current frame; with auto-freeze ON a plain CLICK (no
-        // drag) also freezes - the first pose frame usually needs no
-        // movement
-        if(mPoseMoved || Bone::sAutoFreezePose) {
-            if(Bone::sAutoFreezePose) freezeAllBones();
-            else if(mPoseMoved) {
-                transform->getRotAnimator()->anim_saveCurrentValueAsKey();
-            }
-        }
-    } else if(mPoseMode == PoseDragMode::move) {
-        transform->getPosAnimator()->prp_finishTransform();
-        if(mPoseMoved || Bone::sAutoFreezePose) {
-            if(Bone::sAutoFreezePose) freezeAllBones();
-            else if(mPoseMoved) {
-                transform->getPosAnimator()->anim_saveCurrentValueAsKey();
-            }
-        }
-    }
-    if(Document::sInstance) Document::sInstance->actionFinished();
-    mPoseMode = PoseDragMode::none;
-    mPoseBone = nullptr;
-    mPoseMoved = false;
-}
-
-void Canvas::bonePoseCancel() {
-    if(!mPoseBone) return;
-    const auto transform = mPoseBone->getBoxTransformAnimator();
-    if(mPoseMode == PoseDragMode::rotate) {
-        transform->getRotAnimator()->prp_cancelTransform();
-    } else if(mPoseMode == PoseDragMode::move) {
-        transform->getPosAnimator()->prp_cancelTransform();
-    }
-    mPoseMode = PoseDragMode::none;
-    mPoseBone = nullptr;
-}
-
 void Canvas::handleLeftButtonMousePress(const eMouseEvent& e)
 {
     if (e.fMouseGrabbing) {
@@ -686,18 +401,6 @@ void Canvas::handleLeftButtonMousePress(const eMouseEvent& e)
     } else if (mCurrentMode == CanvasMode::pickFillStroke ||
                mCurrentMode == CanvasMode::pickFillStrokeEvent) {
         //mPressedBox = getBoxAtFromAllDescendents(e.fPos);
-    } else if (mCurrentMode == CanvasMode::boneCreate) {
-        boneCreatePress(e);
-    } else if (mCurrentMode == CanvasMode::bonePose) {
-        bonePosePress(e);
-    } else if (mCurrentMode == CanvasMode::boneBind) {
-        boneBindPress(e);
-    } else if (mCurrentMode == CanvasMode::boneParent) {
-        boneParentPress(e);
-    } else if (mCurrentMode == CanvasMode::boneSelect) {
-        boneSelectPress(e);
-    } else if (mCurrentMode == CanvasMode::skinPin) {
-        skinPinPress(e);
     } else if (mCurrentMode == CanvasMode::camera) {
         cameraPress(e);
     } else if (mCurrentMode == CanvasMode::circleCreate) {
@@ -775,7 +478,6 @@ void Canvas::cancelCurrentTransform()
 {
     mGizmos.fState.rotatingFromHandle = false;
 
-    if(mCurrentMode == CanvasMode::bonePose) { bonePoseCancel(); }
     if(mCurrentMode == CanvasMode::camera) { cameraCancel(); }
 
     if (mCurrentMode == CanvasMode::pointTransform) {
@@ -1250,26 +952,6 @@ void Canvas::handleLeftMouseRelease(const eMouseEvent &e)
     if (e.fMouseGrabbing) { e.fReleaseMouse(); }
 
     handleLeftMouseGizmos();
-
-    // bone select marquee: collect only BONES whose head-tail segment
-    // intersects the selection rectangle
-    if(mCurrentMode == CanvasMode::boneSelect && mSelecting) {
-        mSelecting = false;
-        moveSecondSelectionPoint(e.fPos);
-        if(!e.shiftMod()) clearBoxesSelection();
-        const QRectF rect = mSelectionRect.normalized();
-        for(const auto bone : mBones) {
-            if(!bone || !bone->isVisible()) continue;
-            const QLineF seg(bone->getHeadAbsPos(), bone->getTailAbsPos());
-            const QRectF segBounds = QRectF(seg.p1(), seg.p2()).normalized();
-            if(rect.intersects(segBounds) &&
-               (rect.contains(seg.p1()) || rect.contains(seg.p2()) ||
-                segBounds.intersected(rect).width() > 0)) {
-                addBoxToSelection(bone);
-            }
-        }
-        return;
-    }
 
     if (mCurrentNormalSegment.isValid()) {
         if (!mStartTransform) { mCurrentNormalSegment.finishPassThroughTransform(); }

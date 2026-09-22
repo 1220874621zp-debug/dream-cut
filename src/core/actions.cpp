@@ -1002,33 +1002,10 @@ void Actions::setNullMode() {
     mDocument.setCanvasMode(CanvasMode::nullCreate);
 }
 
-void Actions::setBoneCreateMode() {
-    mDocument.setCanvasMode(CanvasMode::boneCreate);
-}
-
-void Actions::setBonePoseMode() {
-    mDocument.setCanvasMode(CanvasMode::bonePose);
-}
-
-void Actions::setBoneBindMode() {
-    mDocument.setCanvasMode(CanvasMode::boneBind);
-}
-
-void Actions::setBoneParentMode() {
-    mDocument.setCanvasMode(CanvasMode::boneParent);
-}
-
-void Actions::setBoneSelectMode() {
-    mDocument.setCanvasMode(CanvasMode::boneSelect);
-}
-
 void Actions::setCameraMode() {
     mDocument.setCanvasMode(CanvasMode::camera);
 }
 
-void Actions::setSkinPinMode() {
-    mDocument.setCanvasMode(CanvasMode::skinPin);
-}
 
 
 void Actions::finishSmoothChange() {

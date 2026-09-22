@@ -34,12 +34,7 @@ ImageRenderData::ImageRenderData(BoundingBox * const parentBoxT) :
 }
 
 void ImageRenderData::updateRelBoundingRect() {
-    // skinned: the raster surface must cover the DEFORMED geometry or
-    // the mesh bends outside the original image rect and gets clipped
-    if(fSkinned && !fSkinBounds.isEmpty()) {
-        fRelBoundingRect = QRectF(QPointF(fSkinBounds.left(), fSkinBounds.top()),
-                                  QPointF(fSkinBounds.right(), fSkinBounds.bottom()));
-    } else if(fImage) fRelBoundingRect =
+    if(fImage) fRelBoundingRect =
             QRectF(0, 0, fImage->width(), fImage->height());
     else fRelBoundingRect = QRectF(0, 0, 0, 0);
 }
@@ -52,8 +47,7 @@ void ImageRenderData::setupRenderData() {
     }
     // 2.5D: perspective requires rasterization (direct draw is 2D only);
     // skinning too: the deformed mesh replaces the plain drawImage
-    if(!fForceRasterize && !hasEffects() && !fHasPerspective &&
-       !fSkinned) setupDirectDraw();
+    if(!fForceRasterize && !hasEffects() && !fHasPerspective) setupDirectDraw();
 }
 
 void ImageRenderData::setupDirectDraw() {
@@ -71,19 +65,6 @@ void ImageRenderData::setupDirectDraw() {
 }
 
 void ImageRenderData::drawSk(SkCanvas * const canvas) {
-    // skin bind: draw the deformed mesh, sampling the source image at
-    // the undeformed positions (texcoords == base mesh positions)
-    if(fSkinned && fSkinVertices && fImage) {
-        SkPaint paint;
-        paint.setAntiAlias(true);
-        paint.setFilterQuality(fFilterQuality);
-        paint.setShader(fImage->makeShader(SkTileMode::kClamp,
-                                           SkTileMode::kClamp,
-                                           nullptr));
-        canvas->drawVertices(fSkinVertices.get(),
-                             SkBlendMode::kModulate, paint);
-        return;
-    }
     const float x = static_cast<float>(fRelBoundingRect.x());
     const float y = static_cast<float>(fRelBoundingRect.y());
     if(fFilterQuality > kNone_SkFilterQuality) {

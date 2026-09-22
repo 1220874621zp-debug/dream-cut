@@ -123,8 +123,7 @@ void Canvas::mouseMoveEvent(const eMouseEvent &e)
             if ((mCurrentMode == CanvasMode::pointTransform &&
                 !mPressedPoint && !mCurrentNormalSegment.isValid()) ||
                (mCurrentMode == CanvasMode::boxTransform &&
-                !mPressedBox && !mPressedPoint) ||
-               mCurrentMode == CanvasMode::boneSelect) {
+                !mPressedBox && !mPressedPoint)) {
                 startSelectionAtPoint(e.fPos);
             }
         }
@@ -146,10 +145,6 @@ void Canvas::mouseMoveEvent(const eMouseEvent &e)
             updateHoveredPoint(e);
         } else if (mCurrentMode == CanvasMode::pathCreate) {
             handleAddSmartPointMouseMove(e);
-        } else if (mCurrentMode == CanvasMode::boneCreate) {
-            updateDraftBone(e.fPos);
-        } else if (mCurrentMode == CanvasMode::bonePose) {
-            bonePoseMove(e);
         } else if (mCurrentMode == CanvasMode::camera) {
             cameraMove(e);
         } else if (mCurrentMode == CanvasMode::circleCreate) {
@@ -206,7 +201,6 @@ void Canvas::mouseReleaseEvent(const eMouseEvent &e)
             break;
         case CanvasMode::circleCreate:
         case CanvasMode::rectCreate:
-        case CanvasMode::boneCreate:
             // a right-click aborts an in-progress rect-mask drag
             // without dropping the half-drawn mask on the layer
             if (!mCurrentMaskRectNodes.isEmpty()) {
@@ -217,8 +211,6 @@ void Canvas::mouseReleaseEvent(const eMouseEvent &e)
                 mCurrentMaskRectPath.clear();
             }
             clearSelectionAction();
-            mDraftBone = nullptr;
-            mChainTail = nullptr; // right-click ends the chain
             break;
         case CanvasMode::pickFillStroke:
             applyPixelColor(pickPixelColor(e.fGlobalPos), false);
@@ -239,13 +231,6 @@ void Canvas::mouseReleaseEvent(const eMouseEvent &e)
     }
     schedulePivotUpdate();
 
-    if(mCurrentMode == CanvasMode::bonePose && e.fButton == Qt::LeftButton) {
-        bonePoseRelease();
-        mPressedBox = nullptr;
-        mPressedPoint = nullptr;
-        mHasCreationPressPos = false;
-        return;
-    }
     if(mCurrentMode == CanvasMode::camera && e.fButton == Qt::LeftButton) {
         cameraRelease();
         return;

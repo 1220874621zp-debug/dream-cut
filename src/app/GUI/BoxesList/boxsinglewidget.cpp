@@ -48,8 +48,6 @@
 #include "Properties/boolproperty.h"
 #include "Properties/boolpropertycontainer.h"
 #include "Animators/qpointfanimator.h"
-#include "Boxes/bone.h"
-#include "Boxes/bonelayer.h"
 #include "Boxes/pathbox.h"
 #include "Boxes/smartvectorpath.h"
 #include "canvas.h"
@@ -332,8 +330,6 @@ QPixmap* BoxSingleWidget::BOX_CAMERA;
 QPixmap* BoxSingleWidget::BOX_IMAGE;
 QPixmap* BoxSingleWidget::BOX_VIDEO;
 QPixmap* BoxSingleWidget::BOX_SOUND;
-QPixmap* BoxSingleWidget::BOX_BONE;
-QPixmap* BoxSingleWidget::BOX_BONELAYER;
 QPixmap* BoxSingleWidget::BOX_SOLID;
 QPixmap* BoxSingleWidget::BOX_GROUP;
 QPixmap* BoxSingleWidget::BOX_LINK;
@@ -466,10 +462,6 @@ BoxSingleWidget::BoxSingleWidget(BoxScroller * const parent)
             return BoxSingleWidget::BOX_RECT;
         } else if (enve_cast<TextBox*>(target)) {
             return BoxSingleWidget::BOX_TEXT;
-        } else if (enve_cast<BoneLayer*>(target)) {
-            return BoxSingleWidget::BOX_BONELAYER;
-        } else if (enve_cast<Bone*>(target)) {
-            return BoxSingleWidget::BOX_BONE;
         } else if (enve_cast<CameraLayer*>(target)) {
             return BoxSingleWidget::BOX_CAMERA;
         } else if (enve_cast<NullObject*>(target)) {
@@ -1321,13 +1313,7 @@ ContainerBox* BoxSingleWidget::getPromoteTargetGroup() {
             targetGroup = static_cast<ContainerBox*>(parentBox);
         }
     }
-    // rig containers must never be promoted: the operation rewrites the
-    // serialized type and the bone layer / bone would be lost on reload
     if(targetGroup) {
-        const auto type = targetGroup->getBoxType();
-        if(type == eBoxType::bone || type == eBoxType::boneLayer) {
-            return nullptr;
-        }
     }
     return targetGroup;
 }
@@ -1952,31 +1938,8 @@ void BoxSingleWidget::loadStaticPixmaps(int iconSize)
         BOX_CAMERA = new QPixmap(pc);
     }
     {
-        // bone row icon: the U+1F9B4 glyph (text presentation, never a
-        // colored emoji); bone layer: layered two-segment glyph mark
         const int isz = qMax(8, pixmapSize.width()*4/5);
         const QColor col = ThemeSupport::getThemeColorYellow();
-        {
-            QPixmap pb(isz, isz); pb.fill(Qt::transparent);
-            QPainter b(&pb);
-            QFont f(QStringLiteral("Segoe UI Symbol"));
-            f.setPixelSize(qRound(isz*0.9));
-            b.setFont(f);
-            b.setPen(col);
-            const QString glyph = QString(QChar(0xD83E)) +
-                    QChar(0xDCB4) + QChar(0xFE0E);
-            b.drawText(pb.rect(), Qt::AlignCenter, glyph);
-            b.end();
-            BOX_BONE = new QPixmap(pb);
-        }
-        QPixmap pl(isz, isz); pl.fill(Qt::transparent);
-        QPainter l(&pl); l.setRenderHint(QPainter::Antialiasing);
-        QPen pen(col); pen.setWidthF(2.2); pen.setCapStyle(Qt::RoundCap);
-        l.setPen(pen);
-        l.drawLine(QPointF(0.15*isz, 0.85*isz), QPointF(0.55*isz, 0.45*isz));
-        l.drawLine(QPointF(0.45*isz, 0.55*isz), QPointF(0.85*isz, 0.15*isz));
-        l.end();
-        BOX_BONELAYER = new QPixmap(pl);
         // solid layer: filled rounded square with border (flat-color
         // plane)
         QPixmap ps(isz, isz); ps.fill(Qt::transparent);
@@ -2045,8 +2008,6 @@ void BoxSingleWidget::clearStaticPixmaps()
     delete BOX_RECT; BOX_RECT = nullptr;
     delete BOX_TEXT; BOX_TEXT = nullptr;
     delete BOX_NULL; BOX_NULL = nullptr;
-    delete BOX_BONE; BOX_BONE = nullptr;
-    delete BOX_BONELAYER; BOX_BONELAYER = nullptr;
     delete BOX_SOLID; BOX_SOLID = nullptr;
     delete BOX_CAMERA; BOX_CAMERA = nullptr;
     delete BOX_IMAGE; BOX_IMAGE = nullptr;
@@ -2162,141 +2123,6 @@ void BoxSingleWidget::mousePressEvent(QMouseEvent *event) {
                     }
                     Document::sInstance->actionFinished();
                 });
-            }
-        }
-        // convert a plain group (e.g. a flattened PSD import root)
-        // into a bone layer: Moho-style the artwork then lives in the
-        // bone layer while the bones drive it
-        if(const auto cont = enve_cast<ContainerBox*>(target)) {
-            if(cont->getBoxType() == eBoxType::group && !cont->isLink()) {
-                menu.addSeparator();
-                menu.addAction(
-                            BoxSingleWidget::tr("Convert to Bone Layer"),
-                            this,
-                            [contQ = QPointer<ContainerBox>(cont),
-                             sceneQ = QPointer<Canvas>(
-                                 mParent->currentScene())]() {
-                    if(!contQ) return;
-                    const auto bl = BoneLayer::convertFromGroup(contQ);
-                    if(bl && sceneQ) {
-                        sceneQ->clearBoxesSelection();
-                        sceneQ->addBoxToSelection(bl);
-                    }
-                });
-            }
-        }
-        // multiple selected layers -> group them into a new switch
-        // group in one step (the entry below covers an existing plain
-        // group row; skip it here so the two never duplicate)
-        if(const auto box = enve_cast<BoundingBox*>(target)) {
-            const auto contT = enve_cast<ContainerBox*>(target);
-            const bool targetIsPlainGroup =
-                    contT && contT->getBoxType() == eBoxType::group;
-            if(!targetIsPlainGroup && box->isSelected() &&
-               mParent && mParent->currentScene()) {
-                const auto scene = mParent->currentScene();
-                if(scene && scene->getSelectedBoxesList().count() > 1) {
-                    menu.addSeparator();
-                    menu.addAction(
-                                BoxSingleWidget::tr("转换为切换组"),
-                                this,
-                                [sceneQ = QPointer<Canvas>(scene)]() {
-                        if(!sceneQ) return;
-                        const auto group = sceneQ->groupSelectedBoxes();
-                        if(group) {
-                            group->enableSwitchLayer();
-                            // tag switch groups with the palette yellow
-                            // (matches the swatch menu's Yellow) so they
-                            // stand out in the layer list
-                            group->setLabelColor(QColor(232, 215, 32));
-                            Document::sInstance->actionFinished();
-                        }
-                    });
-                }
-            }
-        }
-        // Moho-style switch group: mark the group so exactly one child
-        // renders (derived from the children's visibility channels);
-        // the switch panel then drives the switch keyframes
-        if(const auto cont = enve_cast<ContainerBox*>(target)) {
-            if(cont->getBoxType() == eBoxType::group && !cont->isLink() &&
-               !cont->isFlipBook()) {
-                menu.addSeparator();
-                if(cont->isSwitchLayer()) {
-                    menu.addAction(
-                                BoxSingleWidget::tr("取消切换组"),
-                                this,
-                                [contQ = QPointer<ContainerBox>(cont)]() {
-                        if(!contQ) return;
-                        contQ->disableSwitchLayer();
-                        Document::sInstance->actionFinished();
-                    });
-                } else {
-                    menu.addAction(
-                                BoxSingleWidget::tr("转换为切换组"),
-                                this,
-                                [contQ = QPointer<ContainerBox>(cont),
-                                 sceneQ = QPointer<Canvas>(
-                                     mParent->currentScene())]() {
-                        if(!contQ) return;
-                        contQ->enableSwitchLayer();
-                        // same auto yellow tag as new switch groups
-                        contQ->setLabelColor(QColor(232, 215, 32));
-                        // select the group so the switch panel auto-binds
-                        if(sceneQ) {
-                            sceneQ->clearBoxesSelection();
-                            sceneQ->addBoxToSelection(contQ.data());
-                        }
-                        Document::sInstance->actionFinished();
-                    });
-                }
-            }
-        }
-        // layer-side bone binding: list every bone in the scene, picking
-        // one re-parents the currently selected layers into it (world
-        // position preserved) - Moho-style bind flow
-        if(const auto box = enve_cast<BoundingBox*>(target)) {
-            if(!enve_cast<Bone*>(box) && !enve_cast<BoneLayer*>(box) &&
-               mParent && mParent->currentScene()) {
-                // bound layer: offer a direct unbind back to the bone
-                // layer (single layer, world appearance preserved)
-                if(const auto hostBone =
-                        enve_cast<Bone*>(box->getParentGroup())) {
-                    menu.addSeparator();
-                    menu.addAction(
-                                BoxSingleWidget::tr("Unbind from Bone"),
-                                this,
-                                [boxQ = QPointer<BoundingBox>(box),
-                                 boneQ = QPointer<Bone>(hostBone)]() {
-                        if(boxQ && boneQ) boneQ->unbindLayer(boxQ);
-                    });
-                }
-                QList<QPointer<Bone>> bones;
-                std::function<void(ContainerBox*)> walkBones =
-                        [&walkBones, &bones](ContainerBox* const cont) {
-                    for(const auto& b : cont->getContainedBoxes()) {
-                        if(const auto bone = enve_cast<Bone*>(b)) {
-                            bones << bone;
-                            walkBones(bone);
-                        } else if(const auto g =
-                                  enve_cast<ContainerBox*>(b)) {
-                            walkBones(g);
-                        }
-                    }
-                };
-                walkBones(mParent->currentScene());
-                if(!bones.isEmpty()) {
-                    menu.addSeparator();
-                    auto bindMenu = menu.addMenu(
-                                BoxSingleWidget::tr("Bind to Bone"));
-                    for(const auto& boneQ : bones) {
-                        if(!boneQ) continue;
-                        bindMenu->addAction(boneQ->prp_getName(),
-                                            this, [boneQ]() {
-                            if(boneQ) boneQ->bindSelectedLayers();
-                        });
-                    }
-                }
             }
         }
         menu.exec(AppSupport::getMouseGlobalPos(event));

@@ -27,7 +27,6 @@
 #include "Timeline/durationrectangle.h"
 #include "Animators/transformanimator.h"
 #include "canvas.h"
-#include "bonelayer.h"
 #include "internallinkgroupbox.h"
 #include "PathEffects/patheffectcollection.h"
 #include "PathEffects/patheffect.h"
@@ -481,7 +480,6 @@ void ContainerBox::promoteToLayer()
     if (!isGroup()) { return; }
     // rig containers must keep their identity: promoting rewrites the
     // serialized type and the bone layer / bone would be lost on reload
-    if (mType == eBoxType::bone || mType == eBoxType::boneLayer) { return; }
     if (!isLink()) { mType = eBoxType::layer; }
     mIsLayer = true;
     if (prp_getName().contains("Group")) {
@@ -952,15 +950,10 @@ void ContainerBox::setupCanvasMenu(PropertyMenu * const menu)
     if (menu->hasActionsForType<ContainerBox>()) { return; }
     menu->addedActionsForType<ContainerBox>();
 
-    // rig containers (bone layer / bone) must not be promoted or
-    // ungrouped - either operation destroys the bone container
-    const bool boneKind = mType == eBoxType::bone ||
-                          mType == eBoxType::boneLayer;
-
     menu->addPlainAction<ContainerBox>(QIcon::fromTheme("layer"), tr("Promote to Layer"),
                                        [](ContainerBox * box) {
         box->promoteToLayer();
-    })->setEnabled(isGroup() && !boneKind);
+    })->setEnabled(isGroup());
 
     menu->addPlainAction<ContainerBox>(QIcon::fromTheme("group"), tr("Demote to Group"),
                                        [](ContainerBox * box) {
@@ -968,7 +961,7 @@ void ContainerBox::setupCanvasMenu(PropertyMenu * const menu)
     })->setDisabled(isGroup());
 
 
-    if (!isLink() && !boneKind) {
+    if (!isLink()) {
         menu->addSeparator();
 
         const auto ungroupAbandonAction = menu->addPlainAction<ContainerBox>(QIcon::fromTheme("group"), tr("Ungroup"),
@@ -1491,7 +1484,7 @@ bool ContainerBox::addContainedBoxesToSelection(const QRectF &rect) {
         // marquee). Links are leaves here (their content belongs to
         // the source scene), bone layers keep their dedicated tool
         const auto cont = enve_cast<ContainerBox*>(box);
-        if (cont && !cont->isLink() && !enve_cast<BoneLayer*>(cont)) {
+        if (cont && !cont->isLink()) {
             if (cont->addContainedBoxesToSelection(normRect)) {
                 anySelected = true;
                 continue;
@@ -1919,8 +1912,6 @@ void ContainerBox::writeBoxOrSoundXEV(const stdsptr<XevZipFileSaver>& xevFileSav
 #include "customboxcreator.h"
 #include "svglinkbox.h"
 #include "nullobject.h"
-#include "bone.h"
-#include "bonelayer.h"
 #include "Psd/psdimagebox.h"
 #include "Kra/kraimagebox.h"
 #include "lottiebox.h"
@@ -1957,10 +1948,6 @@ qsptr<BoundingBox> createBoxOfNonCustomType(const eBoxType type) {
             return enve::make_shared<InternalLinkCanvas>(nullptr, false);
         case(eBoxType::nullObject):
             return enve::make_shared<NullObject>();
-        case(eBoxType::bone):
-            return enve::make_shared<Bone>();
-        case(eBoxType::boneLayer):
-            return enve::make_shared<BoneLayer>();
         case(eBoxType::solid):
             return enve::make_shared<SolidLayer>();
         case(eBoxType::cameraLayer):

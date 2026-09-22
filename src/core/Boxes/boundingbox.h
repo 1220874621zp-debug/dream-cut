@@ -94,8 +94,6 @@ enum class eBoxType {
     nullObject,
     psdImage,
     adjustmentLayer,
-    bone,
-    boneLayer,
     solid,
     cameraLayer,
     kraImage,
@@ -299,7 +297,7 @@ public:
     void setEffectsEnabled(const bool enable);
     void switchEffectsEnabled() { setEffectsEnabled(!mEffectsEnabled); }
     bool getEffectsEnabled() const { return mEffectsEnabled; }
-    // read access for tools (e.g. the bone bind auto-attach check)
+    // read access for tools
     RasterEffectCollection* rasterEffectsCollection() const
     { return mRasterEffectsAnimators.get(); }
 

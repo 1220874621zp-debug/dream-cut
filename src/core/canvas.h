@@ -71,7 +71,6 @@ class VideoBox;
 class ImageBox;
 class Document;
 class NullObject;
-class Bone;
 
 class eMouseEvent;
 class eKeyEvent;
@@ -902,23 +901,6 @@ public:
     void addNullObject(NullObject* const obj);
     void removeNullObject(NullObject* const obj);
 
-    // FK bones: editing-time visuals + the bone-in-progress chain
-    void addBone(Bone* const bone);
-
-    // read access for diagnostics / tools
-    const QList<Bone*>& getBones() const { return mBones; }
-    // freeze-pose helper: key every channel of every bone in the scene
-    // at the current frame (the auto-freeze toolbar toggle uses this)
-    void freezeAllBones();
-    void removeBone(Bone* const bone);
-    // bone currently being placed by the bone tool (length/rotation
-    // follow the cursor until the next click grows a child bone)
-    Bone* draftBone() const { return mDraftBone; }
-    void setDraftBone(Bone* const bone) { mDraftBone = bone; }
-    // target container for new bones: the current BoneLayer if any
-    Bone* startBoneChain(const QPointF& absPos);
-    // UI helpers: create rig/special layers into the current container
-    void addBoneLayerAction();
     void addAdjustmentLayerAction();
     void addSolidLayerAction();
     // empty layer-type container for vector shapes; entering it makes
@@ -953,33 +935,12 @@ public:
     // un-project a canvas position through the scene camera so screen-space
     // mouse deltas become world-space deltas (identity camera: unchanged)
     QPointF mapCameraScreenToWorld(const QPointF &pos) const;
-    // bone tool interaction helpers (canvasmouseinteractions.cpp)
-    void boneCreatePress(const class eMouseEvent& e);
-    void updateDraftBone(const QPointF& absPos);
-    // bone pose tool (Moho-style): drag a bone body to rotate it around
-    // its head, drag the head joint to move the whole chain segment
-    void bonePosePress(const class eMouseEvent& e);
-    void bonePoseMove(const class eMouseEvent& e);
-    void bonePoseRelease();
-    // bone bind tool: click a bone to bind the selected layers into it
-    void boneBindPress(const class eMouseEvent& e);
-    // bone parent-link tool: click a bone to make it the parent of
-    // the currently selected bone (world positions preserved)
-    void boneParentPress(const class eMouseEvent& e);
-    // bone select tool: clicking picks ONLY bones (graphics are
-    // transparent to the pick)
-    void boneSelectPress(const class eMouseEvent& e);
-    // skin pin tool: clicking an image layer places a puppet pin on
-    // it (direct mesh deformation, no bones needed)
-    void skinPinPress(const class eMouseEvent& e);
     // scene camera tool (Blender-flavoured): LMB drag orbits (tilt),
     // Shift+LMB pans, Ctrl+LMB drags zoom
     void cameraPress(const class eMouseEvent& e);
     void cameraMove(const class eMouseEvent& e);
     void cameraRelease();
     void cameraCancel();
-    Bone* pickBoneAt(const QPointF& absPos, const qreal maxDist);
-    void bonePoseCancel();
 
 private:
     // set first thing in the destructor: while true the track/selection
@@ -1101,19 +1062,6 @@ private:
 
     QList<qsptr<SceneBoundGradient>> mGradients;
     QList<NullObject*> mNullObjects;
-    QList<Bone*> mBones;
-
-    Bone* mDraftBone = nullptr;
-    // tail of the chain being built: a press WITHIN the pick radius of
-    // this bone's tail grows a CHILD bone from here (Spine-style
-    // auto-chaining); a distant press, Ctrl+press or right-click ends
-    // the chain (a distant press immediately starts a new one)
-    Bone* mChainTail = nullptr;
-
-    // bone pose tool drag state
-    enum class PoseDragMode { none, rotate, move };
-    PoseDragMode mPoseMode = PoseDragMode::none;
-
     // camera tool drag state
     enum class CamDragMode { none, orbit, pan, zoom };
     CamDragMode mCamDragMode = CamDragMode::none;
@@ -1123,16 +1071,6 @@ private:
     qreal mCamStartZoom = 1;
     qreal mCamStartRotX = 0;
     qreal mCamStartRotY = 0;
-    Bone* mPoseBone = nullptr;
-    bool mPoseMoved = false;   // any value written this drag
-    qreal mPoseStartAngle = 0;   // world angle of the cursor at press
-    qreal mPoseStartRot = 0;     // bone rotation value at press
-    // incremental rotation accumulation: each move wraps its delta to
-    // (-180, 180] so dragging across the atan2 +/-pi boundary never
-    // jumps the stored value by ~360 (which made keys interpolate the
-    // long way around - the wrong rotation direction)
-    qreal mPoseLastAngle = 0;    // cursor angle at the previous move
-    qreal mPoseAccumDeg = 0;     // total wrapped degrees since press
     QPointF mPoseMoveLast;       // last cursor pos while moving
 
 protected:

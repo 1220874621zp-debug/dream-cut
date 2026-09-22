@@ -192,24 +192,6 @@ void ToolBox::setupMainAction(const QIcon &icon,
         case CanvasMode::nullCreate:
             mActions.setNullMode();
             break;
-        case CanvasMode::boneCreate:
-            mActions.setBoneCreateMode();
-            break;
-        case CanvasMode::bonePose:
-            mActions.setBonePoseMode();
-            break;
-        case CanvasMode::boneBind:
-            mActions.setBoneBindMode();
-            break;
-        case CanvasMode::boneParent:
-            mActions.setBoneParentMode();
-            break;
-        case CanvasMode::boneSelect:
-            mActions.setBoneSelectMode();
-            break;
-        case CanvasMode::skinPin:
-            mActions.setSkinPinMode();
-            break;
         case CanvasMode::camera:
             mActions.setCameraMode();
             break;
@@ -228,9 +210,9 @@ void ToolBox::setupMainAction(const QIcon &icon,
 }
 
 
-// the bone tool icon: rasterized from the bundled bone_icon.svg via
-// QSvgRenderer (the iconengines plugin is not deployed, so QIcon on an
-// svg file would not work)
+// tool icon rasterized from a bundled svg via QSvgRenderer (the
+// iconengines plugin is not deployed, so QIcon on an svg file would
+// not work)
 static QIcon svgToolIcon(const QString& qrcPath, const int size) {
     static QHash<QString, QIcon> cache;
     const auto hit = cache.constFind(qrcPath);
@@ -240,8 +222,7 @@ static QIcon svgToolIcon(const QString& qrcPath, const int size) {
     const QByteArray data = f.readAll();
     QSvgRenderer renderer(data);
     if(!renderer.isValid()) return QIcon();
-    // keep the artwork aspect; WIDE artwork (like the bone-select
-    // glyph) is rendered fill-height into a wider temp pixmap and the
+    // keep the artwork aspect; WIDE artwork is rendered fill-height into a wider temp pixmap and the
     // center square is cropped out, so it matches the visual weight of
     // the square icons (Qt5 QSvgRenderer has no source-rect overload)
     const QSizeF def = renderer.defaultSize();
@@ -294,9 +275,6 @@ static QIcon svgToolIcon(const QString& qrcPath, const int size) {
     return ic;
 }
 
-static QIcon boneSvgIcon(const int size) {
-    return svgToolIcon(QStringLiteral(":/icons/bone.svg"), size);
-}
 
 // monochrome tool glyph rendered with a symbol font (follows the
 // theme color, never a colored emoji)
@@ -372,64 +350,12 @@ void ToolBox::setupMainActions()
                                                          "F8").toString()),
                     {CanvasMode::nullCreate},
                     false);
-    // bone tool group: separated from the shape tools above and the
-    // camera/pick tools below so the strip reads as its own block
-    const auto addMainSeparator = [this]() {
+    // separator between the shape tools and the camera/pick tools
+    {
         auto sep = new QAction(mMain);
         sep->setSeparator(true);
         mGroupMain->addAction(sep);
-    };
-    addMainSeparator();
-    setupMainAction(boneSvgIcon(ThemeSupport::getIconSize(64).width()),
-                    tr("Add Bone"),
-                    QKeySequence(AppSupport::getSettings("shortcuts",
-                                                         "boneMode",
-                                                         "B").toString()),
-                    {CanvasMode::boneCreate},
-                    false);
-    setupMainAction(svgToolIcon(QStringLiteral(":/icons/bone_pose.svg"),
-                              ThemeSupport::getIconSize(64).width()),
-                    tr("Bone Pose"),
-                    QKeySequence(AppSupport::getSettings("shortcuts",
-                                                         "bonePose",
-                                                         "").toString()),
-                    {CanvasMode::bonePose},
-                    false);
-    setupMainAction(svgToolIcon(QStringLiteral(":/icons/bone_bind.svg"),
-                              ThemeSupport::getIconSize(64).width()),
-                    tr("Bone Bind"),
-                    QKeySequence(AppSupport::getSettings("shortcuts",
-                                                         "boneBind",
-                                                         "J").toString()),
-                    {CanvasMode::boneBind},
-                    false);
-    setupMainAction(svgToolIcon(QStringLiteral(":/icons/bone_parent.svg"),
-                              ThemeSupport::getIconSize(64).width()),
-                    tr("Bone Parent"),
-                    QKeySequence(AppSupport::getSettings("shortcuts",
-                                                         "boneParent",
-                                                         "L").toString()),
-                    {CanvasMode::boneParent},
-                    false);
-    setupMainAction(svgToolIcon(QStringLiteral(":/icons/bone_select.svg"),
-                              ThemeSupport::getIconSize(64).width()),
-                    tr("Bone Select"),
-                    QKeySequence(AppSupport::getSettings("shortcuts",
-                                                         "boneSelect",
-                                                         "K").toString()),
-                    {CanvasMode::boneSelect},
-                    false);
-    // puppet pin: click an image on the canvas to place a skin pin
-    // (direct mesh deformation, no bones needed)
-    setupMainAction(svgToolIcon(QStringLiteral(":/icons/pin_tool.svg"),
-                              ThemeSupport::getIconSize(64).width()),
-                    tr("Skin Pin (place pins on images to deform)"),
-                    QKeySequence(AppSupport::getSettings("shortcuts",
-                                                         "skinPin",
-                                                         "P").toString()),
-                    {CanvasMode::skinPin},
-                    false);
-    addMainSeparator();
+    }
     // scene camera (AE-like): orbit/pan/zoom the whole composition -
     // LMB orbit, Shift+LMB pan, Ctrl+LMB zoom
     setupMainAction(svgToolIcon(QStringLiteral(":/icons/camera_tool.svg"),

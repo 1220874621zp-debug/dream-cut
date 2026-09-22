@@ -30,12 +30,8 @@
 #include "FileCacheHandlers/imagecachehandler.h"
 #include "imagerenderdata.h"
 #include "FileCacheHandlers/filehandlerobjref.h"
-#include "Boxes/skinmesh.h"
 
 class BoxTargetProperty;
-class Bone;
-class SkinPin;
-class SkinPinsProperty;
 
 struct CORE_EXPORT ImageBoxRenderData : public ImageContainerRenderData {
     ImageBoxRenderData(ImageFileHandler * const cacheHandler,
@@ -82,36 +78,6 @@ public:
 
     const QString& filePath() const { return mPath; }
 
-    // drop all skinning (pins + mesh) and render as a plain image
-    void skinUnbind();
-    bool hasSkinBind() const;
-
-    // ---- puppet pins (direct mesh deformation, NO bones needed) ----
-    // a pin is a degenerate skin driver: place it on the artwork,
-    // drag it (standard animator undo/auto-key), the mesh follows
-    // with a radial falloff - PS/AE puppet-warp workflow.
-    // A pin can also RIDE a bone (rigid passenger + manual offset on
-    // top), which turns a whole skeleton into mesh drivers
-    SkinPin* addSkinPin(const QPointF& relPos);
-    void removeSkinPin(SkinPin* const pin);
-    void clearSkinPins();
-    int skinPinCount() const;
-    // one-click full-skeleton bind: pins along every scene bone, each
-    // bound to its own bone
-    void skinPinsBindSkeleton();
-    // bind every FREE pin to its nearest bone in one action
-    void skinPinsAutoBindBones();
-    // automatic hook at the natural bind moments (first bone pose,
-    // drop into a bone group); no-op without free pins or bones
-    void maybeAutoBindFreePins(const bool quiet = false);
-    // sweep every image under the container and auto-bind their pins
-    static void autoBindFreePinsUnder(ContainerBox * const root);
-    // refresh the render cache after an out-of-animator pin change
-    // (bone bind / unbind)
-    void skinChangedNotify();
-    // bone candidates for pin binding: the bone LAYER wrapping this
-    // image (its own rig), or every scene bone as a fallback
-    QList<Bone*> skinCandidateBones();
     // pixel-in-RAM state for diagnostics (blank canvas investigation):
     // false = pixels evicted/not loaded yet; the next render schedules
     // an async reload
@@ -131,12 +97,8 @@ private:
     void fileHandlerConnector(ConnContext& conn, ImageFileHandler* obj);
     void fileHandlerAfterAssigned(ImageFileHandler* obj);
 
-    // skin internals
-    bool skinGenerateMesh(SkinBindData& skin);
 
     QString mPath;
-    qsptr<SkinPinsProperty> mSkinPins;
-    SkinBindData mSkin;
 };
 
 #endif // IMAGEBOX_H

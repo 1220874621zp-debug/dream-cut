@@ -52,7 +52,6 @@
 #include "Boxes/boundingbox.h"
 #include "CacheHandlers/sceneframecontainer.h"
 #include "skia/skiahelpers.h"
-#include "Boxes/bone.h"
 #include "Animators/transformanimator.h"
 #include "Animators/complexanimator.h"
 #include "Animators/animator.h"
@@ -365,48 +364,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
             if(scene) scene->setTransparencyGrid(checked);
         });
 
-        // bone auto-freeze pose: when on, every bone pose operation
-        // keys ALL channels of the bone (Moho freeze-pose semantics)
-        // instead of just the touched one - pins the pose so staggered
-        // per-channel keys cannot drift
-        QPixmap fp(64, 64);
-        fp.fill(Qt::transparent);
-        QPainter f(&fp);
-        f.setRenderHint(QPainter::Antialiasing);
-        // snowflake: three crossing arms + center dot
-        QPen fpen(QColor(255, 255, 255, 230));
-        fpen.setWidthF(3.5);
-        fpen.setCapStyle(Qt::RoundCap);
-        f.setPen(fpen);
-        const QPointF c(32, 32);
-        const qreal r = 20.;
-        for(int k = 0; k < 3; k++) {
-            const qreal a = qDegreesToRadians(30. + k*60.);
-            f.drawLine(c + QPointF(qCos(a)*r, qSin(a)*r),
-                       c - QPointF(qCos(a)*r, qSin(a)*r));
-        }
-        f.setBrush(QColor(255, 255, 255, 230));
-        f.setPen(Qt::NoPen);
-        f.drawEllipse(c, 4.5, 4.5);
-        f.end();
-        mFreezePoseButton = new QAction(fp, tr("Freeze Pose"), this);
-        mFreezePoseButton->setCheckable(true);
-        mFreezePoseButton->setToolTip(tr(
-                "Auto freeze pose: key ALL bone channels on every pose "
-                "edit (pinned poses, no drift)"));
-        Bone::sAutoFreezePose = AppSupport::getSettings(
-                    QStringLiteral("bones"),
-                    QStringLiteral("autoFreezePose"),
-                    false).toBool();
-        mFreezePoseButton->setChecked(Bone::sAutoFreezePose);
-        connect(mFreezePoseButton, &QAction::triggered,
-                this, [this](const bool checked) {
-            Bone::sAutoFreezePose = checked;
-            AppSupport::setSettings(QStringLiteral("bones"),
-                                    QStringLiteral("autoFreezePose"),
-                                    checked);
-        });
-
         // key loop modes: toggles right of the freeze-pose button;
         // enabling applies a loop-out expression (AE loopOut alike,
         // see Expression::parseLoopHeader) to every keyed animator of
@@ -431,7 +388,7 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
         mLoopPoseFwdButton->setToolTip(tr(
                 "Cycle keyframed animation forward after the last key "
                 "(1,2,3 -> 1,2,3,1,...); applies a loop expression to "
-                "every keyed property of the selected layers, bones "
+                "every keyed property of the selected layers "
                 "included; click again to remove"));
         connect(mLoopPoseFwdButton, &QAction::triggered,
                 this, [this, setCheckedQuiet](const bool checked) {
@@ -451,7 +408,7 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
                 "Bounce keyframed animation back and forth after the "
                 "last key (1,2,3 -> 1,2,3,2,1,...); applies a loop "
                 "expression to every keyed property of the selected "
-                "layers, bones included; click again to remove"));
+                "layers included; click again to remove"));
         connect(mLoopPosePingPongButton, &QAction::triggered,
                 this, [this, setCheckedQuiet](const bool checked) {
             if (checked) {
@@ -471,7 +428,7 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
                 "leading keys (keys 1,2,3, skip 1 -> cycles 2,3); the "
                 "amount is asked for when enabled; applies a loop "
                 "expression to every keyed property of the selected "
-                "layers, bones included; click again to remove"));
+                "layers included; click again to remove"));
         connect(mLoopPoseSkipButton, &QAction::triggered,
                 this, [this, setCheckedQuiet](const bool checked) {
             if (!checked) {
@@ -737,7 +694,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     mToolBar->addAction(mClipCanvasButton);
     mToolBar->addAction(mRulersButton);
     mToolBar->addAction(mTransparencyGridButton);
-    mToolBar->addAction(mFreezePoseButton);
     mToolBar->addSeparator();
     mToolBar->addAction(mLoopPoseFwdButton);
     mToolBar->addAction(mLoopPosePingPongButton);

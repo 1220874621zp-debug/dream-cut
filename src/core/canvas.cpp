@@ -22,8 +22,6 @@
 #include "canvas.h"
 #include "Timeline/durationrectangle.h"
 #include "Boxes/internallinkgroupbox.h"
-#include "Boxes/bone.h"
-#include "Boxes/bonelayer.h"
 #include "Boxes/adjustmentlayer.h"
 #include "Boxes/solidlayer.h"
 #include "Boxes/cameralayer.h"
@@ -759,11 +757,6 @@ void Canvas::renderSk(SkCanvas* const canvas,
         for (const auto obj : mNullObjects) {
             canvas->save();
             obj->drawNullObject(canvas, mCurrentMode, invZoom, ctrlPressed);
-            canvas->restore();
-        }
-        for (const auto bone : mBones) {
-            canvas->save();
-            bone->drawBone(canvas, mCurrentMode, invZoom, ctrlPressed);
             canvas->restore();
         }
     //}
@@ -2612,33 +2605,6 @@ void Canvas::removeNullObject(NullObject* const obj)
     mNullObjects.removeOne(obj);
 }
 
-void Canvas::addBone(Bone* const bone)
-{
-    Bone::diag(QStringLiteral("+bone %1 count=%2")
-               .arg(bone ? bone->prp_getName() : QStringLiteral("?"))
-               .arg(mBones.count() + 1));
-    mBones.append(bone);
-}
-
-void Canvas::removeBone(Bone* const bone)
-{
-    Bone::diag(QStringLiteral("-bone %1 remaining=%2")
-               .arg(bone ? bone->prp_getName() : QStringLiteral("?"))
-               .arg(mBones.count() - 1));
-    mBones.removeOne(bone);
-    if(mDraftBone == bone) mDraftBone = nullptr;
-    if(mChainTail == bone) mChainTail = nullptr;
-}
-
-// begin a bone chain at the given scene position: new bones land in the
-// current bone layer (one is created at the top when none exists yet)
-void Canvas::addBoneLayerAction() {
-    const auto layer = enve::make_shared<BoneLayer>();
-    mCurrentContainer ? mCurrentContainer->addContained(layer) :
-                        addContained(layer);
-    if(Document::sInstance) Document::sInstance->actionFinished();
-}
-
 void Canvas::addAdjustmentLayerAction() {
     const auto adj = enve::make_shared<AdjustmentLayer>();
     mCurrentContainer ? mCurrentContainer->addContained(adj) :
@@ -2688,16 +2654,6 @@ void Canvas::addVectorLayerAction() {
 }
 
 // ---- scene camera (AE-like, driven by a CameraLayer box) ----
-
-// freeze pose across the whole rig: key every channel of every bone
-// at the current frame - a pose is only pinned when no bone anywhere
-// keeps interpolating through this frame (staggered keys = drift)
-void Canvas::freezeAllBones() {
-    const QList<Bone*> bones = mBones;
-    for(const auto bone : bones) {
-        if(bone) bone->freezeChannels();
-    }
-}
 
 CameraLayer* Canvas::getCameraLayer() const {
     for(const auto& c : getContained()) {
@@ -2801,53 +2757,6 @@ void Canvas::sceneCameraChanged(const FrameRange& range) {
         walk(const_cast<Canvas*>(this));
         planUpdate(UpdateReason::userChange);
     }, Qt::QueuedConnection);
-}
-
-// depth-first search for the first bone layer anywhere in the scene
-// hierarchy (bone layers may be nested inside groups - e.g. a PSD
-// import root converted into one); the visited set guards against
-// cycles introduced by link canvases (stack overflow otherwise)
-static BoneLayer* findBoneLayerDeep(ContainerBox* const cont,
-                                    QSet<ContainerBox*>& visited) {
-    if(!cont || visited.contains(cont)) return nullptr;
-    visited.insert(cont);
-    for(const auto& c : cont->getContained()) {
-        if(const auto bl = enve_cast<BoneLayer*>(c.data())) return bl;
-        if(const auto group = enve_cast<ContainerBox*>(c.data())) {
-            if(const auto bl = findBoneLayerDeep(group, visited)) return bl;
-        }
-    }
-    return nullptr;
-}
-
-static BoneLayer* findBoneLayerDeep(ContainerBox* const cont) {
-    QSet<ContainerBox*> visited;
-    return findBoneLayerDeep(cont, visited);
-}
-
-Bone* Canvas::startBoneChain(const QPointF& absPos) {
-    ContainerBox* parent = enve_cast<BoneLayer*>(mCurrentContainer.data());
-    if(!parent && mCurrentContainer) {
-        // walk up: a bone layer nested above the current container is
-        // the natural home for new bones (converted PSD group etc.)
-        for(auto p = mCurrentContainer->getParentGroup(); p;
-            p = p->getParentGroup()) {
-            if(const auto bl = enve_cast<BoneLayer*>(p)) { parent = bl; break; }
-        }
-    }
-    if(!parent) parent = findBoneLayerDeep(this);
-    if(!parent) {
-        const auto layer = enve::make_shared<BoneLayer>();
-        addContained(layer);
-        parent = layer.get();
-    }
-    const auto bone = enve::make_shared<Bone>();
-    parent->addContained(bone);
-    bone->getBoxTransformAnimator()->setPivot(0, 0);
-    const QPointF rel = parent->mapAbsPosToRel(absPos);
-    bone->getBoxTransformAnimator()->setPosition(rel.x(), rel.y());
-    mDraftBone = bone.get();
-    return mDraftBone;
 }
 
 void Canvas::clearGradientRWIds() const

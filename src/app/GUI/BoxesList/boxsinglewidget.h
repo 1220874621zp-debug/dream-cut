@@ -119,8 +119,6 @@ public:
     static QPixmap* BOX_IMAGE;
     static QPixmap* BOX_VIDEO;
     static QPixmap* BOX_SOUND;
-    static QPixmap* BOX_BONE;
-    static QPixmap* BOX_BONELAYER;
     static QPixmap* BOX_SOLID;
     static QPixmap* BOX_CAMERA;
     static QPixmap* BOX_GROUP;

@@ -235,9 +235,6 @@ set(
     Boxes/adjustmentlayer.cpp
     Boxes/solidlayer.cpp
     Boxes/cameralayer.cpp
-    Boxes/bone.cpp
-    Boxes/bonelayer.cpp
-    Boxes/skinmesh.cpp
     RasterEffects/noisefadeeffect.cpp
     RasterEffects/openglrastereffectcaller.cpp
     RasterEffects/rastereffect.cpp
@@ -519,8 +516,6 @@ set(
     Boxes/linkcanvasrenderdata.h
     Boxes/lottiebox.h
     Boxes/adjustmentlayer.h
-    Boxes/bone.h
-    Boxes/bonelayer.h
     Boxes/cameralayer.h
     Boxes/solidlayer.h
     Boxes/pathbox.h

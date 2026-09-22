@@ -114,7 +114,6 @@
 #include "canvas.h"
 
 
-#include "Boxes/bonelayer.h"
 
 
 #include "Properties/emimedata.h"
@@ -1105,12 +1104,7 @@ void BoxScroller::dropEvent(QDropEvent *event) {
 
 
             // Dropping onto a CONTAINER row moves the layers INTO that
-
-
-            // container (Moho-style: drop artwork onto the bone-layer
-
-
-            // row); SWT_drop carries its own cycle guards
+            // container; SWT_drop carries its own cycle guards
 
 
             if(!draggedBos.isEmpty()) {
@@ -1134,28 +1128,7 @@ void BoxScroller::dropEvent(QDropEvent *event) {
                 if(!combined) {
 
 
-                    if(const auto bl = enve_cast<BoneLayer*>(target)) {
-
-
-                        // Moho-style: dropping onto a bone-layer row
-
-
-                        // FLATTENS plain groups (children move directly
-
-
-                        // under the bone layer, shell removed) -
-
-
-                        // nesting would isolate blend-mode layers from
-
-
-                        // their backdrop and shift colors
-
-
-                        bl->absorbDroppedBoxes(draggedBos);
-
-
-                    } else if(enve_cast<ContainerBox*>(target)) {
+                    if(enve_cast<ContainerBox*>(target)) {
 
 
                         target->SWT_drop(mCurrentMimeData);
