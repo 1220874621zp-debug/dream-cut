@@ -1752,7 +1752,34 @@ void MainWindow::setupLayout()
         });
     }
 
+    // NLE-style edit timeline panel: scenes map to video blocks
+    // through the appended semantic bridge
+    mEditorTimelineWindow = new EditorTimelineWindow(this);
+    mEditorTimelineDock = makeDock(tr("剪辑时间轴"),
+                                   QStringLiteral("dockEditorTimeline"),
+                                   mEditorTimelineWindow);
+    mEditorTimelineSync = new EditorTimelineSync(
+                mDocument,
+                mEditorTimelineWindow->findChild<EditorTimelineWidget*>(),
+                this);
+
+    setCentralWidget(mStackWidget);
+    addDockWidget(Qt::RightDockWidgetArea, mFillStrokeDock);
+    addDockWidget(Qt::RightDockWidgetArea, mPropertiesDock);
+    addDockWidget(Qt::RightDockWidgetArea, mEffectsDock);
+    // project panel sits right beside the properties/queue dock
+    addDockWidget(Qt::RightDockWidgetArea, mProjectDock);
+    addDockWidget(Qt::RightDockWidgetArea, mEasingDock);
+    addDockWidget(Qt::BottomDockWidgetArea, mTimelineDock);
+    addDockWidget(Qt::RightDockWidgetArea, mTextAnimDock);
+    // the edit timeline wants the wide bottom zone beside the timeline
+    addDockWidget(Qt::BottomDockWidgetArea, mEditorTimelineDock);
+
+    // hidden by default, can be opened from the Panels menu
+    mEasingDock->hide();
+    mTextAnimDock->hide();
     mEditorTimelineDock->hide();
+
     // edit timeline: refresh the scene -> clip mapping when reopened
     connect(mEditorTimelineDock, &QDockWidget::visibilityChanged,
             this, [this](const bool visible) {
