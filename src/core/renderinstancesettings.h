@@ -87,6 +87,9 @@ private:
     ConnContextQPtr<Canvas> mTargetCanvas;
 
     RenderSettings mRenderSettings;
+    // false = 用户在渲染设置对话框确认/改过范围，渲染起步不再跟随
+    // 场景当前范围（NLE 时间轴会随内容自动增长场景范围）
+    bool mRangeFromScene = true;
     OutputSettings mOutputSettings;
 };
 

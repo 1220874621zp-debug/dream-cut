@@ -1100,7 +1100,11 @@ void NleTimelineModel::connectPanelScene(Canvas * const scene)
                            this, [this](const UpdateReason) {
         if (mInWriteback) { return; }
         const auto s = mPanelScene.data();
-        if (s) { emit playheadFrameChanged(s->anim_getCurrentAbsFrame()); }
+        if (!s) { return; }
+        // 输出渲染逐帧步进不推时间轴播放头：每帧一次整幅重绘
+        // 白白与渲染线程抢 CPU，导出进度看队列条目即可
+        if (s->isOutputRendering()) { return; }
+        emit playheadFrameChanged(s->anim_getCurrentAbsFrame());
     });
     mSceneConns << connect(scene, &Canvas::fpsChanged,
                            this, [this](const qreal) { refreshFromDocument(); });

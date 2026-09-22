@@ -38,6 +38,7 @@ RenderInstanceSettings::RenderInstanceSettings(const RenderInstanceSettings &src
     mOutputSettingsProfile = src.mOutputSettingsProfile;
     mRenderSettings = src.mRenderSettings;
     mOutputSettings = src.mOutputSettings;
+    mRangeFromScene = src.mRangeFromScene;
 }
 
 QString RenderInstanceSettings::getName() {
@@ -118,9 +119,22 @@ const RenderSettings &RenderInstanceSettings::getRenderSettings() const {
 void RenderInstanceSettings::setRenderSettings(
         const RenderSettings &settings) {
     mRenderSettings = settings;
+    // 唯一调用方是渲染设置对话框确认：视为用户已亲自确认范围，
+    // 渲染起步不再自动跟随场景当前范围
+    mRangeFromScene = false;
 }
 
 void RenderInstanceSettings::renderingAboutToStart() {
+    // NLE 时间轴随内容自动增长场景范围：排队后又编辑过内容时，
+    // 这里重读场景范围避免输出被旧快照截短（用户自定义范围除外）
+    if (mRangeFromScene) {
+        const auto canvas = mTargetCanvas.data();
+        if (canvas) {
+            const auto frameRange = canvas->getFrameRange();
+            mRenderSettings.fMinFrame = frameRange.fMin;
+            mRenderSettings.fMaxFrame = frameRange.fMax;
+        }
+    }
     mRenderError.clear();
     mRenderSettings.fTimeBase = { 1, qRound(mRenderSettings.fFps) };
     mRenderSettings.fFrameInc = mRenderSettings.fBaseFps/mRenderSettings.fFps;

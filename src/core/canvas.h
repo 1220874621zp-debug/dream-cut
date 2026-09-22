@@ -445,6 +445,7 @@ public:
 
     void setPreviewing(const bool bT);
     void setOutputRendering(const bool bT);
+    bool isOutputRendering() const { return mRenderingOutput; }
 
     bool SWT_shouldBeVisible(const SWT_RulesCollection &rules,
                              const bool parentSatisfies,

@@ -375,6 +375,12 @@ void RenderHandler::interruptOutputRendering() {
         disconnect(mCurrentScene, &Canvas::sceneFrameCached,
                    this, &RenderHandler::onSceneFrameCached);
         mCurrentScene->setOutputRendering(false);
+        // 失败/中断出口也要把导出分辨率换回预览值：正常完成由
+        // finishEncoding 先行恢复，这里重复命中被差值守卫挡掉
+        if(!isZero4Dec(mSavedResolutionFraction - mCurrentScene->getResolution())) {
+            const auto block = mCurrentScene->blockUndoRedo();
+            mCurrentScene->setResolution(mSavedResolutionFraction);
+        }
     }
     mCurrentRenderSettings = nullptr;
     TaskScheduler::instance()->setAlwaysQue(false);
