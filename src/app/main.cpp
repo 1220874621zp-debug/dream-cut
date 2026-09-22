@@ -362,6 +362,12 @@ int main(int argc, char *argv[])
     QApplication::setOrganizationName(AppSupport::getAppOrg());
     QApplication::setOrganizationDomain(AppSupport::getAppDomain());
     QApplication::setApplicationVersion(AppSupport::getAppVersion());
+    // desktop file id for EVERY launch mode (not just portable/AppImage):
+    // on Wayland this is the app_id the compositor sees, matching it to
+    // graphics.dreamcut.DreamCut.desktop is how the taskbar resolves the
+    // window icon - without it the id falls back to "dreamcut" and the
+    // match only works through StartupWMClass heuristics
+    QGuiApplication::setDesktopFileName(AppSupport::getAppID());
 
     // setup scaling
     setScaleFactor(hdpiPassThrough);
