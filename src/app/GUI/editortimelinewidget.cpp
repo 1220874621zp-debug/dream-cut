@@ -12,6 +12,10 @@
 #include <QRandomGenerator>
 #include <QDateTime>
 #include <QDebug>
+#include <QCursor>
+#include <QInputDialog>
+#include <QLineEdit>
+#include <QSet>
 #include <algorithm>
 
 #include "themesupport.h"
@@ -150,6 +154,17 @@ void EditorTimelineWidget::paintEvent(QPaintEvent *)
         p.drawLine(x, rulerHeight(), x, height());
     }
 
+    // rubber band selection overlay
+    if (m_rubber) {
+        const QRect band = QRect(m_rubberStart, mapFromGlobal(QCursor::pos()))
+                .normalized().intersected(rect().adjusted(headerWidth(), rulerHeight(), -1, -1));
+        if (!band.isEmpty()) {
+            p.setPen(QPen(cAccent, 1, Qt::DashLine));
+            p.setBrush(QColor(cAccent.red(), cAccent.green(), cAccent.blue(), 30));
+            p.drawRect(band);
+        }
+    }
+
     drawPlayhead(p);
 
     // corner between ruler and headers
@@ -188,6 +203,20 @@ void EditorTimelineWidget::drawRuler(QPainter &p)
             }
         }
     }
+
+    // scene markers: amber guides through the whole timeline
+    for (const auto &mark : m_markers) {
+        const int x = timeToX(mark.first / m_fps);
+        if (x < headerWidth() || x > width()) { continue; }
+        p.setPen(QPen(QColor(0xff, 0xd1, 0x54), 1, Qt::DashLine));
+        p.drawLine(x, 0, x, height());
+        if (!mark.second.isEmpty()) {
+            p.setPen(QColor(0xff, 0xd1, 0x54));
+            p.drawText(QRect(x + 2, rulerHeight() - 1, 120, 14),
+                       Qt::AlignLeft | Qt::AlignVCenter,
+                       p.fontMetrics().elidedText(mark.second, Qt::ElideRight, 116));
+        }
+    }
 }
 
 void EditorTimelineWidget::drawTrackHeaders(QPainter &p)
@@ -209,9 +238,25 @@ void EditorTimelineWidget::drawTrackHeaders(QPainter &p)
         p.setPen(QColor(0xe8, 0xe8, 0xe8));
         p.drawText(badge, Qt::AlignCenter, icon);
 
-        p.setPen(cText);
-        p.drawText(QRect(38, top, headerWidth() - 44, m_tracks[i].height),
+        p.setPen(m_tracks[i].muted ? cTextDim : cText);
+        p.drawText(QRect(38, top, headerWidth() - 68, m_tracks[i].height),
                    Qt::AlignVCenter, m_tracks[i].name);
+
+        // mute badge (M): dim when off, red when the lane is muted
+        const QRect mb = muteBadgeRect(i);
+        p.setPen(QPen(m_tracks[i].muted ? QColor(0xe8, 0x4c, 0x4c) : cGridLine, 1));
+        p.setBrush(Qt::NoBrush);
+        p.drawRoundedRect(mb, 4, 4);
+        p.setPen(m_tracks[i].muted ? QColor(0xe8, 0x4c, 0x4c) : cTextDim);
+        p.drawText(mb, Qt::AlignCenter, QStringLiteral("M"));
+
+        // lock badge (L): dim when off, amber when the lane is locked
+        const QRect lb = lockBadgeRect(i);
+        p.setPen(QPen(m_tracks[i].locked ? QColor(0xff, 0xd1, 0x54) : cGridLine, 1));
+        p.setBrush(Qt::NoBrush);
+        p.drawRoundedRect(lb, 4, 4);
+        p.setPen(m_tracks[i].locked ? QColor(0xff, 0xd1, 0x54) : cTextDim);
+        p.drawText(lb, Qt::AlignCenter, QStringLiteral("L"));
     }
 }
 
@@ -228,9 +273,10 @@ void EditorTimelineWidget::drawTrackBodies(QPainter &p)
 
 QString EditorTimelineWidget::timecode(double t) const
 {
-    int total = int(t);
-    int mm = total / 60, ss = total % 60;
-    int ff = int((t - total) * 25.0 + 0.5); // assume 25fps display
+    const int ffTot = qRound(t * m_fps);
+    const int mm = ffTot / (60 * qMax(1, int(m_fps)));
+    const int ss = (ffTot / qMax(1, int(m_fps))) % 60;
+    const int ff = ffTot % qMax(1, int(m_fps));
     return QStringLiteral("%1:%2:%3")
         .arg(mm, 2, 10, QLatin1Char('0'))
         .arg(ss, 2, 10, QLatin1Char('0'))
@@ -316,11 +362,13 @@ void EditorTimelineWidget::drawClip(QPainter &p, int index, bool ghost)
     QRectF r = clipRect(c);
     if (r.right() < headerWidth() || r.left() > width()) return;
 
-    bool selected = (index == m_selected) && !ghost;
-    bool hovered  = (index == m_hover) && !ghost;
+    const bool selected = m_selectedIds.contains(c.id) && !ghost;
+    const bool hovered  = (index == m_hover) && !ghost;
 
     p.save();
     if (ghost) p.setOpacity(0.35);
+    else if (c.track >= 0 && c.track < m_tracks.size() &&
+             m_tracks[c.track].muted) p.setOpacity(0.45);
     // keep everything of the clip inside the content area
     p.setClipRect(QRectF(headerWidth(), 0, width() - headerWidth(), height()));
 
@@ -450,6 +498,8 @@ double EditorTimelineWidget::snapTime(double t, int ignoreClipIdx, bool *snapped
         consider(m_clips[i].start);
         consider(m_clips[i].start + m_clips[i].length);
     }
+    // frame-quantized: the whole timeline lives on the scene frame grid
+    best = qRound(best * m_fps) / m_fps;
     if (snappedOut) *snappedOut = snapped;
     return best;
 }
@@ -497,9 +547,26 @@ void EditorTimelineWidget::mousePressEvent(QMouseEvent *e)
            e->pos().x(), e->pos().y(), idx, m_clips.size(), m_tracks.size(),
            m_scrollSec, m_pxPerSec);
 
+    // ---- track header area: mute / lock badges ----
+    if (e->pos().x() < headerWidth() && e->pos().y() > rulerHeight()) {
+        const int tr = trackAtY(e->pos().y());
+        if (tr >= 0) {
+            if (muteBadgeRect(tr).contains(e->pos())) {
+                emit trackMuteToggleRequested(tr);
+                return;
+            }
+            if (lockBadgeRect(tr).contains(e->pos())) {
+                m_tracks[tr].locked = !m_tracks[tr].locked;
+                update();
+                return;
+            }
+        }
+        return; // plain header click: nothing (double-click renames)
+    }
+
     // playhead: ruler area or near playhead line (when no clip is there)
     int phx = timeToX(m_playhead);
-    if (idx < 0 &&
+    if (idx < 0 && e->pos().x() >= headerWidth() &&
             (e->pos().y() <= rulerHeight() || qAbs(e->pos().x() - phx) <= 4)) {
         m_drag = DragMode::Playhead;
         m_playhead = qMax(0.0, xToTime(e->pos().x()));
@@ -509,41 +576,82 @@ void EditorTimelineWidget::mousePressEvent(QMouseEvent *e)
     }
 
     if (idx >= 0) {
-        m_selected = idx;
         const Clip &c = m_clips[idx];
-        emit selectionChanged(QStringLiteral("%1  [%2 → %3]")
-                              .arg(c.name, timecode(c.start), timecode(c.start + c.length)));
+        // multi-select: ctrl toggles membership; a plain press on an
+        // already-selected clip keeps the whole selection (group move)
+        if (e->modifiers() & Qt::ControlModifier) {
+            if (m_selectedIds.contains(c.id)) { m_selectedIds.remove(c.id); }
+            else { m_selectedIds.insert(c.id); }
+        } else if (!m_selectedIds.contains(c.id)) {
+            m_selectedIds.clear();
+            m_selectedIds.insert(c.id);
+        }
+        emitSelectionSummary();
+
+        const bool laneLocked = m_tracks.value(c.track).locked;
         m_dragClip = idx;
         m_origStart = c.start;
         m_origLength = c.length;
         m_origTrack = c.track;
         m_dragTempLane = -1;
-
-        bool nearL = qAbs(e->pos().x() - r.left()) <= TRIM_PX;
-        bool nearR = qAbs(e->pos().x() - r.right()) <= TRIM_PX;
-        if (nearL && !nearR) {
-            m_drag = DragMode::TrimLeft;
-        } else if (nearR) {
-            m_drag = DragMode::TrimRight;
-            // snapshot same-track starts for the magnetic follow; the
-            // follow is recomputed from this every move so it is fully
-            // reversible while dragging
-            m_trimSnap.clear();
+        // group move: snapshot every other selected clip's start so the
+        // whole selection rides the same time delta
+        m_groupOrig.clear();
+        if (m_selectedIds.count() > 1) {
             for (int i = 0; i < m_clips.size(); ++i) {
-                if (i != idx && m_clips[i].track == c.track) {
-                    m_trimSnap.append({i, m_clips[i].start});
+                if (i != idx && m_selectedIds.contains(m_clips[i].id)) {
+                    m_groupOrig.append({i, m_clips[i].start});
                 }
             }
-        } else {
-            m_drag = DragMode::MoveClip;
-            m_grabOffsetSec = xToTime(e->pos().x()) - c.start;
         }
-    } else {
-        m_selected = -1;
-        emit selectionChanged(QString());
+
+        if (laneLocked) {
+            m_drag = DragMode::None; // selectable but not editable
+        } else {
+            bool nearL = qAbs(e->pos().x() - r.left()) <= TRIM_PX;
+            bool nearR = qAbs(e->pos().x() - r.right()) <= TRIM_PX;
+            if (nearL && !nearR) {
+                m_drag = DragMode::TrimLeft;
+            } else if (nearR) {
+                m_drag = DragMode::TrimRight;
+                // snapshot same-track starts for the magnetic follow; the
+                // follow is recomputed from this every move so it is fully
+                // reversible while dragging
+                m_trimSnap.clear();
+                for (int i = 0; i < m_clips.size(); ++i) {
+                    if (i != idx && m_clips[i].track == c.track) {
+                        m_trimSnap.append({i, m_clips[i].start});
+                    }
+                }
+            } else {
+                m_drag = DragMode::MoveClip;
+                m_grabOffsetSec = xToTime(e->pos().x()) - c.start;
+            }
+        }
+    } else if (e->pos().x() >= headerWidth()) {
+        // empty content area: rubber band selection
+        if (!(e->modifiers() & Qt::ControlModifier)) {
+            m_selectedIds.clear();
+            emitSelectionSummary();
+        }
+        m_rubber = true;
+        m_rubberStart = e->pos();
         m_drag = DragMode::None;
     }
     update();
+}
+
+void EditorTimelineWidget::emitSelectionSummary()
+{
+    if (m_selectedIds.isEmpty()) { emit selectionChanged(QString()); return; }
+    QStringList names;
+    for (const Clip &c : m_clips) {
+        if (m_selectedIds.contains(c.id)) {
+            names << c.name;
+            if (names.count() >= 3) { names << QStringLiteral("…"); break; }
+        }
+    }
+    emit selectionChanged(names.join(QStringLiteral(", ")));
 }
 
 void EditorTimelineWidget::mouseMoveEvent(QMouseEvent *e)
@@ -560,6 +668,12 @@ void EditorTimelineWidget::mouseMoveEvent(QMouseEvent *e)
             setCursor(Qt::PointingHandCursor);
         else
             unsetCursor();
+        return;
+    }
+
+    // rubber band selection: live update, finalize on release
+    if (m_rubber) {
+        update();
         return;
     }
 
@@ -590,6 +704,16 @@ void EditorTimelineWidget::mouseMoveEvent(QMouseEvent *e)
             c.track = takeDragTempLane(c.type, e->pos().y());
         }
         c.start = newStart;
+        // group move: every other selected clip rides the same time
+        // delta (vertical lane changes stay single-clip on purpose)
+        if (!m_groupOrig.isEmpty()) {
+            const double delta = newStart - m_origStart;
+            for (const auto &g : m_groupOrig) {
+                if (g.idx >= 0 && g.idx < m_clips.size()) {
+                    m_clips[g.idx].start = qMax(0.0, g.origStart + delta);
+                }
+            }
+        }
         break;
     }
     case DragMode::TrimLeft: {
@@ -633,6 +757,23 @@ void EditorTimelineWidget::mouseReleaseEvent(QMouseEvent *e)
 {
     if (e->button() != Qt::LeftButton) return;
 
+    if (m_rubber) {
+        m_rubber = false;
+        const QRect band = QRect(m_rubberStart, e->pos()).normalized();
+        bool changed = false;
+        for (const Clip &c : m_clips) {
+            if (band.intersects(clipRect(c).toRect())) {
+                if (!m_selectedIds.contains(c.id)) {
+                    m_selectedIds.insert(c.id);
+                    changed = true;
+                }
+            }
+        }
+        if (changed) { emitSelectionSummary(); }
+        update();
+        return;
+    }
+
     if (m_drag != DragMode::None && m_dragClip >= 0 && m_dragClip < m_clips.size()) {
         const Clip &c = m_clips[m_dragClip];
         if (qAbs(c.start - m_origStart) > 1e-6 || qAbs(c.length - m_origLength) > 1e-6 ||
@@ -643,19 +784,36 @@ void EditorTimelineWidget::mouseReleaseEvent(QMouseEvent *e)
             emitLog(QStringLiteral("%1 clip \"%2\": [%3 → %4] track %5")
                     .arg(what, c.name, timecode(c.start), timecode(c.start + c.length))
                     .arg(m_tracks[c.track].name));
-            emit selectionChanged(QStringLiteral("%1  [%2 → %3]")
-                                  .arg(c.name, timecode(c.start), timecode(c.start + c.length)));
+            emitSelectionSummary();
         }
     }
     m_drag = DragMode::None;
     m_dragClip = -1;
     m_dragTempLane = -1;
     m_snapTarget = -1.0;
+    m_groupOrig.clear();
     update();
 }
 
 void EditorTimelineWidget::mouseDoubleClickEvent(QMouseEvent *e)
 {
+    // double click track header name: rename the lane
+    if (e->pos().x() < headerWidth() && e->pos().y() > rulerHeight()) {
+        const int lane = trackAtY(e->pos().y());
+        if (lane >= 0 && !muteBadgeRect(lane).contains(e->pos())
+                && !lockBadgeRect(lane).contains(e->pos())) {
+            bool ok = false;
+            const QString name = QInputDialog::getText(
+                        this, tr("重命名轨道"), tr("轨道名称:"),
+                        QLineEdit::Normal, m_tracks[lane].name, &ok);
+            if (ok && !name.trimmed().isEmpty()) {
+                m_tracks[lane].name = name.trimmed();
+                emit trackRenameRequested(lane, m_tracks[lane].name);
+                update();
+            }
+        }
+        return;
+    }
     // double click ruler: move playhead without drag
     if (e->pos().y() <= rulerHeight()) {
         m_playhead = qMax(0.0, xToTime(e->pos().x()));
@@ -680,8 +838,21 @@ void EditorTimelineWidget::wheelEvent(QWheelEvent *e)
 
 void EditorTimelineWidget::keyPressEvent(QKeyEvent *e)
 {
-    if ((e->key() == Qt::Key_Delete || e->key() == Qt::Key_Backspace) && m_selected >= 0) {
-        removeSelectedClip();
+    if ((e->key() == Qt::Key_Delete || e->key() == Qt::Key_Backspace)
+            && !m_selectedIds.isEmpty()) {
+        requestDelete(e->modifiers() & Qt::ShiftModifier);
+        return;
+    }
+    if ((e->key() == Qt::Key_S || e->key() == Qt::Key_Slash)
+            && !m_selectedIds.isEmpty()) {
+        emit splitAtPlayheadRequested();
+        return;
+    }
+    if (e->key() == Qt::Key_A && e->modifiers() & Qt::ControlModifier) {
+        m_selectedIds.clear();
+        for (const Clip &c : m_clips) { m_selectedIds.insert(c.id); }
+        emitSelectionSummary();
+        update();
         return;
     }
     QWidget::keyPressEvent(e);
@@ -735,7 +906,8 @@ void EditorTimelineWidget::addVideoClip()
     c.length = len;
     c.hueSeed = c.id * 37;
     m_clips.push_back(c);
-    m_selected = m_clips.size() - 1;
+    m_selectedIds.clear();
+    m_selectedIds.insert(c.id);
     emitLog(QStringLiteral("add video clip \"%1\" at %2").arg(c.name, timecode(s)));
     updateScrollBar();
     update();
@@ -763,7 +935,8 @@ void EditorTimelineWidget::addAudioClip()
     c.length = len;
     c.hueSeed = c.id * 37;
     m_clips.push_back(c);
-    m_selected = m_clips.size() - 1;
+    m_selectedIds.clear();
+    m_selectedIds.insert(c.id);
     emitLog(QStringLiteral("add audio clip \"%1\" at %2").arg(c.name, timecode(s)));
     updateScrollBar();
     update();
@@ -771,14 +944,9 @@ void EditorTimelineWidget::addAudioClip()
 
 void EditorTimelineWidget::removeSelectedClip()
 {
-    if (m_selected < 0 || m_selected >= m_clips.size()) return;
-    emitLog(QStringLiteral("remove clip \"%1\"").arg(m_clips[m_selected].name));
-    m_thumbCache.remove(QStringLiteral("%1").arg(m_clips[m_selected].id));
-    m_clips.removeAt(m_selected);
-    m_selected = -1;
-    m_hover = -1;
-    emit selectionChanged(QString());
-    update();
+    // bridge era: deletion is document-side (undoable); the widget only
+    // mirrors the document through the sync rebuild
+    requestDelete(false);
 }
 
 void EditorTimelineWidget::applyZoom(double factor, int anchorX)
@@ -841,9 +1009,11 @@ void EditorTimelineWidget::emitLog(const QString &msg)
 void EditorTimelineWidget::clearAllClips()
 {
     // remember the selection so the sync-driven rebuild can restore it
-    m_keepSelName = (m_selected >= 0 && m_selected < m_clips.size()) ?
-                m_clips[m_selected].name : QString();
-    m_selected = -1;
+    m_keepSelNames.clear();
+    for (const Clip &c : m_clips) {
+        if (m_selectedIds.contains(c.id)) { m_keepSelNames.insert(c.name); }
+    }
+    m_selectedIds.clear();
     m_hover = -1;
     m_drag = DragMode::None;
     m_dragClip = -1;
@@ -873,11 +1043,8 @@ int EditorTimelineWidget::appendClip(const QString &name,
     c.length = qMax(MIN_CLIP_LEN, lengthSec);
     c.hueSeed = c.id * 37;
     m_clips.push_back(c);
-    if (!m_keepSelName.isEmpty() && c.name == m_keepSelName) {
-        m_selected = m_clips.size() - 1;
-        emit selectionChanged(QStringLiteral("%1  [%2 → %3]")
-                              .arg(c.name, timecode(c.start),
-                                   timecode(c.start + c.length)));
+    if (m_keepSelNames.contains(c.name)) {
+        m_selectedIds.insert(c.id);
     }
     updateScrollBar();
     update();
@@ -932,14 +1099,33 @@ int EditorTimelineWidget::videoTrackCount() const
 
 void EditorTimelineWidget::contextMenuEvent(QContextMenuEvent *e)
 {
+    // ruler: marker management at the clicked frame
+    if (e->pos().y() <= rulerHeight() && e->pos().x() >= headerWidth()) {
+        const int frame = qRound(xToTime(e->pos().x()) * m_fps);
+        QMenu menu(this);
+        QAction *add = menu.addAction(tr("在此处添加标记"));
+        int nearest = -1;
+        int bestDist = 12 * m_fps / m_pxPerSec + 8;
+        for (const auto &mark : m_markers) {
+            const int d = qAbs(mark.first - frame);
+            if (d < bestDist) { bestDist = d; nearest = mark.first; }
+        }
+        QAction *remove = menu.addAction(tr("移除最近的标记"));
+        remove->setEnabled(nearest >= 0);
+        QAction *act = menu.exec(e->globalPos());
+        if (act == add) { emit markerAddRequested(frame); }
+        else if (act == remove && nearest >= 0) {
+            emit markerRemoveRequested(nearest);
+        }
+        return;
+    }
+
     const int idx = clipAt(e->pos());
     if (idx < 0) { QWidget::contextMenuEvent(e); return; }
-    if (m_selected != idx) {
-        m_selected = idx;
-        const Clip &sel = m_clips[idx];
-        emit selectionChanged(QStringLiteral("%1  [%2 → %3]")
-                              .arg(sel.name, timecode(sel.start),
-                                   timecode(sel.start + sel.length)));
+    if (!m_selectedIds.contains(m_clips[idx].id)) {
+        m_selectedIds.clear();
+        m_selectedIds.insert(m_clips[idx].id);
+        emitSelectionSummary();
         update();
     }
     const Clip &c = m_clips[idx];
@@ -1159,8 +1345,53 @@ void EditorTimelineWidget::refreshThemeColors()
     if (cVideoBar != accentDark) { cVideoBar = accentDark; }
 }
 
-int EditorTimelineWidget::selectedClipId() const
+QList<int> EditorTimelineWidget::selectedClipIds() const
 {
-    if (m_selected < 0 || m_selected >= m_clips.size()) { return -1; }
-    return m_clips.at(m_selected).id;
+    QList<int> ids;
+    for (const Clip &c : m_clips) {
+        if (m_selectedIds.contains(c.id)) { ids << c.id; }
+    }
+    return ids;
+}
+
+void EditorTimelineWidget::setMarkers(const QVector<QPair<int, QString>> &markers)
+{
+    m_markers = markers;
+    update();
+}
+
+void EditorTimelineWidget::setTrackMuted(const int trackIdx, const bool muted)
+{
+    if (trackIdx < 0 || trackIdx >= m_tracks.size()) { return; }
+    if (m_tracks[trackIdx].muted == muted) { return; }
+    m_tracks[trackIdx].muted = muted;
+    update();
+}
+
+void EditorTimelineWidget::setTrackName(const int trackIdx, const QString &name)
+{
+    if (trackIdx < 0 || trackIdx >= m_tracks.size()) { return; }
+    if (m_tracks[trackIdx].name == name) { return; }
+    m_tracks[trackIdx].name = name;
+    update();
+}
+
+QRect EditorTimelineWidget::muteBadgeRect(const int trackIdx) const
+{
+    const int top = trackY(trackIdx);
+    const int h = m_tracks.value(trackIdx).height;
+    return QRect(headerWidth() - 58, top + (h - 20) / 2, 20, 20);
+}
+
+QRect EditorTimelineWidget::lockBadgeRect(const int trackIdx) const
+{
+    const int top = trackY(trackIdx);
+    const int h = m_tracks.value(trackIdx).height;
+    return QRect(headerWidth() - 32, top + (h - 20) / 2, 20, 20);
+}
+
+void EditorTimelineWidget::requestDelete(const bool ripple)
+{
+    if (m_selectedIds.isEmpty()) { return; }
+    emit deleteRequested(ripple);
 }

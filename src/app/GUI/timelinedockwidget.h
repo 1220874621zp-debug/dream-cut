@@ -200,6 +200,7 @@ private:
     QAction *mNleModeAct = nullptr;
     QAction *mMagneticAct = nullptr;
     QAction *mNleDeleteAct = nullptr;
+    QAction *mNleRippleAct = nullptr;
     QAction *mNleZoomFitAct = nullptr;
 
     QAction *mRenderProgressAct;

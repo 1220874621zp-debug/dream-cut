@@ -835,8 +835,15 @@ void TimelineDockWidget::setupNleActions()
 
     // NLE editing group
     mNleDeleteAct = mToolBar->addAction(tr("删除块"));
-    connect(mNleDeleteAct, &QAction::triggered,
-            mEditorTimeline, &EditorTimelineWidget::removeSelectedClip);
+    mNleDeleteAct->setToolTip(tr("删除选中的块（Delete）；Shift=波纹删除，后续块左移补洞"));
+    connect(mNleDeleteAct, &QAction::triggered, mEditorTimeline, [this]() {
+        if (mEditorTimeline) { mEditorTimeline->requestDelete(false); }
+    });
+    mNleRippleAct = mToolBar->addAction(tr("波纹删除"));
+    mNleRippleAct->setToolTip(tr("删除选中的块并让同轨后续块左移补洞（Shift+Delete）"));
+    connect(mNleRippleAct, &QAction::triggered, mEditorTimeline, [this]() {
+        if (mEditorTimeline) { mEditorTimeline->requestDelete(true); }
+    });
 
     mMagneticAct = mToolBar->addAction(
                 QIcon(nleMagneticPixmap(QColor(0xc8, 0xc8, 0xc8))), QString());
@@ -869,8 +876,8 @@ void TimelineDockWidget::setNleMode(const bool nle)
         mNleModeAct->setChecked(nle);
         mNleModeAct->setText(nle ? tr("剪辑时间轴") : tr("关键帧视图"));
     }
-    const auto nleActs = QList<QAction*>{ mNleDeleteAct, mMagneticAct,
-                                          mNleZoomFitAct };
+    const auto nleActs = QList<QAction*>{ mNleDeleteAct, mNleRippleAct,
+                                          mMagneticAct, mNleZoomFitAct };
     for (auto *a : nleActs) { if (a) { a->setVisible(nle); } }
     if (nle && mEditorSync) { mEditorSync->rebuild(); }
 }

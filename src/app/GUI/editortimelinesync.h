@@ -48,6 +48,19 @@ public:
     // clear a user's canvas selection)
     void pushSelectionToCanvas();
 
+    // ---- document-side NLE operations (all undoable) ----
+    // ripple=false: plain remove; ripple=true: later clips on the same
+    // lane slide left to close the gap left by the removed ones
+    void deleteSelectedClips(const bool ripple);
+    // split every selected visual clip at the playhead frame
+    void splitAtPlayhead();
+    // toggle the lane's layer visibility (mute)
+    void toggleTrackMute(const int trackIdx);
+    // lane name overrides, survive rebuilds ("v1"/"a2" keyed)
+    QHash<QString, QString> mTrackNames;
+    // shift one layer's whole clip by frameDelta (min+max transforms)
+    void shiftLayerFrames(eBoxOrSound * const layer, const int frameDelta);
+
 public slots:
     void rebuild();
     void updatePlayheadFromDoc();

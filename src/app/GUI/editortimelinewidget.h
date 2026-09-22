@@ -23,8 +23,23 @@ public:
     double playheadTime() const { return m_playhead; }
 
 public:
-    // semantic bridge: stable id of the (single) selected clip, -1 none
-    int selectedClipId() const;
+    // semantic bridge: ids of ALL selected clips (multi-select)
+    QList<int> selectedClipIds() const;
+    // scene fps for timecode + frame-quantized snapping
+    void setFps(const double fps) { m_fps = qMax(1.0, fps); }
+    double fps() const { return m_fps; }
+    // ruler markers (abs frames + titles), painted as amber guides
+    void setMarkers(const QVector<QPair<int, QString>> &markers);
+    // lane muted mirror (paint dimming); set from the sync rebuild
+    void setTrackMuted(const int trackIdx, const bool muted);
+    // lane name override applied after rebuildTracks
+    void setTrackName(const int trackIdx, const QString &name);
+    int trackCount() const { return m_tracks.size(); }
+    // document ops go through the sync bridge (undoable on the doc side)
+    void requestDelete(const bool ripple = false);
+    // header badge rects (mute / lock), shared by paint + hit test
+    QRect muteBadgeRect(const int trackIdx) const;
+    QRect lockBadgeRect(const int trackIdx) const;
 
 public slots:
     void addVideoClip();
@@ -35,6 +50,13 @@ public slots:
     void zoomFit();
 
 signals:
+    // document-side operation requests (implemented by EditorTimelineSync)
+    void deleteRequested(const bool ripple);
+    void splitAtPlayheadRequested();
+    void trackMuteToggleRequested(const int trackIdx);
+    void trackRenameRequested(const int trackIdx, const QString &name);
+    void markerAddRequested(const int frame);
+    void markerRemoveRequested(const int frame);
     void logMessage(const QString &msg);
     void selectionChanged(const QString &info);
     void trackLayoutChanged();
@@ -67,6 +89,8 @@ private:
         QString name;
         int height = 64;
         ClipType type = ClipType::Video;
+        bool locked = false; // UI-side: clips on the lane refuse drag/trim
+        bool muted = false;  // mirror of the lane's layer visibility
     };
 
     // ---- layout / mapping ----
@@ -106,8 +130,8 @@ private:
     double m_scrollSec = 0.0;   // left edge in seconds
     double m_playhead = 2.0;
 
-    int m_selected = -1;        // clip index
-    QString m_keepSelName;      // selection survives rebuilds by clip name
+    QSet<int> m_selectedIds;    // selected clip ids (multi-select)
+    QSet<QString> m_keepSelNames; // selection survives rebuilds by name
     int m_hover = -1;
 
     DragMode m_drag = DragMode::None;
@@ -119,6 +143,16 @@ private:
     int m_dragTempLane = -1;   // live-inserted lane while dragging outside
     double m_snapTarget = -1.0;   // for drawing snap guide, -1 = none
     QPoint m_pressPos;
+
+    // NLE upgrades
+    double m_fps = 25.0;         // scene fps, drives timecode + frame snap
+    QVector<QPair<int, QString>> m_markers; // ruler markers (abs frame, title)
+    bool m_rubber = false;       // rubber band selection in progress
+    QPoint m_rubberStart;
+    // group move snapshot: the other selected clips ride the same delta
+    struct GroupSnap { int idx; double origStart; };
+    QVector<GroupSnap> m_groupOrig;
+    void emitSelectionSummary();
 
     QScrollBar *m_scrollBar = nullptr;
     QHash<QString, QPixmap> m_thumbCache;

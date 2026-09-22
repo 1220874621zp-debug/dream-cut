@@ -47,6 +47,29 @@ EditorTimelineSync::EditorTimelineSync(Document &document,
     if (mWidget) {
         connect(mWidget, &EditorTimelineWidget::selectionChanged,
                 this, [this](const QString&) { pushSelectionToCanvas(); });
+        connect(mWidget, &EditorTimelineWidget::deleteRequested,
+                this, [this](const bool ripple) { deleteSelectedClips(ripple); });
+        connect(mWidget, &EditorTimelineWidget::splitAtPlayheadRequested,
+                this, &EditorTimelineSync::splitAtPlayhead);
+        connect(mWidget, &EditorTimelineWidget::trackMuteToggleRequested,
+                this, &EditorTimelineSync::toggleTrackMute);
+        connect(mWidget, &EditorTimelineWidget::trackRenameRequested,
+                this, [this](const int idx, const QString &name) {
+            const int vc = mWidget ? mWidget->videoTrackCount() : 0;
+            const QString key = idx < vc ? QStringLiteral("v%1").arg(idx + 1)
+                                         : QStringLiteral("a%1").arg(idx - vc + 1);
+            mTrackNames.insert(key, name);
+        });
+        connect(mWidget, &EditorTimelineWidget::markerAddRequested,
+                this, [this](const int frame) {
+            const auto scene = mPanelScene.data();
+            if (scene) { scene->setMarker(frame); rebuild(); }
+        });
+        connect(mWidget, &EditorTimelineWidget::markerRemoveRequested,
+                this, [this](const int frame) {
+            const auto scene = mPanelScene.data();
+            if (scene && scene->removeMarker(frame)) { rebuild(); }
+        });
     }
 
     rebuild();
@@ -180,6 +203,34 @@ void EditorTimelineSync::rebuild()
 
     if (!scene) { return; }
     const qreal fps = scene->getFps();
+    if (fps > 0.) { mWidget->setFps(fps); }
+    {
+        // lane name overrides + mute mirrors (all lane layers hidden)
+        const int vc = mWidget->videoTrackCount();
+        for (int t = 0; t < mWidget->trackCount(); ++t) {
+            const QString key = t < vc ? QStringLiteral("v%1").arg(t + 1)
+                                       : QStringLiteral("a%1").arg(t - vc + 1);
+            const auto nameIt = mTrackNames.constFind(key);
+            if (nameIt != mTrackNames.constEnd()) {
+                mWidget->setTrackName(t, nameIt.value());
+            }
+        }
+        // mute state: computed below per lane from the layer list
+        QVector<bool> laneMuted(videoCount + audioCount, true);
+        for (int i = 0; i < items.size(); ++i) {
+            const int track = items[i].audio ? videoCount + lane[i] : lane[i];
+            if (items[i].layer->isVisible()) { laneMuted[track] = false; }
+        }
+        for (int t = 0; t < laneMuted.size(); ++t) {
+            mWidget->setTrackMuted(t, laneMuted[t]);
+        }
+        // ruler markers from the scene (abs frames + titles)
+        QVector<QPair<int, QString>> marks;
+        for (const auto &m : scene->getMarkers()) {
+            if (m.enabled) { marks.append({m.frame, m.title}); }
+        }
+        mWidget->setMarkers(marks);
+    }
     const double fallbackLen = fps > 0. ?
                 scene->getFrameRange().fMax / fps : 0.;
     for (int i = 0; i < items.size(); ++i) {
@@ -468,16 +519,152 @@ bool EditorTimelineSync::eventFilter(QObject * const obj, QEvent * const ev)
 void EditorTimelineSync::pushSelectionToCanvas()
 {
     if (!mWidget || mInWriteback || mDragging) { return; }
-    const int id = mWidget->selectedClipId();
-    if (id < 0) { return; }
-    const auto it = mClipToLayer.constFind(id);
-    if (it == mClipToLayer.constEnd() || !it.value()) { return; }
+    const auto ids = mWidget->selectedClipIds();
+    if (ids.isEmpty()) { return; }
     const auto scene = mPanelScene.data();
     if (!scene) { return; }
-    const auto box = enve_cast<BoundingBox*>(it.value().data());
-    if (!box) { return; }
-    if (scene->getSelectedBoxesList().count() == 1 &&
-        scene->getSelectedBoxesList().first() == box) { return; }
+    QList<BoundingBox*> boxes;
+    for (const int id : ids) {
+        const auto it = mClipToLayer.constFind(id);
+        if (it == mClipToLayer.constEnd() || !it.value()) { continue; }
+        const auto box = enve_cast<BoundingBox*>(it.value().data());
+        if (box) { boxes << box; }
+    }
+    if (boxes.isEmpty()) { return; }
+    const auto &cur = scene->getSelectedBoxesList();
+    if (cur.count() == boxes.count()) {
+        bool same = true;
+        for (const auto *b : boxes) { if (!cur.contains(b)) { same = false; break; } }
+        if (same) { return; }
+    }
     scene->clearBoxesSelection();
-    scene->addBoxToSelection(box);
+    for (auto *b : boxes) { scene->addBoxToSelection(b); }
+}
+
+// ---------------------------------------------------------------- NLE ops
+
+void EditorTimelineSync::shiftLayerFrames(eBoxOrSound * const layer,
+                                          const int frameDelta)
+{
+    if (!layer || frameDelta == 0) { return; }
+    const auto dur = layer->getDurationRectangle();
+    if (!dur) { return; }
+    dur->startMinFramePosTransform();
+    dur->moveMinFrame(frameDelta);
+    dur->finishMinFramePosTransform();
+    dur->startMaxFramePosTransform();
+    dur->moveMaxFrame(frameDelta);
+    dur->finishMaxFramePosTransform();
+}
+
+void EditorTimelineSync::deleteSelectedClips(const bool ripple)
+{
+    if (!mWidget || mInWriteback || mDragging) { return; }
+    const auto scene = mPanelScene.data();
+    if (!scene) { return; }
+    const qreal fps = scene->getFps();
+    if (fps <= 0.) { return; }
+
+    const auto ids = mWidget->selectedClipIds();
+    if (ids.isEmpty()) { return; }
+
+    // snapshot the pre-delete panel layout for the ripple math
+    struct Snap { int track; double start; double length; };
+    const auto clips = mWidget->allClips();
+    QHash<int, Snap> snap;
+    for (const auto &c : clips) { snap.insert(c.id, {c.track, c.start, c.length}); }
+
+    QList<eBoxOrSound*> victims;
+    QSet<int> victimIds;
+    for (const int id : ids) {
+        const auto layer = mClipToLayer.value(id).data();
+        if (!layer) { continue; }
+        victims << layer;
+        victimIds << id;
+    }
+    if (victims.isEmpty()) { return; }
+
+    if (ripple) {
+        // per lane: every later clip slides left by the total length of
+        // the removed clips that started before it (exact for chains)
+        for (const int track : std::set<int>(
+                 [&snap, &victimIds]() {
+                     std::set<int> tracks;
+                     for (auto it = snap.constBegin(); it != snap.constEnd(); ++it) {
+                         if (victimIds.contains(it.key())) { tracks.insert(it.value().track); }
+                     }
+                     return tracks;
+                 }())) {
+            QList<QPair<double, eBoxOrSound*>> later;
+            for (const auto &c : clips) {
+                const bool removed = victimIds.contains(c.id);
+                if (removed && snap.value(c.id).track == track) { continue; }
+                const auto layer = mClipToLayer.value(c.id).data();
+                if (!layer || snap.value(c.id).track != track) { continue; }
+                double removedLenBefore = 0.;
+                for (const int vid : victimIds) {
+                    const auto vs = snap.value(vid);
+                    if (vs.track == track && vs.start < c.start - 1e-9) {
+                        removedLenBefore += vs.length;
+                    }
+                }
+                if (removedLenBefore > 0.) { later.append({removedLenBefore, layer}); }
+            }
+            for (const auto &p : later) {
+                shiftLayerFrames(p.second, -qRound(p.first * fps));
+            }
+        }
+    }
+
+    mInWriteback = true;
+    for (auto *layer : victims) { layer->removeFromParent_k(); }
+    mInWriteback = false;
+    if (Document::sInstance) { Document::sInstance->actionFinished(); }
+    rebuild();
+}
+
+void EditorTimelineSync::splitAtPlayhead()
+{
+    if (!mWidget || mInWriteback || mDragging) { return; }
+    const auto scene = mPanelScene.data();
+    if (!scene) { return; }
+    // the split operates at the scene's current frame: sync the panel
+    // playhead first so the visual position is what gets split
+    syncPlayheadToDoc();
+    QList<BoundingBox*> boxes;
+    const auto ids = mWidget->selectedClipIds();
+    for (const int id : ids) {
+        const auto layer = mClipToLayer.value(id).data();
+        if (!layer) { continue; }
+        const auto box = enve_cast<BoundingBox*>(layer);
+        if (box) { boxes << box; }
+    }
+    if (boxes.isEmpty()) { return; }
+    scene->clearBoxesSelection();
+    for (auto *b : boxes) { scene->addBoxToSelection(b); }
+    scene->splitAction();
+    if (Document::sInstance) { Document::sInstance->actionFinished(); }
+    rebuild();
+}
+
+void EditorTimelineSync::toggleTrackMute(const int trackIdx)
+{
+    if (!mWidget || mInWriteback || mDragging) { return; }
+    const auto scene = mPanelScene.data();
+    if (!scene) { return; }
+    // lane layers: every clip currently parked on that panel track
+    QList<eBoxOrSound*> laneLayers;
+    const auto clips = mWidget->allClips();
+    for (const auto &c : clips) {
+        if (c.track != trackIdx) { continue; }
+        const auto layer = mClipToLayer.value(c.id).data();
+        if (layer) { laneLayers << layer; }
+    }
+    if (laneLayers.isEmpty()) { return; }
+    const bool anyVisible = std::any_of(
+                laneLayers.cbegin(), laneLayers.cend(),
+                [](eBoxOrSound * const l) { return l->isVisible(); });
+    for (auto *l : laneLayers) { l->setVisible(!anyVisible); }
+    if (Document::sInstance) { Document::sInstance->actionFinished(); }
+    rebuild();
 }
