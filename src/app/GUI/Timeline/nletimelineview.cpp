@@ -1569,6 +1569,19 @@ void NleTimelineView::KFT_setFocusToWidget()
 // stale canvas selection and steal the Qt focus back)
 bool NleTimelineView::KFT_keyPressEvent(QKeyEvent *e)
 {
+    // MainWindow's Del special case re-dispatches ONE physical key
+    // through two propagation chains (the eventFilter sendEvent lands
+    // in MainWindow::keyPressEvent -> processKeyEvent -> KFT, then the
+    // filter itself calls processKeyEvent again): the same event
+    // object arrives twice with an identical timestamp - execute it
+    // once (auto-repeat shares the timestamp too, so held-key repeats
+    // stay swallowed as well)
+    if (e->timestamp() == mLastKftTs && e->key() == mLastKftKey) {
+        return true;
+    }
+    mLastKftTs = e->timestamp();
+    mLastKftKey = e->key();
+
     const int key = e->key();
     const auto mods = e->modifiers();
     if (key == Qt::Key_Delete || key == Qt::Key_Backspace) {

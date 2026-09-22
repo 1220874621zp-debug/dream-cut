@@ -233,6 +233,10 @@ private:
     bool mInsertMode = false;  // kdenlive insert/overwrite default
     QString mLastFeedback;     // dedupe live drag TC status messages
     void feedback(const QString &msg);
+    // double-dispatch dedup for KFT keys (same event object arrives
+    // through two propagation chains, identical timestamp)
+    ulong mLastKftTs = 0;
+    int mLastKftKey = 0;
 
     QScrollBar *mScrollBar = nullptr;
     // media caches (clip ids are stable across rebuilds, so these

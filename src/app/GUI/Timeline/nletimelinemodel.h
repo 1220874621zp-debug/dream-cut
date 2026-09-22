@@ -219,11 +219,12 @@ private:
     QVector<Track> mTracks;
     QVector<Clip> mClips;
     // stable model ids: a layer keeps its clip id across rebuilds so
-    // media caches (film strips / waveforms) survive
+    // media caches (film strips / waveforms) survive AND the clip
+    // selection survives by id (never by name - razor halves share
+    // one name, name matching co-selected every sibling)
     QHash<eBoxOrSound*, int> mLayerToClipId;
     int mNextClipId = 1;
     QSet<int> mSelected;
-    QSet<QString> mSelectionNames; // selection survives rebuilds by name
     qreal mFps = 25.;
     bool mMagnetic = false;
     bool mInWriteback = false;

@@ -1007,13 +1007,14 @@ void NleTimelineModel::refreshFromDocument()
     connectPanelScene(scene);
     connectChildren(scene);
 
-    // selection survives rebuilds by layer name (collected from the
-    // outgoing table before it is replaced)
-    mSelectionNames.clear();
-    for (const int id : mSelected) {
-        const auto c = clip(id);
-        if (c) { mSelectionNames.insert(c->name); }
-    }
+    // selection survives rebuilds by STABLE CLIP ID: mLayerToClipId
+    // keeps the layer->id mapping alive across refreshes, so the ids
+    // in mSelected keep resolving. The old name-based survival
+    // co-selected every same-named sibling (razor halves share a
+    // name - the split restores the original), which made a plain
+    // click look like select-all and silently added riders that
+    // blocked every drag
+    QSet<int> selectionIds = mSelected;
     mSelected.clear();
 
     // tracks are explicit persistent entities: video specs first (top
@@ -1117,7 +1118,7 @@ void NleTimelineModel::refreshFromDocument()
         c.start = qMax(0, start);
         c.duration = qMax(1, length);
         mClips.append(c);
-        if (mSelectionNames.contains(c.name)) { mSelected.insert(c.clipId); }
+        if (selectionIds.contains(c.clipId)) { mSelected.insert(c.clipId); }
     }
 
     qDebug("[NLE] refresh scene=%s items=%d tracks=%d clips=%d",
