@@ -31,8 +31,6 @@
 #include "Sound/eindependentsound.h"
 #include "Boxes/externallinkboxt.h"
 #include "GUI/dialogsinterface.h"
-#include "svgimporter.h"
-#include "Psd/ocaimporter.h"
 
 #include <QMessageBox>
 #include <QStandardItemModel>
@@ -766,13 +764,6 @@ qsptr<VideoBox> createVideoForPath(const QString &path) {
     return vidBox;
 }
 
-#include "Boxes/lottiebox.h"
-qsptr<LottieBox> createLottieBoxForPath(const QString &path) {
-    const auto lottieBox = enve::make_shared<LottieBox>();
-    lottieBox->setFilePath(path);
-    return lottieBox;
-}
-
 qsptr<eIndependentSound> createSoundForPath(const QString &path) {
     const auto result = enve::make_shared<eIndependentSound>();
     result->setFilePath(path);
@@ -811,20 +802,8 @@ eBoxOrSound *Actions::importFile(const QString &path,
     }
 
     if (fInfo.isDir()) {
-        // OCA folders (Open Cel Animation) build a full layer tree
-        // from the manifest instead of a plain image sequence;
-        // detected by manifest presence, not by folder name
-        if(ImportOCA::looksLikeOCA(path)) {
-            try {
-                result = ImportOCA::loadOCAFolder(path, scene);
-                target->insertContained(insertId, result);
-            } catch(const std::exception& e) {
-                gPrintExceptionCritical(e);
-            }
-        } else {
-            result = createImageSequenceBox(path);
-            target->insertContained(insertId, result);
-        }
+        result = createImageSequenceBox(path);
+        target->insertContained(insertId, result);
     } else { // is file
         const QString extension = fInfo.suffix();
         if (isSoundExt(extension)) {
@@ -833,23 +812,7 @@ eBoxOrSound *Actions::importFile(const QString &path,
         } else {
             try {
                 const QString extLower = extension.toLower();
-                // bodymovin sniff runs first: an OCA manifest also
-                // carries a "layers" array, but never fr+op, so a
-                // lottie json must not fall through to the OCA route
-                if (extLower == QLatin1String("lottie") ||
-                    (extLower == QLatin1String("json") &&
-                     LottieBox::looksLikeLottie(path))) {
-                    qWarning() << "IMPORT: route=lottie";
-                    result = createLottieBoxForPath(path);
-                } else if (extLower == QLatin1String("oca") ||
-                    (extLower == QLatin1String("json") &&
-                     ImportOCA::looksLikeOCAJson(path))) {
-                    // the OCA manifest FILE itself was picked (the
-                    // Krita exporter names it <doc>.oca); frame images
-                    // resolve relative to its folder
-                    qWarning() << "IMPORT: route=oca-manifest";
-                    result = ImportOCA::loadOCAManifestFile(path, scene);
-                } else if (isImageExt(extension)) {
+                if (isImageExt(extension)) {
                     qWarning() << "IMPORT: route=image";
                     result = createImageBox(path);
                 } else if (isVideoExt(extension)) {
@@ -874,18 +837,6 @@ eBoxOrSound *Actions::importFile(const QString &path,
             importedBox->planCenterPivotPosition();
             importedBox->startPosTransform();
             importedBox->moveByAbs(relDropPos);
-            // lottie animations land canvas-origin like images; when
-            // imported through the dialog (null drop pos) center the
-            // animation on the canvas instead - drop imports keep
-            // the drop position
-            if (enve_cast<LottieBox*>(result)
-                    && relDropPos.isNull() && scene) {
-                const QPointF canvasCenter(
-                            scene->getCanvasWidth() / 2.0,
-                            scene->getCanvasHeight() / 2.0);
-                importedBox->moveByAbs(
-                            canvasCenter - importedBox->getPivotAbsPos());
-            }
             importedBox->finishTransform();
         }
         if (const auto videoBox = enve_cast<VideoBox*>(result)) {
@@ -896,71 +847,6 @@ eBoxOrSound *Actions::importFile(const QString &path,
     return result.get();
 }
 
-eBoxOrSound *Actions::importClipboard(const QString &content)
-{
-    if (!mActiveScene) { return nullptr; }
-    return importClipboard(content, mActiveScene->getCurrentGroup());
-}
-
-eBoxOrSound *Actions::importClipboard(const QString &content,
-                                      ContainerBox * const target,
-                                      const int insertId,
-                                      const QPointF &relDropPos,
-                                      const int frame)
-{
-    const auto scene = target->getParentScene();
-    auto block = scene ? scene->blockUndoRedo() : UndoRedoStack::StackBlock();
-    qsptr<eBoxOrSound> result;
-
-    if (!content.contains("<svg")) { RuntimeThrow(tr("Unable to parse SVG")); }
-
-    try {
-        const auto gradientCreator = [scene]() {
-            return scene->createNewGradient();
-        };
-        result =  ImportSVG::loadSVGFile(content.toUtf8(),
-                                         gradientCreator);
-    } catch(const std::exception& e) {
-        gPrintExceptionCritical(e);
-    }
-
-    if (result) {
-        if (frame) { result->shiftAll(frame); }
-        block.reset();
-        target->prp_pushUndoRedoName(tr("Import from Clipboard"));
-        target->insertContained(insertId, result);
-        if (const auto importedBox = enve_cast<BoundingBox*>(result)) {
-            importedBox->planCenterPivotPosition();
-            importedBox->startPosTransform();
-            importedBox->moveByAbs(relDropPos);
-            importedBox->finishTransform();
-        }
-    }
-    afterAction();
-    return result.get();
-}
-
-#include "Boxes/internallinkbox.h"
-#include "Boxes/svglinkbox.h"
-
-eBoxOrSound* Actions::linkFile(const QString &path)
-{
-    qsptr<eBoxOrSound> result;
-    const QFileInfo info(path);
-    const QString suffix = info.suffix();
-    if (suffix == "svg") {
-        const auto svg = enve::make_shared<SvgLinkBox>();
-        svg->setFilePath(path);
-        result = svg;
-    } /*else if (suffix == "ora") {
-        const auto ora = enve::make_shared<ImageBox>();
-        ora->setFilePath(path);
-        result = ora;
-    }*/ else { RuntimeThrow(tr("Cannot link file format %1").arg(path)); }
-    mActiveScene->getCurrentGroup()->addContained(result);
-    mDocument.actionFinished();
-    return result.get();
-}
 
 void Actions::setMovePathMode() {
     mDocument.setCanvasMode(CanvasMode::boxTransform);

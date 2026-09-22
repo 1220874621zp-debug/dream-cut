@@ -46,7 +46,6 @@
 #include "Sound/soundcomposition.h"
 #include "GUI/global.h"
 #include "renderinstancesettings.h"
-#include "svgimporter.h"
 #include "filesourcescache.h"
 #include "videoencoder.h"
 #include "memorychecker.h"

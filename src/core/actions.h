@@ -107,13 +107,6 @@ public:
                             const int insertId = 0,
                             const QPointF &relDropPos = QPointF(0, 0),
                             const int frame = 0);
-    eBoxOrSound* importClipboard(const QString &content);
-    eBoxOrSound* importClipboard(const QString &content,
-                                 ContainerBox * const target,
-                                 const int insertId = 0,
-                                 const QPointF &relDropPos = QPointF(0, 0),
-                                 const int frame = 0);
-    eBoxOrSound *linkFile(const QString &path);
 //
     void setMovePathMode();
     void setMovePointMode();

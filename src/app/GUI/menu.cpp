@@ -67,15 +67,6 @@ void MainWindow::setupMenuBar()
     mRecentMenu = mFileMenu->addMenu(QIcon::fromTheme("file_folder"),
                                      tr("Open Recent", "MenuBar_File"));
 
-    mLinkedAct = mFileMenu->addAction(QIcon::fromTheme("linked"),
-                                      tr("Link"),
-                                      this, &MainWindow::linkFile,
-                                      QStringLiteral("Ctrl+L"));
-    mLinkedAct->setEnabled(false);
-    mLinkedAct->setData(tr("Link File"));
-    mLinkedAct->setObjectName("LinkFileAct");
-
-    cmdAddAction(mLinkedAct);
 
     mImportAct = mFileMenu->addAction(QIcon::fromTheme("file_import"),
                                       tr("Import", "MenuBar_File"),
@@ -90,13 +81,6 @@ void MainWindow::setupMenuBar()
                                          this, &MainWindow::importImageSequence);
     mImportSeqAct->setEnabled(false);
     cmdAddAction(mImportSeqAct);
-
-    mImportOCAAct = mFileMenu->addAction(QIcon::fromTheme("file_import"),
-                                         tr("Import OCA", "MenuBar_File"),
-                                         this, &MainWindow::importOCA);
-    mImportOCAAct->setEnabled(false);
-    mImportOCAAct->setObjectName("ImportOCAAct");
-    cmdAddAction(mImportOCAAct);
 
     mRevertAct = mFileMenu->addAction(QIcon::fromTheme("loop_back"),
                                       tr("Revert", "MenuBar_File"),
@@ -238,17 +222,6 @@ void MainWindow::setupMenuBar()
         cmdAddAction(qAct);
     }
 
-    { // import (paste) SVG from clipboard
-        mEditMenu->addAction(QIcon::fromTheme("paste"),
-                             tr("Paste from Clipboard"),
-                             [this]() {
-                                 const QString svg = Ui::SvgClipBoard::getContent();
-                                 if (!svg.isEmpty()) {
-                                         try { mActions.importClipboard(svg); }
-                                         catch (const std::exception& e) { gPrintExceptionCritical(e); }
-                                 }
-                             }, QKeySequence(tr("Ctrl+Shift+V")));
-    }
 
     {
         const auto qAct = new NoShortcutAction(tr("Duplicate", "MenuBar_Edit"));
@@ -901,13 +874,6 @@ void MainWindow::setupMenuBar()
     mToolbar->addAction(openAct);
     mToolbar->addAction(mSaveAct);
     mToolbar->addAction(mImportAct);
-
-    // OCA quick-import next to the generic import; shares the menu
-    // action so it disables with no scene (a standalone action stayed
-    // enabled and silently did nothing)
-    mToolbar->addAction(mImportOCAAct);
-
-    mToolbar->addAction(mLinkedAct);
 
     mRenderVideoAct = mToolbar->addAction(QIcon::fromTheme("render_animation"),
                                           tr("Render"),

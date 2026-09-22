@@ -138,14 +138,12 @@ set(
     Boxes/internallinkgroupbox.cpp
     Boxes/layerboxrenderdata.cpp
     Boxes/linkcanvasrenderdata.cpp
-    Boxes/lottiebox.cpp
     Boxes/pathbox.cpp
     Boxes/pathboxrenderdata.cpp
     Boxes/patheffectsmenu.cpp
     Boxes/rectangle.cpp
     Boxes/renderdatahandler.cpp
     Boxes/smartvectorpath.cpp
-    Boxes/svglinkbox.cpp
     Boxes/textbox.cpp
     Boxes/textboxrenderdata.cpp
     Boxes/videobox.cpp
@@ -176,7 +174,6 @@ set(
     FileCacheHandlers/imagesequencecachehandler.cpp
     FileCacheHandlers/soundreader.cpp
     FileCacheHandlers/soundreaderformerger.cpp
-    FileCacheHandlers/svgfilecachehandler.cpp
     FileCacheHandlers/videocachehandler.cpp
     FileCacheHandlers/videoframeloader.cpp
     FileCacheHandlers/videostreamsdata.cpp
@@ -368,16 +365,7 @@ set(
     Animators/boolanimator.cpp
     svgexporter.cpp
     svgexporthelpers.cpp
-    svgimporter.cpp
-    lottieprovider.cpp
     CacheHandlers/tmpfileregistry.cpp
-    Psd/psdfile.cpp
-    Psd/psdimporter.cpp
-    Psd/ocaimporter.cpp
-    Psd/fpsdpackage.cpp
-    Psd/psdimagebox.cpp
-    Kra/kraimporter.cpp
-    Kra/kraimagebox.cpp
     switchablecontext.cpp
     swt_abstraction.cpp
     swt_rulescollection.cpp
@@ -513,7 +501,6 @@ set(
     Boxes/internallinkgroupbox.h
     Boxes/layerboxrenderdata.h
     Boxes/linkcanvasrenderdata.h
-    Boxes/lottiebox.h
     Boxes/adjustmentlayer.h
     Boxes/solidlayer.h
     Boxes/pathbox.h
@@ -522,11 +509,9 @@ set(
     Boxes/rectangle.h
     Boxes/renderdatahandler.h
     Boxes/smartvectorpath.h
-    Boxes/svglinkbox.h
     Boxes/textbox.h
     Boxes/textboxrenderdata.h
     Boxes/videobox.h
-    Psd/ocaimporter.h
     RasterEffects/trackmattecaller.h
     CacheHandlers/cachecontainer.h
     CacheHandlers/hddcachablecachehandler.h
@@ -556,7 +541,6 @@ set(
     FileCacheHandlers/imagesequencecachehandler.h
     FileCacheHandlers/soundreader.h
     FileCacheHandlers/soundreaderformerger.h
-    FileCacheHandlers/svgfilecachehandler.h
     FileCacheHandlers/videocachehandler.h
     FileCacheHandlers/videoframeloader.h
     FileCacheHandlers/videostreamsdata.h
@@ -769,15 +753,7 @@ set(
     Animators/boolanimator.h
     svgexporter.h
     svgexporthelpers.h
-    svgimporter.h
-    lottieprovider.h
     CacheHandlers/tmpfileregistry.h
-    Psd/psdfile.h
-    Psd/psdimporter.h
-    Psd/fpsdpackage.h
-    Psd/psdimagebox.h
-    Kra/kraimporter.h
-    Kra/kraimagebox.h
     switchablecontext.h
     swt_abstraction.h
     swt_rulescollection.h

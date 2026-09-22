@@ -57,8 +57,6 @@ class PathBox;
 //class PaintBox;
 class SmartVectorPath;
 class BlendEffectBoxShadow;
-class PsdImageBox;
-class KraImageBox;
 // Sound
 class eSound;
 class eIndependentSound;
@@ -156,8 +154,6 @@ public:
 
     // new virtuals appended at the end, AFTER all pre-existing ones
     // (see the vtable slot order note above)
-    e_DECLARE_TYPE_FUNCTION(PsdImageBox)
-    e_DECLARE_TYPE_FUNCTION(KraImageBox)
 
     void SWT_addChild(SingleWidgetTarget * const child);
     void SWT_addChildAt(SingleWidgetTarget * const child, const int id);

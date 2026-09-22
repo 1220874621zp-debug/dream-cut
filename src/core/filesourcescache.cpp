@@ -39,7 +39,6 @@ QStringList FileExtensions::video{"avi", "mp4", "mov",
 //QStringList FileExtensions::layers{};
 // lottie animations (.lottie = zip container, .json = bodymovin;
 // json is sniffed on import to separate it from other json uses)
-QStringList FileExtensions::lottie{"lottie", "json"};
 
 bool isVideoExt(const QString &extension) {
     return FileExtensions::video.contains(extension.toLower());
@@ -102,4 +101,3 @@ QString FileExtensions::videoFilters() { return filters(video); }
 
 QString FileExtensions::layersFilters() { return QString(); /*filters(layers);*/ }
 
-QString FileExtensions::lottieFilters() { return filters(lottie); }

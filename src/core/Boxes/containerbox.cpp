@@ -1909,11 +1909,7 @@ void ContainerBox::writeBoxOrSoundXEV(const stdsptr<XevZipFileSaver>& xevFileSav
 #include "internallinkcanvas.h"
 #include "internallinkbox.h"
 #include "customboxcreator.h"
-#include "svglinkbox.h"
 #include "nullobject.h"
-#include "Psd/psdimagebox.h"
-#include "Kra/kraimagebox.h"
-#include "lottiebox.h"
 
 qsptr<BoundingBox> createBoxOfNonCustomType(const eBoxType type) {
     switch(type) {
@@ -1941,20 +1937,12 @@ qsptr<BoundingBox> createBoxOfNonCustomType(const eBoxType type) {
             return enve::make_shared<InternalLinkBox>(nullptr, false);
         case(eBoxType::internalLinkGroup):
             return enve::make_shared<InternalLinkGroupBox>(nullptr, false);
-        case(eBoxType::svgLink):
-            return enve::make_shared<SvgLinkBox>();
         case(eBoxType::internalLinkCanvas):
             return enve::make_shared<InternalLinkCanvas>(nullptr, false);
         case(eBoxType::nullObject):
             return enve::make_shared<NullObject>();
         case(eBoxType::solid):
             return enve::make_shared<SolidLayer>();
-        case(eBoxType::psdImage):
-            return enve::make_shared<PsdImageBox>();
-        case(eBoxType::kraImage):
-            return enve::make_shared<KraImageBox>();
-        case(eBoxType::lottie):
-            return enve::make_shared<LottieBox>();
         // adjustment layers were never registered here - saving one
         // and reloading the project threw "Invalid box type"
         case(eBoxType::adjustmentLayer):

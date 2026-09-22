@@ -63,7 +63,7 @@ QString fileIconName(const QString& path)
 {
     static const QStringList imageExt = {"png", "jpg", "jpeg", "bmp",
                                          "gif", "webp", "tif", "tiff",
-                                         "kra", "psd", "ora"};
+                                         "ora"};
     static const QStringList videoExt = {"mp4", "mov", "avi", "mkv",
                                          "webm", "gifv"};
     static const QStringList audioExt = {"mp3", "wav", "ogg", "flac",

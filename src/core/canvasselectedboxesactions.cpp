@@ -23,7 +23,6 @@
 
 // Fork of enve - Copyright (C) 2016-2020 Maurycy Liebner
 
-#include "Boxes/svglinkbox.h"
 #include "Boxes/videobox.h"
 #include "canvas.h"
 #include "MovablePoints/pathpivot.h"

@@ -209,9 +209,7 @@ public:
     const QString getLastOpenDir();
     const QString getLastSaveDir();
     bool closeProject();
-    void linkFile();
     void importImageSequence();
-    void importOCA();
     void importFile();
     void openSammieRoto();
     void traceSelectedImage();
@@ -313,10 +311,8 @@ private:
     QAction *mExportSVGAct;
     QAction *mRenderVideoAct;
     QAction *mCloseProjectAct;
-    QAction *mLinkedAct;
     QAction *mImportAct;
     QAction *mImportSeqAct;
-    QAction *mImportOCAAct;
     QAction *mRevertAct;
     QAction *mSelectAllAct;
     QAction *mInvertSelAct;

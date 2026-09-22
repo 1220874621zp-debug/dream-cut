@@ -111,7 +111,6 @@
 #include "wizards/installpresets.h"
 #include "Boxes/videobox.h"
 #include "Boxes/imagebox.h"
-#include "svgimporter.h"
 #include <QProcess>
 #include <QFileInfo>
 #include <QDir>
@@ -440,7 +439,6 @@ MainWindow::MainWindow(Document& document,
     , mExportSVGAct(nullptr)
     , mRenderVideoAct(nullptr)
     , mCloseProjectAct(nullptr)
-    , mLinkedAct(nullptr)
     , mImportAct(nullptr)
     , mImportSeqAct(nullptr)
     , mRevertAct(nullptr)
@@ -875,10 +873,8 @@ void MainWindow::updateSettingsForCurrentCanvas(Canvas* const scene)
     if (mAddToQueAct) { mAddToQueAct->setEnabled(scene); }
     if (mRenderVideoAct) { mRenderVideoAct->setEnabled(scene); }
     if (mCloseProjectAct) { mCloseProjectAct->setEnabled(scene); }
-    if (mLinkedAct) { mLinkedAct->setEnabled(scene); }
     if (mImportAct) { mImportAct->setEnabled(scene); }
     if (mImportSeqAct) { mImportSeqAct->setEnabled(scene); }
-    if (mImportOCAAct) { mImportOCAAct->setEnabled(scene); }
     if (mRevertAct) { mRevertAct->setEnabled(scene); }
     if (mSelectAllAct) { mSelectAllAct->setEnabled(scene); }
     if (mInvertSelAct) { mInvertSelAct->setEnabled(scene); }
@@ -1008,9 +1004,6 @@ void MainWindow::setupImporters()
     //ImportHandler::sInstance->addImporter<eXevImporter>();
     ImportHandler::sInstance->addImporter<evImporter>();
 
-    ImportHandler::sInstance->addImporter<eSvgImporter>();
-    ImportHandler::sInstance->addImporter<ePsdImporter>();
-    ImportHandler::sInstance->addImporter<eKraImporter>();
     //ImportHandler::sInstance->addImporter<eOraImporter>();
 }
 
@@ -2097,11 +2090,10 @@ void MainWindow::importFile()
 
     const QString title = tr("Import File(s)", "ImportDialog_Title");
     const QString fileType = tr("Files %1", "ImportDialog_FileTypes");
-    const QString fileTypes = "(*.friction *.svg *.psd *.psb *.kra " +
+    const QString fileTypes = "(*.friction " +
             FileExtensions::videoFilters() +
             FileExtensions::imageFilters() +
-            FileExtensions::soundFilters() +
-            FileExtensions::lottieFilters() + ")";
+            FileExtensions::soundFilters() + ")";
     const auto importPaths = AppSupport::getOpenFiles(this,
                                                       title,
                                                       defPath,
@@ -2119,29 +2111,6 @@ void MainWindow::importFile()
     }
 }
 
-void MainWindow::linkFile()
-{
-    disableEventFilter();
-    const QString defPath = mDocument.fEvFile.isEmpty() ?
-                QDir::homePath() : mDocument.fEvFile;
-    const QString title = tr("Link File", "LinkDialog_Title");
-    const QString fileType = tr("Files %1", "LinkDialog_FileType");
-    const auto importPaths = AppSupport::getOpenFiles(this,
-                                                      title,
-                                                      defPath,
-                                                      fileType.arg("(*.svg)"));
-    enableEventFilter();
-    if (!importPaths.isEmpty()) {
-        for (const QString &path : importPaths) {
-            if (path.isEmpty()) { continue; }
-            try {
-                mActions.linkFile(path);
-            } catch(const std::exception& e) {
-                gPrintExceptionCritical(e);
-            }
-        }
-    }
-}
 
 void MainWindow::importImageSequence()
 {
@@ -2157,30 +2126,6 @@ void MainWindow::importImageSequence()
     if (!folder.isEmpty()) { mActions.importFile(folder); }
 }
 
-void MainWindow::importOCA()
-{
-    disableEventFilter();
-    const QString defPath = mDocument.fEvFile.isEmpty() ?
-                QDir::homePath() : mDocument.fEvFile;
-    // DuIO/AE-style: the user picks the MANIFEST FILE (.oca/.json)
-    // and the import starts right away; a directory-only picker hid
-    // the manifest file entirely and read as "clicking does nothing"
-    const QString title = tr("Select OCA Manifest", "ImportOCADialog_Title");
-    const QString fileType = tr("OCA manifest %1", "ImportOCADialog_FileTypes");
-    const auto importPaths = AppSupport::getOpenFiles(this,
-                                                      title,
-                                                      defPath,
-                                                      fileType.arg("(*.oca *.json)"));
-    enableEventFilter();
-    for (const QString &path : importPaths) {
-        if (path.isEmpty()) { continue; }
-        try {
-            mActions.importFile(path);
-        } catch(const std::exception& e) {
-            gPrintExceptionCritical(e);
-        }
-    }
-}
 
 void MainWindow::openSammieRoto()
 {

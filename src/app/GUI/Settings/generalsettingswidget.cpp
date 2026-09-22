@@ -49,7 +49,6 @@
 #include "Boxes/containerbox.h"
 #include "CacheHandlers/tmpfileregistry.h"
 #include "fileshandler.h"
-#include "Psd/psdimagebox.h"
 
 GeneralSettingsWidget::GeneralSettingsWidget(QWidget *parent)
     : SettingsWidget(parent)
@@ -255,8 +254,7 @@ GeneralSettingsWidget::GeneralSettingsWidget(QWidget *parent)
     mCacheLayout->addWidget(cachePathLabel);
 
     const auto cacheInfoLabel = new QLabel(tr(
-            "PSD layer pixel cache. Safe to clear - layers currently "
-            "in use are re-extracted from their .fpsd packages."), this);
+            "应用缓存目录。清除后正在使用的缓存会按需重建。"), this);
     cacheInfoLabel->setWordWrap(true);
     mCacheLayout->addWidget(cacheInfoLabel);
 
@@ -265,7 +263,7 @@ GeneralSettingsWidget::GeneralSettingsWidget(QWidget *parent)
     const auto cacheBtnLayout = new QHBoxLayout(cacheBtnRow);
     cacheBtnLayout->setContentsMargins(0, 0, 0, 0);
     const auto openCacheBtn = new QPushButton(tr("Open Directory"), this);
-    const auto clearCacheBtn = new QPushButton(tr("Clear PSD Cache"), this);
+    const auto clearCacheBtn = new QPushButton(tr("清除缓存"), this);
     cacheBtnLayout->addWidget(openCacheBtn);
     cacheBtnLayout->addWidget(clearCacheBtn);
     cacheBtnLayout->addStretch();
@@ -293,27 +291,9 @@ GeneralSettingsWidget::GeneralSettingsWidget(QWidget *parent)
             dir.removeRecursively();
         }
         int refreshed = 0;
-        if(Document::sInstance) {
-            for(const auto& scene : Document::sInstance->fScenes) {
-                if(!scene) continue;
-                std::function<void(ContainerBox*)> walk =
-                        [&](ContainerBox* const cont) {
-                    for(const auto& c : cont->getContained()) {
-                        if(const auto psd =
-                                dynamic_cast<PsdImageBox*>(c.data())) {
-                            if(psd->ensureCachedFile()) refreshed++;
-                        } else if(const auto group =
-                                  dynamic_cast<ContainerBox*>(c.data())) {
-                            walk(group);
-                        }
-                    }
-                };
-                walk(scene.data());
-            }
-        }
+        Q_UNUSED(refreshed)
         QMessageBox::information(this, tr("Cache"),
-                tr("Removed %1 cache file(s). Re-extracted %2 layer(s) "
-                   "currently in use.").arg(removed).arg(refreshed));
+                tr("Removed %1 cache file(s).").arg(removed));
     });
 
     // KRA import cache: configurable location + reference-aware clear

@@ -1126,10 +1126,7 @@ QIcon ThemeIconProvider::icon(const QFileInfo &info) const
         }
     }
     const QString suf = info.suffix().toLower();
-    if (suf == QLatin1String("psd") || suf == QLatin1String("psb")) {
-        return QFileIconProvider::icon(info);
-    }
-    if (info.isDir()) {
+        if (info.isDir()) {
         return QFileIconProvider::icon(info);
     }
     return QFileIconProvider::icon(QFileIconProvider::File);
