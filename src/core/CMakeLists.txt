@@ -27,10 +27,8 @@ include(friction-meta)
 include(friction-common)
 #include(friction-quazip)
 include(friction-ffmpeg)
-include(friction-vtracer)
 
 message("-- ffmpeg include: ${FFMPEG_INCLUDE_DIRS}")
-message("-- vtracer include: ${VTRACER_INCLUDE_DIRS}")
 message("-- ffmpeg libraries: ${FFMPEG_LIBRARIES_DIRS} ${FFMPEG_LIBRARIES}")
 message("-- skia libraries: ${SKIA_LIBRARIES_DIRS} ${SKIA_LIBRARIES}")
 
@@ -375,10 +373,7 @@ set(
     svgexporter.cpp
     svgexporthelpers.cpp
     svgimporter.cpp
-    vtracerprovider.cpp
     lottieprovider.cpp
-    Depth/modelcatalog.cpp
-    Depth/aidepthprovider.cpp
     CacheHandlers/tmpfileregistry.cpp
     Psd/psdfile.cpp
     Psd/psdimporter.cpp
@@ -782,10 +777,7 @@ set(
     svgexporter.h
     svgexporthelpers.h
     svgimporter.h
-    vtracerprovider.h
     lottieprovider.h
-    Depth/modelcatalog.h
-    Depth/aidepthprovider.h
     CacheHandlers/tmpfileregistry.h
     Psd/psdfile.h
     Psd/psdimporter.h

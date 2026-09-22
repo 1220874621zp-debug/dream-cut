@@ -24,9 +24,7 @@
 // Fork of enve - Copyright (C) 2016-2020 Maurycy Liebner
 
 #include "mainwindow.h"
-#include "AI/mcpserver.h"
 #include "GUI/Expressions/expressiondialog.h"
-#include "GUI/topviewwindow.h"
 #include "canvas.h"
 #include <QKeyEvent>
 #include <QApplication>
@@ -110,14 +108,10 @@
 
 #include "dialogs/adjustscenedialog.h"
 #include "dialogs/commandpalette.h"
-#include "Dialogs/vectortracedialog.h"
 #include "wizards/installpresets.h"
 #include "Boxes/videobox.h"
 #include "Boxes/imagebox.h"
 #include "svgimporter.h"
-#include "vtracerprovider.h"
-#include "Depth/aidepthprovider.h"
-#include "Dialogs/aidepthdialog.h"
 #include <QProcess>
 #include <QFileInfo>
 #include <QDir>
@@ -522,7 +516,6 @@ MainWindow::MainWindow(Document& document,
 
     setupLayout();
     setupDebugLog();
-    setupAiServer();
     readSettings(openProject);
 }
 
@@ -626,59 +619,6 @@ void MainWindow::closedTimelineWindow()
         mTimeline->show();
         if (mViewTimelineAct) { mViewTimelineAct->setChecked(true); }
     }
-}
-
-void MainWindow::openTopViewWindow()
-{
-    if (!mTopViewWindow) {
-        if (!mTopViewWidget) {
-            mTopViewWidget = new TopViewWindow(mDocument, this);
-        }
-        mTopViewWindow = new Window(this,
-                                     mTopViewWidget,
-                                     tr("Top View"),
-                                     QString("TopViewWindow"),
-                                     true,
-                                     true,
-                                     false);
-        mTopViewWindow->setMinimumSize(360, 300);
-        connect(mTopViewWindow, &Window::closed,
-                this, [this]() { closedTopViewWindow(); });
-        if (mViewTopViewAct) { mViewTopViewAct->setChecked(true); }
-        if (mTimeline) { mTimeline->setTopViewButtonChecked(true); }
-    }
-    mTopViewWindow->focusWindow();
-}
-
-void MainWindow::closedTopViewWindow()
-{
-    if (mShutdown) { return; }
-    // cheap to rebuild - drop the window AND the GL widget so no
-    // context lingers (the widget dies as the window's child); finish
-    // any in-progress drag here while Document is guaranteed alive
-    // (the destructor alone would skip the actionFinished epilogue)
-    if (mTopViewWidget) { mTopViewWidget->finishDrags(); }
-    if (mTopViewWindow) {
-        mTopViewWindow->deleteLater();
-        mTopViewWindow = nullptr;
-    }
-    mTopViewWidget = nullptr;
-    if (mViewTopViewAct) { mViewTopViewAct->setChecked(false); }
-    if (mTimeline) { mTimeline->setTopViewButtonChecked(false); }
-}
-
-void MainWindow::toggleTopViewWindow()
-{
-    if (mTopViewWindow) {
-        mTopViewWindow->close();
-    } else {
-        openTopViewWindow();
-    }
-}
-
-bool MainWindow::isTopViewVisible() const
-{
-    return mTopViewWindow && mTopViewWindow->isVisible();
 }
 
 RenderWidget *MainWindow::renderWidget() const
@@ -1927,25 +1867,6 @@ void MainWindow::setupScripting()
     mScriptManager->console()->hide();
 }
 
-void MainWindow::setupAiServer()
-{
-    mMcpServer = new Friction::AI::McpServer(this);
-
-    const bool enabled = AppSupport::getSettings(QStringLiteral("ai"), QStringLiteral("enabled"), true).toBool();
-    const bool autoStart = AppSupport::getSettings(QStringLiteral("ai"), QStringLiteral("autoStart"), true).toBool();
-    const quint16 port = AppSupport::getSettings(QStringLiteral("ai"), QStringLiteral("port"), 9527).toInt();
-#ifdef Q_OS_WIN
-    const QString defSock = QStringLiteral("friction_mcp");
-#else
-    const QString defSock = QStringLiteral("/tmp/friction_mcp.sock");
-#endif
-    const QString socketName = AppSupport::getSettings(QStringLiteral("ai"), QStringLiteral("socketName"), defSock).toString();
-
-    if (enabled && autoStart) {
-        mMcpServer->start(port, socketName);
-    }
-}
-
 void MainWindow::clearAll()
 {
     TaskScheduler::instance()->clearTasks();
@@ -2259,151 +2180,6 @@ void MainWindow::importOCA()
             gPrintExceptionCritical(e);
         }
     }
-}
-
-void MainWindow::traceSelectedImage()
-{
-    const auto scene = *mDocument.fActiveScene;
-    if (!scene) {
-        QMessageBox::information(this, tr("矢量描摹"),
-                                 tr("请先打开场景。"));
-        return;
-    }
-    if (!VTracer::available()) {
-        QMessageBox::warning(this, tr("矢量描摹"),
-                             tr("未找到 vtracer.dll，请确认它已随程序一起部署。"));
-        return;
-    }
-
-    QList<ImageBox*> images;
-    const auto selected = scene->getSelectedBoxesList();
-    for (const auto &box : selected) {
-        if (const auto imgBox = enve_cast<ImageBox*>(box)) {
-            images << imgBox;
-        }
-    }
-    if (images.isEmpty()) {
-        QMessageBox::information(this, tr("矢量描摹"),
-                                 tr("请先选中一个或多个位图图层再转绘。"));
-        return;
-    }
-
-    VTracer::Options opts;
-    if (!VectorTraceDialog::sExec(opts, this)) { return; }
-
-    // Indeterminate progress, and no processEvents while tracing: queued
-    // UI events firing between the FFI call and the container insert can
-    // re-enter container updates (blend effect UI crash).
-    QProgressDialog progress(tr("正在转绘，请稍候..."), QString(),
-                             0, 0, this);
-    progress.setWindowModality(Qt::WindowModal);
-    progress.setMinimumDuration(0);
-
-    int traced = 0;
-    QStringList failedNames;
-    for (const auto &imgBox : images) {
-        if (progress.wasCanceled()) { break; }
-
-        // decode synchronously from the source file; QFile handles
-        // Unicode paths on Windows (same rationale as ImageLoader)
-        sk_sp<SkImage> image;
-        QFile file(imgBox->filePath());
-        if (file.open(QIODevice::ReadOnly)) {
-            const QByteArray bytes = file.readAll();
-            image = SkImage::MakeFromEncoded(SkData::MakeWithCopy(
-                    bytes.constData(), bytes.size()));
-        }
-        if (!image) {
-            failedNames << tr("%1（无法读取图像）").arg(imgBox->prp_getName());
-            continue;
-        }
-
-        QString svg;
-        int pathCount = 0;
-        QString err;
-        const auto status = VTracer::traceToSvg(image, opts,
-                                                svg, pathCount, err);
-        if (status == VTracer::TraceStatus::PathLimit) {
-            failedNames << tr("%1（过于复杂：%2 条路径 > 上限 %3）")
-                           .arg(imgBox->prp_getName())
-                           .arg(pathCount).arg(opts.maxPaths);
-            continue;
-        }
-        if (status != VTracer::TraceStatus::Ok) {
-            failedNames << tr("%1（转绘失败：%2）")
-                           .arg(imgBox->prp_getName()).arg(err);
-            continue;
-        }
-
-        const auto gradientCreator = [scene]() {
-            return scene->createNewGradient();
-        };
-        qsptr<BoundingBox> result;
-        try {
-            result = ImportSVG::loadSVGFile(svg.toUtf8(), gradientCreator);
-        } catch(const std::exception& e) {
-            gPrintExceptionCritical(e);
-            failedNames << tr("%1（导入结果失败）").arg(imgBox->prp_getName());
-            continue;
-        }
-        if (!result) {
-            failedNames << tr("%1（导入结果失败）").arg(imgBox->prp_getName());
-            continue;
-        }
-
-        const auto parentGroup = imgBox->getParentGroup();
-        parentGroup->prp_pushUndoRedoName(tr("矢量描摹"));
-        parentGroup->addContained(result);
-
-        // place the traced group centered on the source layer
-        const auto imgTransform = imgBox->getTotalTransform();
-        const qreal halfW = image->width() / 2.0;
-        const qreal halfH = image->height() / 2.0;
-        const QPointF target = imgTransform.map(QPointF(halfW, halfH));
-        result->planCenterPivotPosition();
-        result->startPosTransform();
-        result->moveByAbs(target - QPointF(halfW, halfH));
-        result->finishTransform();
-        // rename only after all structural changes are done
-        result->rename(tr("描摹 - %1").arg(imgBox->prp_getName()));
-        traced++;
-    }
-
-    progress.close();
-    mDocument.actionFinished();
-
-    if (!failedNames.isEmpty()) {
-        QMessageBox::warning(this, tr("矢量描摹"),
-            tr("以下 %1 项未转绘（矢量描摹适用于文字、Logo 与简单图形，"
-               "插画与照片类图像不建议使用）：\n\n• %2")
-                .arg(failedNames.count())
-                .arg(failedNames.join(QStringLiteral("\n• "))));
-    }
-}
-
-void MainWindow::openAiDepthDialog()
-{
-    const auto scene = *mDocument.fActiveScene;
-    if (!scene) {
-        QMessageBox::information(this, tr("AI 深度估计"),
-                                 tr("请先打开场景。"));
-        return;
-    }
-
-    QList<BoundingBox*> boxes;
-    const auto selected = scene->getSelectedBoxesList();
-    for (const auto& box : selected) {
-        if (box && !boxes.contains(box)) { boxes << box; }
-    }
-    if (boxes.isEmpty()) {
-        QMessageBox::information(this, tr("AI 深度估计"),
-                                 tr("请先选中一个或多个图层"
-                                    "（任意类型：组、矢量、位图均可）。"));
-        return;
-    }
-
-    AiDepthDialog dialog(mDocument, boxes, this);
-    dialog.exec();
 }
 
 void MainWindow::openSammieRoto()

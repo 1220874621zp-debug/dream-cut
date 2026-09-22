@@ -82,17 +82,10 @@ class ScrollArea;
 class ScriptManager;
 class ProjectPanel;
 class EffectsPresetsPanel;
-class TopViewWindow;
 class QuickEffectSearchDialog;
 class DockDropTuner;
 class EditorTimelineWindow;
 class EditorTimelineSync;
-
-namespace Friction {
-    namespace AI {
-        class McpServer;
-    }
-}
 
 class MainWindow : public QMainWindow
 {
@@ -108,10 +101,7 @@ public:
 
     static MainWindow *sGetInstance();
 
-    void toggleTopViewWindow();
     // true when the floating top view window exists and is visible
-    bool isTopViewVisible() const;
-    // render queue dock (MCP render tool drives the same queue the
     // UI shows, so AI-initiated renders stay visible to the user)
     RenderWidget *renderWidget() const;
 
@@ -225,7 +215,6 @@ public:
     void importFile();
     void openSammieRoto();
     void traceSelectedImage();
-    void openAiDepthDialog();
     void revert();
     void updateAutoSaveBackupState();
     void openRendererWindow();
@@ -308,9 +297,6 @@ private:
     ScriptManager *mScriptManager = nullptr;
     void setupScripting();
 
-    // AI & MCP Agent Server
-    class Friction::AI::McpServer *mMcpServer = nullptr;
-    void setupAiServer();
 
     QMenu *mWorkspaceMenu = nullptr;
     void rebuildWorkspaceMenu();
@@ -368,8 +354,6 @@ private:
     QMenu *mPathMenu;
     QMenu *mEffectsMenu;
     QMenu *mSceneMenu;
-    QMenu *mVectorTraceMenu;
-    QMenu *mAiToolsMenu;
 #ifndef Q_OS_MAC
     Friction::Ui::PersistentMenu *mViewMenu;
 #else
@@ -406,8 +390,6 @@ private:
     void setupToolBar();
     void setupMenuBar();
     void setupMenuScene();
-    void setupMenuVectorTrace();
-    void setupMenuAiTools();
     void setupMenuEffects();
     void setupMenuExtras();
     void setupPropertiesActions();
@@ -445,11 +427,6 @@ private:
     void closedTimelineWindow();
 
     // AE-style orthographic top view (X/Z) in a floating window
-    QAction *mViewTopViewAct = nullptr;
-    Window *mTopViewWindow = nullptr;
-    TopViewWindow *mTopViewWidget = nullptr;
-    void openTopViewWindow();
-    void closedTopViewWindow();
 
     QAction *mViewFillStrokeAct;
 

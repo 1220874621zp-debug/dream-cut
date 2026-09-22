@@ -212,9 +212,6 @@ set(
     main.cpp
     GUI/BoxesList/boxscroller.cpp
     GUI/Dialogs/dialogsinterfaceimpl.cpp
-    GUI/Dialogs/animationtopaintdialog.cpp
-    GUI/Dialogs/vectortracedialog.cpp
-    GUI/Dialogs/aidepthdialog.cpp
     GUI/Dialogs/manualdialog.cpp
     GUI/Expressions/expressiondialog.cpp
     GUI/Expressions/expressioneditor.cpp
@@ -231,7 +228,6 @@ set(
     GUI/canvasbasewrappernode.cpp
     GUI/canvaswindowevents.cpp
     GUI/canvaswrappernode.cpp
-    GUI/topviewwindow.cpp
     GUI/ekeyfilter.cpp
     GUI/ewidgetsimpl.cpp
     GUI/layouthandler.cpp
@@ -279,9 +275,6 @@ set(
     GUI/extraactions.cpp
     GUI/effectactions.cpp
     GUI/menu.cpp
-    AI/mcpserver.cpp
-    AI/mcpdispatcher.cpp
-    GUI/Settings/aiagentsettingswidget.cpp
 )
 
 set(
@@ -289,9 +282,6 @@ set(
     GUI/aepropertiesinspector.h
     GUI/BoxesList/boxscroller.h
     GUI/Dialogs/dialogsinterfaceimpl.h
-    GUI/Dialogs/animationtopaintdialog.h
-    GUI/Dialogs/vectortracedialog.h
-    GUI/Dialogs/aidepthdialog.h
     GUI/Dialogs/manualdialog.h
     GUI/Expressions/expressiondialog.h
     GUI/Expressions/expressioneditor.h
@@ -318,7 +308,6 @@ set(
     GUI/editortimelinewindow.h
     GUI/editortimelinewidget.h
     GUI/editortimelinesync.h
-    GUI/topviewwindow.h
     GUI/timelinehighlightwidget.h
     GUI/timelinewidget.h
     GUI/timelinewrappernode.h
@@ -348,9 +337,6 @@ set(
     GUI/mainwindow.h
     GUI/hangwatchdog.h
     GUI/window.h
-    AI/mcpserver.h
-    AI/mcpdispatcher.h
-    GUI/Settings/aiagentsettingswidget.h
     Qsci/qsciscintilla.h
     Qsci/qscilexerjavascript.h
     Qsci/qsciapis.h
@@ -381,7 +367,7 @@ add_executable(
     ${WINDOWS_RESOURCE_FILE}
 )
 
-add_executable(friction_effects_test effects_unittest.cpp AI/mcpserver.cpp AI/mcpdispatcher.cpp ${RESOURCES})
+add_executable(friction_effects_test effects_unittest.cpp ${RESOURCES})
 target_link_directories(
     friction_effects_test
     PRIVATE
@@ -657,11 +643,4 @@ if(UNIX AND NOT APPLE)
         #    )
         #endif()
     endif()
-    install(
-        FILES
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/mcp/friction_markup.py
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/mcp/FRICTION_AI_CONNECT.md
-        DESTINATION
-        ${CMAKE_INSTALL_DATAROOTDIR}/friction/tools/mcp
-    )
 endif()

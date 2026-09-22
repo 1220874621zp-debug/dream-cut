@@ -83,7 +83,6 @@ public:
     bool processKeyPress(QKeyEvent *event);
     // keeps the checkable top-view toolbar button in sync with the
     // floating window open/closed state (called by MainWindow)
-    void setTopViewButtonChecked(const bool checked);
     void previewFinished();
     void previewBeingPlayed();
     void previewBeingRendered();
@@ -164,7 +163,6 @@ private:
     QAction *mLoopButton;
     QAction *mSnapshotButton = nullptr;
     QAction *mSafeFramesButton = nullptr;
-    QAction *mTopViewButton = nullptr;
     QAction *mClipCanvasButton = nullptr;
     QAction *mRulersButton = nullptr;
     QAction *mTransparencyGridButton = nullptr;

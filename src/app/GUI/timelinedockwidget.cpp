@@ -298,25 +298,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
             if(scene) scene->setSafeFramesVisible(checked);
         });
 
-        // AE-style top view auxiliary window (X/Z plane with the
-        // scene camera) - user-supplied SVG icon, next to the
-        // safe-frames toggle
-        {
-            mTopViewButton = new QAction(
-                        svgToolbarPixmap(QStringLiteral(":/icons/top_view.svg")),
-                        tr("顶视图"), this);
-        }
-        // checkable so the toolbar reflects the window open/closed
-        // state (kept in sync by MainWindow::open/closedTopViewWindow)
-        mTopViewButton->setCheckable(true);
-        mTopViewButton->setToolTip(tr(
-                "打开/关闭顶视图窗口：X/Z 正交视图，显示摄像机位置与视野，"
-                "可直接拖动 3D 图层调整深度（同视图菜单 Top View Window）"));
-        connect(mTopViewButton, &QAction::triggered,
-                this, [this]() {
-            if (mMainWindow) { mMainWindow->toggleTopViewWindow(); }
-        });
-
         // mask everything outside the canvas - the same toggle as the
         // view menu "Clip to Scene" (shortcut C), surfaced as a button
         // next to the safe-frames toggle (user-supplied SVG icon)
@@ -752,7 +733,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     mToolBar->addAction(mLoopButton);
     mToolBar->addAction(mSnapshotButton);
     mToolBar->addAction(mSafeFramesButton);
-    mToolBar->addAction(mTopViewButton);
     mToolBar->addSeparator();
     mToolBar->addAction(mClipCanvasButton);
     mToolBar->addAction(mRulersButton);
@@ -1008,13 +988,6 @@ void TimelineDockWidget::spaceToggle()
                    << "activeScene="
                    << (*mDocument.fActiveScene ? "yes" : "null");
     }
-}
-
-void TimelineDockWidget::setTopViewButtonChecked(const bool checked)
-{
-    // setChecked does not emit triggered, so no feedback loop with
-    // the toggle slot
-    if (mTopViewButton) { mTopViewButton->setChecked(checked); }
 }
 
 bool TimelineDockWidget::processKeyPress(QKeyEvent *event)

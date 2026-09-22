@@ -216,46 +216,6 @@ FrameRange AnimationBox::prp_getIdenticalRelRange(const int relFrame) const {
     return BoundingBox::prp_getIdenticalRelRange(relFrame);
 }
 
-class AnimationToPaint : public ComplexTask {
-public:
-    using Loader = std::function<void(int, int)>;
-    AnimationToPaint(const int firstAbsFrame, const int firstRelFrame,
-                     const int iMax, const int increment,
-                     AnimationBox* const box,
-                     AnimationFrameHandler* const src,
-                     const Loader& loader) :
-        ComplexTask(iMax, "Video to Paint"),
-        mFirstAbsFrame(firstAbsFrame), mFirstRelFrame(firstRelFrame),
-        mIncrement(increment), mBox(box), mSrc(src), mLoader(loader) {}
-
-    void nextStep() {
-        if(!mBox || !mSrc) return cancel();
-        if(setValue(mI)) return;
-
-        const int relFrame = mFirstRelFrame + mI;
-        const int absFrame = mFirstAbsFrame + mI;
-        const int animFrame = mBox->getAnimationFrameForRelFrame(relFrame);
-        auto task = mSrc->scheduleFrameLoad(animFrame);
-        if(task) addTask(task->ref<eTask>());
-        else task = addEmptyTask();
-        const QPointer<AnimationToPaint> ptr = this;
-        task->addDependent({[ptr, animFrame, absFrame]() {
-            if(ptr) ptr->mLoader(animFrame, absFrame);
-        }, nullptr});
-        mI += mIncrement;
-    }
-private:
-    const int mFirstAbsFrame;
-    const int mFirstRelFrame;
-    const int mIncrement;
-
-    const QPointer<AnimationBox> mBox;
-    const QPointer<AnimationFrameHandler> mSrc;
-    const Loader mLoader;
-
-    int mI = 0;
-};
-
 void AnimationBox::setupCanvasMenu(PropertyMenu * const menu)
 {
     if (menu->hasActionsForType<AnimationBox>()) { return; }

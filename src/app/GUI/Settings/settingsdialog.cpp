@@ -18,7 +18,6 @@
 #include "widgets/performancesettingswidget.h"
 #include "widgets/canvassettingswidget.h"
 #include "widgets/presetsettingswidget.h"
-#include "aiagentsettingswidget.h"
 
 #include <QVBoxLayout>
 #include <QPushButton>
@@ -61,8 +60,6 @@ SettingsDialog::SettingsDialog(QWidget * const parent)
     const auto presets = new PresetSettingsWidget(this);
     addSettingsWidget(presets, tr("Presets"));
 
-    const auto aiAgent = new AIAgentSettingsWidget(this);
-    addSettingsWidget(aiAgent, tr("AI & MCP Agent"));
 
     mainLayout->addWidget(mTabWidget);
 

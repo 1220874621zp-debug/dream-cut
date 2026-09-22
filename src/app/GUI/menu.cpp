@@ -24,15 +24,12 @@
 
 #include "GUI/Settings/settingsdialog.h"
 #include "GUI/Dialogs/manualdialog.h"
-#include "AI/mcpserver.h"
 #include "GUI/timelinedockwidget.h"
 #include "dialogs/commandpalette.h"
 #include "memoryhandler.h"
 #include "misc/noshortcutaction.h"
 #include "dialogs/scenesettingsdialog.h"
 #include "system/svgclipboard.h"
-#include "vtracerprovider.h"
-#include "Depth/aidepthprovider.h"
 #include "RasterEffects/effectcanvaspoint.h"
 
 #include <QDesktopServices>
@@ -519,10 +516,6 @@ void MainWindow::setupMenuBar()
 
     setupMenuScene();
 
-    setupMenuVectorTrace();
-
-    setupMenuAiTools();
-
     mEffectsMenu = mMenuBar->addMenu(tr("Effects"));
     mEffectsMenu->setEnabled(false);
     setupMenuEffects();
@@ -754,13 +747,6 @@ void MainWindow::setupMenuBar()
 
     mViewMenu->addSeparator();
 
-    // AE-style orthographic top view window (X/Z plane with the
-    // scene camera shown) - floating auxiliary view
-    mViewTopViewAct = mViewMenu->addAction(tr("Top View Window"));
-    mViewTopViewAct->setCheckable(true);
-    connect(mViewTopViewAct, &QAction::triggered,
-            this, &MainWindow::toggleTopViewWindow);
-
     mViewTimelineAct = mViewMenu->addAction(tr("View Timeline"));
     mViewTimelineAct->setCheckable(true);
     mViewTimelineAct->setChecked(true);
@@ -957,88 +943,6 @@ void MainWindow::setupMenuBar()
         });
         mViewMenu->addAction(act);
     }
-}
-
-void MainWindow::setupMenuVectorTrace()
-{
-    mVectorTraceMenu = mMenuBar->addMenu(tr("矢量描摹", "MenuBar"));
-
-    const auto traceAct = mVectorTraceMenu->addAction(QIcon::fromTheme("group"),
-                                                      tr("转绘选中图像..."),
-                                                      this, &MainWindow::traceSelectedImage);
-    cmdAddAction(traceAct);
-
-    mVectorTraceMenu->addAction(QIcon::fromTheme("cmd"),
-                                tr("使用说明"),
-                                this, [this]() {
-        QMessageBox::information(this,
-            tr("矢量描摹 使用说明"),
-            tr("矢量描摹（基于开源库 vtracer）\n\n"
-               "把选中的位图图层转绘为可编辑的矢量路径图层：\n"
-               "• 适用：文字截图、Logo、图标、简单图形\n"
-               "• 不适用：插画、照片等复杂图像（会被路径数上限拦截）\n"
-               "• 结果以图层形式叠放在原图层位置，节点可编辑\n\n"
-               "参数建议：文字或单色 Logo 使用默认参数即可；"
-               "细节丢失时可调低「斑点过滤」或调高「颜色精度」。"
-               "\n\n当前组件版本：%1").arg(VTracer::versionString()));
-    });
-}
-
-void MainWindow::setupMenuAiTools()
-{
-    mAiToolsMenu = mMenuBar->addMenu(tr("AI 工具", "MenuBar"));
-
-    const auto depthAct = mAiToolsMenu->addAction(QIcon::fromTheme("group"),
-                                                   tr("深度估计..."),
-                                                   this,
-                                                   &MainWindow::openAiDepthDialog);
-    cmdAddAction(depthAct);
-
-    mAiToolsMenu->addAction(QIcon::fromTheme("cmd"),
-                            tr("使用说明"),
-                            this, [this]() {
-        QMessageBox::information(this,
-            tr("AI 深度估计 使用说明"),
-            tr("AI 深度估计（基于 Depth Anything V2，本机离线推理）\n\n"
-               "为选中的图层生成单目深度图，结果作为新图片图层"
-               "叠放在源图层位置：\n"
-               "• 用途：2.5D 视差位移、快速蒙版、景深/雾气调色辅助\n"
-               "• 两种模型：小型（约 50 MB，随程序内置）与"
-               "基础（约 196 MB，首次使用时在线下载）\n"
-               "• 输出样式：灰度（亮=近）、灰度（亮=远）、伪彩 JET\n"
-               "• 推理在后台线程进行，完成后可在预览区确认再插入\n\n"
-               "许可提示：小型模型为 Apache-2.0；基础模型为"
-               "CC-BY-NC-4.0（禁止商业用途），下载前会再次确认。\n"
-               "引擎：%1").arg(AiDepth::versionString()));
-    });
-
-    mAiToolsMenu->addSeparator();
-
-    mAiToolsMenu->addAction(QIcon::fromTheme("view_refresh"),
-                            tr("Restart AI / MCP Server"),
-                            this, [this]() {
-        if (mMcpServer) {
-            mMcpServer->stop();
-            const quint16 port = AppSupport::getSettings(QStringLiteral("ai"), QStringLiteral("port"), 9527).toInt();
-#ifdef Q_OS_WIN
-            const QString defSock = QStringLiteral("friction_mcp");
-#else
-            const QString defSock = QStringLiteral("/tmp/friction_mcp.sock");
-#endif
-            const QString socketName = AppSupport::getSettings(QStringLiteral("ai"), QStringLiteral("socketName"), defSock).toString();
-            mMcpServer->start(port, socketName);
-            statusBar()->showMessage(tr("AI Server restarted (%1)").arg(mMcpServer->httpUrl()), 3000);
-        }
-    });
-
-    mAiToolsMenu->addAction(QIcon::fromTheme("preferences"),
-                            tr("AI / MCP Agent Settings..."),
-                            this, [this]() {
-        const auto settDial = new SettingsDialog(this);
-        settDial->setAttribute(Qt::WA_DeleteOnClose);
-        settDial->setCurrentIndex(settDial->count() - 1);
-        settDial->show();
-    });
 }
 
 void MainWindow::setupMenuScene()
