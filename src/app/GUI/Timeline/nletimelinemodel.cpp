@@ -794,10 +794,15 @@ void NleTimelineModel::connectPanelScene(Canvas * const scene)
     mPanelScene = scene;
     if (!scene) { return; }
 
-    mSceneConns << connect(scene, &Canvas::ca_childAdded,
-                           this, [this](Property*) { refreshFromDocument(); });
-    mSceneConns << connect(scene, &Canvas::ca_childRemoved,
-                           this, [this](Property*) { refreshFromDocument(); });
+    // box children are NOT ComplexAnimator properties: layer insertion
+    // and removal fire insertedObject/removedObject on the container -
+    // the ca_childAdded family never fires for scene layers, so
+    // connecting only those left imports invisible until some
+    // unrelated signal happened to rebuild
+    mSceneConns << connect(scene, &ContainerBox::insertedObject,
+                           this, [this](const int, eBoxOrSound*) { refreshFromDocument(); });
+    mSceneConns << connect(scene, &ContainerBox::removedObject,
+                           this, [this](const int, eBoxOrSound*) { refreshFromDocument(); });
     // native row reorder (drag in the layer panel / track writebacks /
     // undo) changes the lane order derived from the specs
     mSceneConns << connect(scene, &ContainerBox::movedObject,
@@ -1038,11 +1043,9 @@ void NleTimelineModel::refreshFromDocument()
         if (mSelectionNames.contains(c.name)) { mSelected.insert(c.clipId); }
     }
 
-    qDebug("[NLE] refresh panel=%s clips=%d video=%d audio=%d active=%s",
+    qDebug("[NLE] refresh scene=%s items=%d tracks=%d clips=%d",
            scene ? scene->prp_getName().toUtf8().constData() : "-",
-           items.size(), videoCount, trackCount - videoCount,
-           mDocument.fActiveScene ?
-               mDocument.fActiveScene->prp_getName().toUtf8().constData() : "-");
+           items.size(), trackCount, mClips.size());
 
     emit modelChanged();
     emit guidesChanged();
