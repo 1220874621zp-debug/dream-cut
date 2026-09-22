@@ -64,6 +64,13 @@ void MainWindow::setupMenuBar()
     openAct->setObjectName("OpenProjectAct");
 
     cmdAddAction(openAct);
+
+    // 项目管理面板：启动时自动弹出的同款面板（最近工程卡片/新建/浏览）
+    const auto projectManagerAct = mFileMenu->addAction(
+                QIcon::fromTheme("file_blank"),
+                tr("项目管理面板…"), this, &MainWindow::openProjectManager);
+    cmdAddAction(projectManagerAct);
+
     mRecentMenu = mFileMenu->addMenu(QIcon::fromTheme("file_folder"),
                                      tr("Open Recent", "MenuBar_File"));
 

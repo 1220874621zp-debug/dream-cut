@@ -67,6 +67,8 @@
 #include "ReadWrite/evformat.h"
 #include "ReadWrite/ereadstream.h"
 #include "ReadWrite/ewritestream.h"
+#include "skia/skiahelpers.h"
+#include "Private/document.h"
 #include "XML/runtimewriteid.h"
 #include "dialogs/askdialog.h"
 
@@ -209,7 +211,22 @@ void MainWindow::saveToFile(const QString &path,
     }
 
     BoundingBox::sClearWriteBoxes();
-    if (addRecent) { addRecentFile(path); }
+    if (addRecent) {
+        addRecentFile(path);
+        // 项目缩略图 sidecar（<工程>.dreamcut.png）：从当前帧缓存取
+        // 已渲染画面；当前帧还没渲出来就跳过（面板显示占位图）
+        const auto scene = *Document::sInstance->fActiveScene;
+        if (scene) {
+            const auto contRaw = scene->getSceneFramesHandler()
+                    .atFrame(scene->getCurrentFrame());
+            const auto cont = dynamic_cast<SceneFrameContainer*>(contRaw);
+            const sk_sp<SkImage> img = cont ? cont->getImage() : nullptr;
+            if (img) {
+                SkiaHelpers::saveImage(path + QStringLiteral(".png"), img,
+                                       SkEncodedImageFormat::kPNG, 90);
+            }
+        }
+    }
 }
 
 #include "XML/xevzipfilesaver.h"

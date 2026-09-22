@@ -100,6 +100,7 @@
 #include "efiltersettings.h"
 #include "Settings/settingsdialog.h"
 #include "appsupport.h"
+#include "projectmanagerdialog.h"
 #include "themesupport.h"
 
 #include "dialogs/adjustscenedialog.h"
@@ -845,6 +846,22 @@ void MainWindow::closeWelcomeDialog()
     mStackWidget->setCurrentIndex(mStackIndexScene);
 }
 
+// 项目管理面板（启动自动弹出，文件菜单可随时再开）：打开最近工程走
+// 保存确认（openFile 内 askForSaving），新建走 newFile（含确认）
+void MainWindow::openProjectManager()
+{
+    ProjectManagerDialog manager(this);
+    const int result = manager.exec();
+    if (result == ProjectManagerDialog::OpenProject)
+    {
+        openFile(manager.selectedProject());
+    }
+    else if (result == ProjectManagerDialog::NewProject)
+    {
+        newFile();
+    }
+}
+
 void MainWindow::addCanvasToRenderQue()
 {
     if (!mDocument.fActiveScene) { return; }
@@ -1342,7 +1359,11 @@ void MainWindow::readSettings(const QString &openProject)
                            this,
                            [this,
                            openProject]() { openFile(openProject); });
-    } else { openWelcomeDialog(); }
+    } else {
+        openWelcomeDialog();
+        // 项目管理面板：等主窗口上屏后再弹（直接关闭则停在欢迎页）
+        QTimer::singleShot(200, this, &MainWindow::openProjectManager);
+    }
 }
 
 void MainWindow::writeSettings()

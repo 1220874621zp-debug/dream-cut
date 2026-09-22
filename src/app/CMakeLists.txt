@@ -239,6 +239,7 @@ set(
     GUI/directplayer.cpp
     GUI/textanimpresetpanel.cpp
     GUI/timelinebasewrappernode.cpp
+    GUI/projectmanagerdialog.cpp
     GUI/timelinedockwidget.cpp
     GUI/timelinehighlightwidget.cpp
     GUI/timelinewidget.cpp
@@ -281,6 +282,7 @@ set(
     HEADERS
     GUI/aepropertiesinspector.h
     GUI/BoxesList/boxscroller.h
+    GUI/projectmanagerdialog.h
     GUI/Dialogs/dialogsinterfaceimpl.h
     GUI/Dialogs/manualdialog.h
     GUI/Expressions/expressiondialog.h

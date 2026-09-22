@@ -238,6 +238,7 @@ private:
 
     void openWelcomeDialog();
     void closeWelcomeDialog();
+    void openProjectManager();
 
     eKeyFilter* mNumericFilter = eKeyFilter::sCreateNumberFilter(this);
     eKeyFilter* mLineFilter = eKeyFilter::sCreateLineFilter(this);
