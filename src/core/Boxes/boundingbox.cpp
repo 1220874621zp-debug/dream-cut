@@ -24,7 +24,6 @@
 // Fork of enve - Copyright (C) 2016-2020 Maurycy Liebner
 
 #include "Boxes/boundingbox.h"
-#include "Boxes/cameralayer.h"
 #include "Animators/motionpathhandler.h"
 #include "Boxes/containerbox.h"
 #include "TransformEffects/followpatheffect.h"
@@ -1508,39 +1507,10 @@ void BoundingBox::setupWithoutRasterEffects(const qreal relFrame,
     // stale-bitmap preview path jitters against the exact re-render
     data->fPerspectiveTransform.reset();
     data->fHasPerspective = false;
-    const bool cameraPresent = scene->getCameraLayer() &&
-            mType != eBoxType::canvas;
     if(mTransformAnimator->has3DTransformAtFrame(relFrame)) {
-        data->fPerspectiveTransform = cameraPresent ?
-                    mTransformAnimator->get3DRotationTransformAtFrame(relFrame) :
+        data->fPerspectiveTransform =
                     mTransformAnimator->get3DTransformAtFrame(relFrame);
         data->fHasPerspective = true;
-    }
-
-    // scene camera (world space; AE rule: only layers with their 3D
-    // switch enabled are affected - plain 2D layers live in screen
-    // space; the canvas itself is skipped too - its own render data
-    // composites the already-camera-mapped children)
-    // per-layer 2.5D camera: the matrix is built for THIS layer's
-    // depth (Parallaxer semantics - identity at the default camera,
-    // each layer peels apart by its own z when the camera moves,
-    // zooms or orbits)
-    data->fSceneCameraT.reset();
-    data->fHasSceneCamera = false;
-    if(cameraPresent && mTransformAnimator->is3DEnabled()) {
-        const qreal camZ = mTransformAnimator->get3DZPosAtFrame(relFrame);
-        const SkMatrix cam = scene->getCameraPerLayerTransformAtFrame(
-                    relFrame, camZ);
-        if(!CameraLayer::isEffectivelyIdentity(cam)) {
-            data->fSceneCameraT = cam;
-            data->fHasSceneCamera = true;
-            // a camera with tilt has perspective terms: reuse the
-            // fHasPerspective convention so direct-draw paths fall
-            // back to offscreen rasterization
-            if(scene->cameraHasPerspectiveAtFrame(relFrame)) {
-                data->fHasPerspective = true;
-            }
-        }
     }
 
     data->fResolution = scene->getResolution();
@@ -1616,31 +1586,11 @@ void BoundingBox::updateDrawRenderContainerTransform() {
         // bounces between the mis-compensated old bitmap and the new render
         const int relFrame = anim_getCurrentRelFrame();
         SkMatrix full = toSkMatrix(getTotalTransformAtFrame(relFrame));
-        if(mType != eBoxType::canvas && mTransformAnimator->is3DEnabled()) {
-            const auto scene = getParentScene();
-            const bool cameraPresent = scene && scene->getCameraLayer();
-            // same family as the render data: perspective -> rel ->
-            // inherited -> camera. While a scene camera is present the
-            // billboard keeps only its self-tilt (depth handed to the
-            // camera) - see setupWithoutRasterEffects
-            if(mTransformAnimator->has3DTransformAtFrame(relFrame)) {
-                full = SkMatrix::Concat(
-                            full,
-                            cameraPresent ?
-                    mTransformAnimator->get3DRotationTransformAtFrame(relFrame) :
-                    mTransformAnimator->get3DTransformAtFrame(relFrame));
-            }
-            if(cameraPresent) {
-                // same per-layer camera family as the render data
-                // (depth-aware, Parallaxer compensation)
-                const qreal camZ =
-                        mTransformAnimator->get3DZPosAtFrame(relFrame);
-                const SkMatrix cam = scene->getCameraPerLayerTransformAtFrame(
-                            relFrame, camZ);
-                if(!CameraLayer::isEffectivelyIdentity(cam)) {
-                    full = SkMatrix::Concat(cam, full);
-                }
-            }
+        if(mType != eBoxType::canvas &&
+                mTransformAnimator->has3DTransformAtFrame(relFrame)) {
+            full = SkMatrix::Concat(
+                        full,
+                        mTransformAnimator->get3DTransformAtFrame(relFrame));
         }
         mDrawRenderContainer.updatePaintTransformGivenNewTotalTransform(full);
     }

@@ -145,8 +145,6 @@ void Canvas::mouseMoveEvent(const eMouseEvent &e)
             updateHoveredPoint(e);
         } else if (mCurrentMode == CanvasMode::pathCreate) {
             handleAddSmartPointMouseMove(e);
-        } else if (mCurrentMode == CanvasMode::camera) {
-            cameraMove(e);
         } else if (mCurrentMode == CanvasMode::circleCreate) {
             if (!mCurrentMaskRectNodes.isEmpty()) {
                 updateMaskCircleDrag(e);
@@ -231,10 +229,6 @@ void Canvas::mouseReleaseEvent(const eMouseEvent &e)
     }
     schedulePivotUpdate();
 
-    if(mCurrentMode == CanvasMode::camera && e.fButton == Qt::LeftButton) {
-        cameraRelease();
-        return;
-    }
     /*if(mCurrentMode == CanvasMode::paint) {
         const auto paintMode = mDocument.fPaintMode;
         if(paintMode <= PaintMode::colorize) {

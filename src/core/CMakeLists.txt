@@ -234,7 +234,6 @@ set(
     RasterEffects/trackmattecaller.cpp
     Boxes/adjustmentlayer.cpp
     Boxes/solidlayer.cpp
-    Boxes/cameralayer.cpp
     RasterEffects/noisefadeeffect.cpp
     RasterEffects/openglrastereffectcaller.cpp
     RasterEffects/rastereffect.cpp
@@ -516,7 +515,6 @@ set(
     Boxes/linkcanvasrenderdata.h
     Boxes/lottiebox.h
     Boxes/adjustmentlayer.h
-    Boxes/cameralayer.h
     Boxes/solidlayer.h
     Boxes/pathbox.h
     Boxes/pathboxrenderdata.h

@@ -25,7 +25,6 @@
 
 #include "canvas.h"
 #include "Boxes/adjustmentlayer.h"
-#include "Boxes/cameralayer.h"
 
 #include "eevent.h"
 
@@ -72,17 +71,8 @@ void Canvas::handleMovePathMousePressEvent(const eMouseEvent& e)
     // deselects, same as without the switch)
     if(mDocument.fAutoSelectLayer) {
         mPressedBox = mCurrentContainer->getBoxAtPixel(e.fPos);
-        if(!mPressedBox && sceneHasActiveCamera()) {
-            mPressedBox = mCurrentContainer->getBoxAtPixel(
-                        mapCameraScreenToWorld(e.fPos));
-        }
     } else {
         mPressedBox = mCurrentContainer->getBoxAt(e.fPos);
-        if(!mPressedBox && sceneHasActiveCamera()) {
-            // 3D layers are hit-tested where they are SEEN (through the camera
-            // projection), 2D layers keep the raw canvas position first
-            mPressedBox = mCurrentContainer->getBoxAt(mapCameraScreenToWorld(e.fPos));
-        }
     }
     if (e.shiftMod()) { return; }
     if (mPressedBox ? !mPressedBox->isSelected() : true) {
@@ -233,103 +223,6 @@ void Canvas::handleMovePointMousePressEvent(const eMouseEvent& e)
 }
 
 
-// scene camera tool (AE-like, Blender-flavoured): LMB drag orbits the
-// composition (tilt X/Y), Shift+LMB pans, Ctrl+LMB drags zoom. AE
-// flow: a camera LAYER must exist - auto-created on first use; the
-// camera only affects layers with their 3D switch enabled. All values
-// live as plain animators on the camera layer - the standard
-// prp_start/finishTransform pipeline carries undo and auto-keying
-void Canvas::cameraPress(const eMouseEvent& e) {
-    const bool autoCreated = !getCameraLayer();
-    if(autoCreated) addCameraLayerAction();
-    const auto cam = getCameraLayer();
-    if(!cam) return;
-    if(e.ctrlMod()) mCamDragMode = CamDragMode::zoom;
-    else if(e.shiftMod()) mCamDragMode = CamDragMode::pan;
-    else mCamDragMode = CamDragMode::orbit;
-    qWarning() << "CAMERA: press, drag mode" << int(mCamDragMode)
-               << (autoCreated ? "(camera layer auto-created)"
-                               : "(camera layer present)");
-    mCamPressPos = e.fPos;
-    mCamStartPanX = cam->panXAnimator()->getCurrentBaseValue();
-    mCamStartPanY = cam->panYAnimator()->getCurrentBaseValue();
-    mCamStartZoom = cam->zoomAnimator()->getCurrentBaseValue();
-    mCamStartRotX = cam->rotXAnimator()->getCurrentBaseValue();
-    mCamStartRotY = cam->rotYAnimator()->getCurrentBaseValue();
-    if(mCamDragMode == CamDragMode::orbit) {
-        cam->rotXAnimator()->prp_startTransform();
-        cam->rotYAnimator()->prp_startTransform();
-    } else if(mCamDragMode == CamDragMode::pan) {
-        cam->panXAnimator()->prp_startTransform();
-        cam->panYAnimator()->prp_startTransform();
-    } else {
-        cam->zoomAnimator()->prp_startTransform();
-    }
-}
-
-void Canvas::cameraMove(const eMouseEvent& e) {
-    if(mCamDragMode == CamDragMode::none) return;
-    const auto cam = getCameraLayer();
-    if(!cam) { mCamDragMode = CamDragMode::none; return; }
-    const QPointF d = e.fPos - mCamPressPos;
-    if(mCamDragMode == CamDragMode::orbit) {
-        cam->rotYAnimator()->setCurrentBaseValue(
-                    qBound(-89., mCamStartRotY + d.x()*0.3, 89.));
-        cam->rotXAnimator()->setCurrentBaseValue(
-                    qBound(-89., mCamStartRotX + d.y()*0.3, 89.));
-    } else if(mCamDragMode == CamDragMode::pan) {
-        // content follows the cursor 1:1: canvas units = view pixels
-        // divided by view scale and camera zoom
-        const qreal k = 1./(e.fScale*qMax(0.01, mCamStartZoom));
-        cam->panXAnimator()->setCurrentBaseValue(
-                    mCamStartPanX - d.x()*k);
-        cam->panYAnimator()->setCurrentBaseValue(
-                    mCamStartPanY - d.y()*k);
-    } else {
-        // drag up = zoom in (bound matches the animator range)
-        cam->zoomAnimator()->setCurrentBaseValue(
-                    qBound(0.01, mCamStartZoom*std::exp(-d.y()*0.005),
-                           100000.));
-    }
-}
-
-void Canvas::cameraRelease() {
-    if(mCamDragMode == CamDragMode::none) return;
-    const auto cam = getCameraLayer();
-    if(cam) {
-        if(mCamDragMode == CamDragMode::orbit) {
-            cam->rotXAnimator()->prp_finishTransform();
-            cam->rotYAnimator()->prp_finishTransform();
-        } else if(mCamDragMode == CamDragMode::pan) {
-            cam->panXAnimator()->prp_finishTransform();
-            cam->panYAnimator()->prp_finishTransform();
-        } else {
-            cam->zoomAnimator()->prp_finishTransform();
-        }
-    }
-    mCamDragMode = CamDragMode::none;
-    if(Document::sInstance) Document::sInstance->actionFinished();
-}
-
-void Canvas::cameraCancel() {
-    if(mCamDragMode == CamDragMode::none) return;
-    const auto cam = getCameraLayer();
-    if(cam) {
-        // write the press-time values back before finishing so the
-        // undo entry becomes a no-op
-        if(mCamDragMode == CamDragMode::orbit) {
-            cam->rotXAnimator()->setCurrentBaseValue(mCamStartRotX);
-            cam->rotYAnimator()->setCurrentBaseValue(mCamStartRotY);
-        } else if(mCamDragMode == CamDragMode::pan) {
-            cam->panXAnimator()->setCurrentBaseValue(mCamStartPanX);
-            cam->panYAnimator()->setCurrentBaseValue(mCamStartPanY);
-        } else {
-            cam->zoomAnimator()->setCurrentBaseValue(mCamStartZoom);
-        }
-    }
-    cameraRelease();
-}
-
 void Canvas::handleLeftButtonMousePress(const eMouseEvent& e)
 {
     if (e.fMouseGrabbing) {
@@ -401,8 +294,6 @@ void Canvas::handleLeftButtonMousePress(const eMouseEvent& e)
     } else if (mCurrentMode == CanvasMode::pickFillStroke ||
                mCurrentMode == CanvasMode::pickFillStrokeEvent) {
         //mPressedBox = getBoxAtFromAllDescendents(e.fPos);
-    } else if (mCurrentMode == CanvasMode::camera) {
-        cameraPress(e);
     } else if (mCurrentMode == CanvasMode::circleCreate) {
         // bitmap auto-detect, same rule as the rect tool: a single
         // selected bitmap/mask-host layer (or a press over one) draws
@@ -478,7 +369,6 @@ void Canvas::cancelCurrentTransform()
 {
     mGizmos.fState.rotatingFromHandle = false;
 
-    if(mCurrentMode == CanvasMode::camera) { cameraCancel(); }
 
     if (mCurrentMode == CanvasMode::pointTransform) {
         if (mCurrentNormalSegment.isValid()) {
@@ -1292,13 +1182,6 @@ void Canvas::handleMovePathMouseMove(const eMouseEvent& e)
         }
 
         auto moveBy = getMoveByValueForEvent(e);
-        if(selectionNeedsCameraMapping()) {
-            // the selection is displayed through the camera projection:
-            // un-project both positions so the layer follows the cursor
-            // instead of racing off when the camera is rotated/tilted
-            moveBy = mapCameraScreenToWorld(e.fPos) -
-                     mapCameraScreenToWorld(e.fLastPressPos);
-        }
         if (gridSettings.snapEnabled && !mSelectedBoxes.isEmpty()) {
             const auto snapped = moveBySnapTargets(e.fModifiers,
                                                    moveBy,

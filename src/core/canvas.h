@@ -909,38 +909,6 @@ public:
     // empty group flagged as a switch group, ready to receive layers
     void addSwitchGroupAction();
 
-    // ---- scene camera (AE-like): driven by a CameraLayer box (the
-    // camera tool auto-creates one on first use). Affects ONLY layers
-    // with their 3D switch enabled (AE rule - plain 2D layers live in
-    // screen space) ----
-    class CameraLayer* getCameraLayer() const;
-    SkMatrix getCameraTransformAtFrame(const qreal relFrame) const;
-    // per-layer 2.5D camera matrix (Parallaxer semantics; see
-    // CameraLayer::getCameraPerLayerTransformAtFrame)
-    SkMatrix getCameraPerLayerTransformAtFrame(const qreal relFrame,
-                                               const qreal layerZ) const;
-    bool cameraHasPerspectiveAtFrame(const qreal relFrame) const;
-    // invalidate every 3D layer's render data + the scene frame cache
-    // (wired to the CameraLayer animators - without this the layers
-    // keep serving cached render data with the OLD camera matrix)
-    // Coalesced through the event loop: one orbit drag updates rotX AND
-    // rotY, which must not walk the whole scene twice per mouse move
-    void sceneCameraChanged(const FrameRange& range);
-    void addCameraLayerAction();
-    // true when a camera layer exists and its transform is not the identity
-    bool sceneHasActiveCamera() const;
-    // true when the current box selection contains 3D layers shown through
-    // an active camera (their move deltas must be un-projected)
-    bool selectionNeedsCameraMapping() const;
-    // un-project a canvas position through the scene camera so screen-space
-    // mouse deltas become world-space deltas (identity camera: unchanged)
-    QPointF mapCameraScreenToWorld(const QPointF &pos) const;
-    // scene camera tool (Blender-flavoured): LMB drag orbits (tilt),
-    // Shift+LMB pans, Ctrl+LMB drags zoom
-    void cameraPress(const class eMouseEvent& e);
-    void cameraMove(const class eMouseEvent& e);
-    void cameraRelease();
-    void cameraCancel();
 
 private:
     // set first thing in the destructor: while true the track/selection
@@ -1062,16 +1030,6 @@ private:
 
     QList<qsptr<SceneBoundGradient>> mGradients;
     QList<NullObject*> mNullObjects;
-    // camera tool drag state
-    enum class CamDragMode { none, orbit, pan, zoom };
-    CamDragMode mCamDragMode = CamDragMode::none;
-    QPointF mCamPressPos;
-    qreal mCamStartPanX = 0;
-    qreal mCamStartPanY = 0;
-    qreal mCamStartZoom = 1;
-    qreal mCamStartRotX = 0;
-    qreal mCamStartRotY = 0;
-    QPointF mPoseMoveLast;       // last cursor pos while moving
 
 protected:
     Document& mDocument;
@@ -1162,8 +1120,6 @@ protected:
 
     bool mSceneFrameOutdated = false;
     // camera-change coalescing (see sceneCameraChanged)
-    bool mCameraChangeQueued = false;
-    FrameRange mCameraChangePendingRange = FrameRange::INVALID;
     UseSharedPointer<SceneFrameContainer> mSceneFrame;
     UseSharedPointer<SceneFrameContainer> mLoadingSceneFrame;
 

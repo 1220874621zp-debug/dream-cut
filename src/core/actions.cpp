@@ -1002,10 +1002,6 @@ void Actions::setNullMode() {
     mDocument.setCanvasMode(CanvasMode::nullCreate);
 }
 
-void Actions::setCameraMode() {
-    mDocument.setCanvasMode(CanvasMode::camera);
-}
-
 
 
 void Actions::finishSmoothChange() {

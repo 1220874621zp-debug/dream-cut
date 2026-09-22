@@ -120,7 +120,6 @@ public:
     static QPixmap* BOX_VIDEO;
     static QPixmap* BOX_SOUND;
     static QPixmap* BOX_SOLID;
-    static QPixmap* BOX_CAMERA;
     static QPixmap* BOX_GROUP;
     static QPixmap* BOX_LINK;
     static QPixmap* BOX_SEQ;

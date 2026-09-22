@@ -126,7 +126,6 @@ public:
     void setTextMode();
 
     void setNullMode();
-    void setCameraMode();
     void setPickPaintSettingsMode();
 //
     bool smoothChange() const { return mSmoothChange; }

@@ -81,7 +81,6 @@
 #include "Boxes/circle.h"
 #include "Boxes/rectangle.h"
 #include "Boxes/solidlayer.h"
-#include "Boxes/cameralayer.h"
 #include "Boxes/nullobject.h"
 #include "Sound/evideosound.h"
 #include "Boxes/internallinkgroupbox.h"
@@ -326,7 +325,6 @@ QPixmap* BoxSingleWidget::BOX_CIRCLE;
 QPixmap* BoxSingleWidget::BOX_RECT;
 QPixmap* BoxSingleWidget::BOX_TEXT;
 QPixmap* BoxSingleWidget::BOX_NULL;
-QPixmap* BoxSingleWidget::BOX_CAMERA;
 QPixmap* BoxSingleWidget::BOX_IMAGE;
 QPixmap* BoxSingleWidget::BOX_VIDEO;
 QPixmap* BoxSingleWidget::BOX_SOUND;
@@ -462,8 +460,6 @@ BoxSingleWidget::BoxSingleWidget(BoxScroller * const parent)
             return BoxSingleWidget::BOX_RECT;
         } else if (enve_cast<TextBox*>(target)) {
             return BoxSingleWidget::BOX_TEXT;
-        } else if (enve_cast<CameraLayer*>(target)) {
-            return BoxSingleWidget::BOX_CAMERA;
         } else if (enve_cast<NullObject*>(target)) {
             return BoxSingleWidget::BOX_NULL;
         } else if (enve_cast<ImageBox*>(target)) {
@@ -1920,26 +1916,6 @@ void BoxSingleWidget::loadStaticPixmaps(int iconSize)
     {
         const int isz = qMax(8, pixmapSize.width()*4/5);
         const QColor col = ThemeSupport::getThemeColorYellow();
-        QPixmap pc(isz, isz); pc.fill(Qt::transparent);
-        QPainter c(&pc); c.setRenderHint(QPainter::Antialiasing);
-        QPen cpen(col); cpen.setWidthF(2.0); cpen.setCapStyle(Qt::RoundCap);
-        c.setPen(cpen);
-        c.setBrush(Qt::NoBrush);
-        c.drawRoundedRect(QRectF(0.10*isz, 0.30*isz, 0.80*isz, 0.52*isz),
-                          0.12*isz, 0.12*isz);
-        c.drawEllipse(QPointF(0.5*isz, 0.56*isz), 0.17*isz, 0.17*isz);
-        c.drawLine(QPointF(0.32*isz, 0.30*isz),
-                   QPointF(0.40*isz, 0.18*isz));
-        c.drawLine(QPointF(0.40*isz, 0.18*isz),
-                   QPointF(0.60*isz, 0.18*isz));
-        c.drawLine(QPointF(0.60*isz, 0.18*isz),
-                   QPointF(0.68*isz, 0.30*isz));
-        c.end();
-        BOX_CAMERA = new QPixmap(pc);
-    }
-    {
-        const int isz = qMax(8, pixmapSize.width()*4/5);
-        const QColor col = ThemeSupport::getThemeColorYellow();
         // solid layer: filled rounded square with border (flat-color
         // plane)
         QPixmap ps(isz, isz); ps.fill(Qt::transparent);
@@ -2009,7 +1985,6 @@ void BoxSingleWidget::clearStaticPixmaps()
     delete BOX_TEXT; BOX_TEXT = nullptr;
     delete BOX_NULL; BOX_NULL = nullptr;
     delete BOX_SOLID; BOX_SOLID = nullptr;
-    delete BOX_CAMERA; BOX_CAMERA = nullptr;
     delete BOX_IMAGE; BOX_IMAGE = nullptr;
     delete BOX_VIDEO; BOX_VIDEO = nullptr;
     delete BOX_SOUND; BOX_SOUND = nullptr;

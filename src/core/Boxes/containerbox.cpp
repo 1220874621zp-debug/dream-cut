@@ -1903,7 +1903,6 @@ void ContainerBox::writeBoxOrSoundXEV(const stdsptr<XevZipFileSaver>& xevFileSav
 #include "videobox.h"
 #include "rectangle.h"
 #include "Boxes/solidlayer.h"
-#include "Boxes/cameralayer.h"
 #include "circle.h"
 //#include "paintbox.h"
 #include "imagesequencebox.h"
@@ -1950,8 +1949,6 @@ qsptr<BoundingBox> createBoxOfNonCustomType(const eBoxType type) {
             return enve::make_shared<NullObject>();
         case(eBoxType::solid):
             return enve::make_shared<SolidLayer>();
-        case(eBoxType::cameraLayer):
-            return enve::make_shared<CameraLayer>();
         case(eBoxType::psdImage):
             return enve::make_shared<PsdImageBox>();
         case(eBoxType::kraImage):

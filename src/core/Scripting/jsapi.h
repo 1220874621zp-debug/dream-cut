@@ -251,12 +251,6 @@ namespace Friction
             Q_INVOKABLE QJSValue numberProperty(const QString &name,
                                                 const qreal value);
 
-            // true for scene camera layers (CameraLayer)
-            Q_INVOKABLE bool isCamera();
-            // camera animator access on camera layers only:
-            // "panX"/"panY"/"zoom"/"rotZ"/"focal" -> scalar property
-            // proxy (value/setValue/keyframes). Null otherwise.
-            Q_INVOKABLE QJSValue cameraProperty(const QString &name);
             // layer duration trimming (AE inPoint / outPoint)
             Q_INVOKABLE bool setInPoint(const int frame);
             Q_INVOKABLE bool setOutPoint(const int frame);
@@ -392,9 +386,6 @@ namespace Friction
                                          const QString &text);
             Q_INVOKABLE QJSValue addNull(const QString &name);
             Q_INVOKABLE QJSValue addGroup(const QString &name);
-            // scene camera layer (AE camera; one per scene - returns
-            // null when the scene already has one)
-            Q_INVOKABLE QJSValue addCamera(const QString &name);
             // layer-type container: can hold child layers (the enve
             // equivalent of an AE null used as a parent controller;
             // NullObject itself is a leaf and cannot have children)

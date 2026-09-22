@@ -24,7 +24,6 @@
 #include "Boxes/internallinkgroupbox.h"
 #include "Boxes/adjustmentlayer.h"
 #include "Boxes/solidlayer.h"
-#include "Boxes/cameralayer.h"
 #include "RasterEffects/rastereffectcollection.h"
 #include <QPainter>
 #include <QMouseEvent>
@@ -276,12 +275,6 @@ void Canvas::setCurrentBoxesGroup(ContainerBox* const group)
 void Canvas::updateHoveredBox(const eMouseEvent &e)
 {
     mHoveredBox = mCurrentContainer->getBoxAt(e.fPos);
-    if(!mHoveredBox && sceneHasActiveCamera()) {
-        // 3D layers are displayed through the camera projection: try the
-        // un-projected position as well so they highlight where they are
-        // actually seen (2D layers keep matching the raw position first)
-        mHoveredBox = mCurrentContainer->getBoxAt(mapCameraScreenToWorld(e.fPos));
-    }
 }
 
 void Canvas::updateHoveredPoint(const eMouseEvent &e)
@@ -2653,111 +2646,6 @@ void Canvas::addVectorLayerAction() {
     if(Document::sInstance) Document::sInstance->actionFinished();
 }
 
-// ---- scene camera (AE-like, driven by a CameraLayer box) ----
-
-CameraLayer* Canvas::getCameraLayer() const {
-    for(const auto& c : getContained()) {
-        if(const auto cam = enve_cast<CameraLayer*>(c.data())) {
-            return cam;
-        }
-    }
-    return nullptr;
-}
-
-void Canvas::addCameraLayerAction() {
-    if(getCameraLayer()) return;
-    const auto cam = enve::make_shared<CameraLayer>();
-    addContained(cam);
-    if(Document::sInstance) Document::sInstance->actionFinished();
-}
-
-SkMatrix Canvas::getCameraTransformAtFrame(const qreal relFrame) const {
-    const auto cam = getCameraLayer();
-    if(!cam) return SkMatrix();
-    return cam->getCameraTransformAtFrame(relFrame, mWidth, mHeight);
-}
-
-SkMatrix Canvas::getCameraPerLayerTransformAtFrame(
-        const qreal relFrame, const qreal layerZ) const {
-    const auto cam = getCameraLayer();
-    if(!cam) return SkMatrix();
-    return cam->getCameraPerLayerTransformAtFrame(relFrame, mWidth, mHeight,
-                                                  layerZ);
-}
-
-bool Canvas::cameraHasPerspectiveAtFrame(const qreal relFrame) const {
-    const auto cam = getCameraLayer();
-    if(!cam) return false;
-    return cam->hasPerspectiveAtFrame(relFrame);
-}
-
-bool Canvas::sceneHasActiveCamera() const {
-    if(!getCameraLayer()) return false;
-    return !getCameraTransformAtFrame(anim_getCurrentRelFrame()).isIdentity();
-}
-
-bool Canvas::selectionNeedsCameraMapping() const {
-    if(!sceneHasActiveCamera()) return false;
-    for(const auto& box : mSelectedBoxes) {
-        const auto ta = box ? box->getBoxTransformAnimator() : nullptr;
-        if(ta && ta->is3DEnabled()) return true;
-    }
-    return false;
-}
-
-QPointF Canvas::mapCameraScreenToWorld(const QPointF &pos) const {
-    const SkMatrix cam = getCameraTransformAtFrame(anim_getCurrentRelFrame());
-    if(cam.isIdentity()) return pos;
-    SkMatrix inv;
-    if(!cam.invert(&inv)) return pos;
-    SkPoint pt = toSkPoint(pos);
-    inv.mapPoints(&pt, &pt, 1);
-    return toQPointF(pt);
-}
-
-// camera values changed: drop the cached scene frames AND every 3D
-// layer's render data - the layers themselves believe nothing of
-// their own changed and would otherwise keep serving cached data
-// carrying the OLD camera matrix (the original "camera tool has no
-// effect" bug).
-// Coalesced through the event loop: an orbit drag sets rotX and rotY
-// every mouse move, and each setter fires this - without coalescing
-// the scene is walked and invalidated twice per move.
-void Canvas::sceneCameraChanged(const FrameRange& range) {
-    mCameraChangePendingRange = mCameraChangePendingRange + range;
-    if(mCameraChangeQueued) return;
-    mCameraChangeQueued = true;
-    QMetaObject::invokeMethod(this, [this]() {
-        mCameraChangeQueued = false;
-        const auto range = mCameraChangePendingRange;
-        mCameraChangePendingRange = FrameRange::INVALID;
-        mSceneFramesHandler.remove(range);
-        if(!mSceneFramesHandler.atFrame(anim_getCurrentRelFrame())) {
-            mSceneFrameOutdated = true;
-        }
-        // link canvases (InternalLinkCanvas) can introduce cycles into
-        // the box hierarchy - guard the recursion with a visited set
-        // or a cyclic link means unbounded recursion (stack overflow)
-        QSet<ContainerBox*> visited;
-        std::function<void(ContainerBox*)> walk =
-                [&](ContainerBox* const cont) {
-            if(!cont || visited.contains(cont)) return;
-            visited.insert(cont);
-            for(const auto& c : cont->getContained()) {
-                const auto box = enve_cast<BoundingBox*>(c.data());
-                if(const auto group = enve_cast<ContainerBox*>(c.data())) {
-                    walk(group);
-                }
-                if(box && box->getBoxTransformAnimator() &&
-                   box->getBoxTransformAnimator()->is3DEnabled()) {
-                    box->planUpdate(UpdateReason::userChange);
-                }
-            }
-        };
-        walk(const_cast<Canvas*>(this));
-        planUpdate(UpdateReason::userChange);
-    }, Qt::QueuedConnection);
-}
 
 void Canvas::clearGradientRWIds() const
 {
