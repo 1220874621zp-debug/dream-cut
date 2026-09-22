@@ -119,6 +119,11 @@ namespace EvFormat {
         // carry no flag and designate the bottom video lane once
         nleTrackMain = 53,
 
+        // solo flag inside the track spec block (one extra qint32 per
+        // spec, written before the name); solo suppression itself is
+        // layer visibility, only the flag persists
+        nleTrackSolo = 54,
+
         nextVersion
     };
 

@@ -924,6 +924,18 @@ void NleTimelineModel::requestTrackSetHeight(const int trackId,
     refreshFromDocument();
 }
 
+void NleTimelineModel::requestTrackToggleSolo(const int trackId)
+{
+    if (mInWriteback || mGestureActive) { return; }
+    const auto scene = mPanelScene.data();
+    const auto t = track(trackId);
+    if (!scene || !t) { return; }
+    // spec 旗标是平凡写（同锁定），压制/恢复在 refresh 的
+    // solo 压制段统一执行
+    scene->setTrackSpecSolo(trackId, !t->solo);
+    refreshFromDocument();
+}
+
 void NleTimelineModel::requestTrackToggleMute(const int trackId,
                                               const bool allSameType)
 {
@@ -1265,13 +1277,15 @@ void NleTimelineModel::refreshFromDocument()
     for (const auto &s : specs) {
         if (s.mAudio) { continue; }
         laneById.insert(s.mId, mTracks.size());
-        mTracks.append({s.mId, s.mName, false, s.mLocked, false, s.mHeight});
+        mTracks.append({s.mId, s.mName, false, s.mLocked, s.mSolo,
+                        false, s.mHeight});
     }
     const int videoCount = mTracks.size();
     for (const auto &s : specs) {
         if (!s.mAudio) { continue; }
         laneById.insert(s.mId, mTracks.size());
-        mTracks.append({s.mId, s.mName, true, s.mLocked, false, s.mHeight});
+        mTracks.append({s.mId, s.mName, true, s.mLocked, s.mSolo,
+                        true, s.mHeight});
     }
 
     // lane membership: the layer's trackId; unknown ids (fresh
@@ -1305,13 +1319,57 @@ void NleTimelineModel::refreshFromDocument()
         }
         mInWriteback = false;
     }
+    // ---- solo 压制：同类任一轨独奏时未独奏轨的成员层隐藏。
+    // 压制即层可见性（声音可听性=可见性，与静音同一机制），恢复恒
+    // visible=true（剪映语义：取消独奏该回来的都回来）。快照仅内存，
+    // 工程文件只持久化 spec 上的 solo 旗标
+    if (scene && trackCount > 0) {
+        QSet<eBoxOrSound*> live;
+        for (const auto &it : items) {
+            if (it.first) { live.insert(it.first); }
+        }
+        // 剪枝已删图层：只比指针不解引用
+        for (auto it = mSoloSaved.begin(); it != mSoloSaved.end();) {
+            if (!live.contains(*it)) { it = mSoloSaved.erase(it); }
+            else { ++it; }
+        }
+        mSoloSuppressed.intersect(live);
+
+        mInWriteback = true;
+        const auto undoBlock = scene->blockUndoRedo();
+        for (int t = 0; t < trackCount; ++t) {
+            const bool type = mTracks.at(t).audio;
+            bool anySolo = false;
+            for (const auto &o : mTracks) {
+                if (o.audio == type && o.solo) { anySolo = true; break; }
+            }
+            for (eBoxOrSound* l : laneMembers[t]) {
+                if (!l) { continue; }
+                if (anySolo && !mTracks.at(t).solo) {
+                    mSoloSaved.insert(l);
+                    if (l->isVisible()) { l->setVisible(false); }
+                    mSoloSuppressed.insert(l);
+                } else if (mSoloSaved.contains(l)) {
+                    l->setVisible(true);
+                    mSoloSaved.remove(l);
+                    mSoloSuppressed.remove(l);
+                }
+            }
+        }
+        mInWriteback = false;
+    }
+
     // mute mirror + default numbering for unnamed specs
     for (int t = 0; t < trackCount; ++t) {
-        bool allHidden = !laneMembers[t].isEmpty();
-        for (const auto *l : laneMembers[t]) {
+        // 独奏压制的层不算用户隐藏，避免独奏期间整排轨误显静音
+        bool anyMember = false;
+        bool allHidden = true;
+        for (eBoxOrSound* l : laneMembers[t]) {
+            if (!l || mSoloSuppressed.contains(l)) { continue; }
+            anyMember = true;
             if (l->isVisible()) { allHidden = false; break; }
         }
-        mTracks[t].muted = allHidden;
+        mTracks[t].muted = anyMember && allHidden;
         if (mTracks[t].name.isEmpty()) {
             mTracks[t].name = mTracks[t].audio
                     ? QStringLiteral("A%1").arg(trackCount - t)

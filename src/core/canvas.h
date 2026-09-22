@@ -96,6 +96,8 @@ struct eTrackSpec {
     // CapCut main track (the magnetic lane overlays follow). Set
     // once, PERSISTENT: adding lanes below never moves it
     bool mMain = false;
+    // 剪映式独奏：同类任一轨独奏时，未独奏轨的成员层被压制隐藏
+    bool mSolo = false;
 };
 
 class CORE_EXPORT Canvas : public CanvasBase
@@ -371,6 +373,7 @@ public:
     // plain setters (UI-state properties, deliberately not undoable)
     void setTrackSpecName(const int id, const QString &name);
     void setTrackSpecLocked(const int id, const bool locked);
+    void setTrackSpecSolo(const int id, const bool solo);
     void setTrackSpecHeight(const int id, const int height);
     // main-track designation (plain UI-state property, deliberately
     // not undoable - it survives lane adds/removes untouched)

@@ -118,7 +118,7 @@ protected:
 private:
     // ---- layout / mapping (frames <-> pixels) ----
     int rulerHeight() const { return 30; }
-    int headerWidth() const { return 132; }
+    int headerWidth() const { return 168; }
     int trackHeight(const int trackIdx) const; // live preview aware
     int trackY(const int trackIdx) const;      // top y of track content
     int trackAtY(const int y) const;           // -1 if none
@@ -183,6 +183,7 @@ private:
     QRect addTrackRect(const bool audio) const;  // corner +V / +A buttons
     QRect muteBadgeRect(const int trackIdx) const;
     QRect lockBadgeRect(const int trackIdx) const;
+    QRect soloBadgeRect(const int trackIdx) const;
     int nearestTrackOfType(const int y, const bool audio) const;
     void renameTrackDialog(const int trackIdx);
     // end an editing gesture: flush candidates into one model commit

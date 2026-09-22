@@ -2383,6 +2383,7 @@ void Canvas::writeBoundingBox(eWriteStream& dst) const
         dst << qint32(s.mId) << qint32(s.mAudio)
             << qint32(s.mLocked) << qint32(s.mHeight)
             << qint32(s.mMain)
+            << qint32(s.mSolo)
             << s.mName.toUtf8();
     }
     clearGradientRWIds();
@@ -2400,10 +2401,14 @@ void Canvas::readBoundingBox(eReadStream& src)
         src >> count;
         mTrackSpecs.clear();
         const bool hasMain = src.evFileVersion() >= EvFormat::nleTrackMain;
+        const bool hasSolo = src.evFileVersion() >= EvFormat::nleTrackSolo;
         for (qint32 i = 0; i < count; ++i) {
             qint32 id = -1, audio = 0, locked = 0, height = 0, main = 0;
+            qint32 solo = 0;
             QByteArray name;
-            if (hasMain) {
+            if (hasSolo) {
+                src >> id >> audio >> locked >> height >> main >> solo >> name;
+            } else if (hasMain) {
                 src >> id >> audio >> locked >> height >> main >> name;
             } else {
                 src >> id >> audio >> locked >> height >> name;
@@ -2414,6 +2419,7 @@ void Canvas::readBoundingBox(eReadStream& src)
             spec.mLocked = locked != 0;
             spec.mHeight = height;
             spec.mMain = main != 0;
+            spec.mSolo = solo != 0;
             spec.mName = QString::fromUtf8(name);
             mTrackSpecs.append(spec);
         }
@@ -2522,6 +2528,13 @@ void Canvas::setTrackSpecLocked(const int id, const bool locked)
 {
     for (auto &s : mTrackSpecs) {
         if (s.mId == id) { s.mLocked = locked; return; }
+    }
+}
+
+void Canvas::setTrackSpecSolo(const int id, const bool solo)
+{
+    for (auto &s : mTrackSpecs) {
+        if (s.mId == id) { s.mSolo = solo; return; }
     }
 }
 

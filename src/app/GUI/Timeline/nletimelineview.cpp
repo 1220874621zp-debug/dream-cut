@@ -444,7 +444,7 @@ void NleTimelineView::drawTrackHeaders(QPainter &p)
         }
 
         p.setPen(tracks[i].muted ? cTextDim : cText);
-        p.drawText(QRect(38, top, headerWidth() - 108, h),
+        p.drawText(QRect(38, top, headerWidth() - 130, h),
                    Qt::AlignVCenter, tracks[i].name);
 
         // 剪映顺序：锁在左，眼(视频)/喇叭(音频)在右
@@ -468,6 +468,15 @@ void NleTimelineView::drawTrackHeaders(QPainter &p)
                      nleHeaderGlyph(ctrlKey,
                                     nleGlyphBody(ctrlKey, laneMuted, mc),
                                     mc, mb.width()));
+
+        // 剪映式独奏 S：未独奏灰、独奏金（同锁定的激活色语言）
+        const QRect sb = soloBadgeRect(i);
+        QFont sf = font();
+        sf.setBold(true);
+        sf.setPixelSize(12);
+        p.setFont(sf);
+        p.setPen(tracks[i].solo ? QColor(0xff, 0xd1, 0x54) : cTextDim);
+        p.drawText(sb, Qt::AlignCenter, QStringLiteral("S"));
     }
 }
 
@@ -1082,6 +1091,10 @@ void NleTimelineView::mousePressEvent(QMouseEvent *e)
                 // Shift = every track of the same type (kdenlive)
                 mModel->requestTrackToggleMute(
                             trackId, e->modifiers() & Qt::ShiftModifier);
+                return;
+            }
+            if (soloBadgeRect(tr).contains(e->pos())) {
+                mModel->requestTrackToggleSolo(trackId);
                 return;
             }
             if (lockBadgeRect(tr).contains(e->pos())) {
@@ -1701,7 +1714,8 @@ void NleTimelineView::mouseDoubleClickEvent(QMouseEvent *e)
     if (e->pos().x() < headerWidth() && e->pos().y() > rulerHeight()) {
         const int lane = trackAtY(e->pos().y());
         if (lane >= 0 && !muteBadgeRect(lane).contains(e->pos())
-                && !lockBadgeRect(lane).contains(e->pos())) {
+                && !lockBadgeRect(lane).contains(e->pos())
+                && !soloBadgeRect(lane).contains(e->pos())) {
             renameTrackDialog(lane);
         }
         return;
@@ -1992,14 +2006,21 @@ QRect NleTimelineView::muteBadgeRect(const int trackIdx) const
 {
     const int top = trackY(trackIdx);
     const int h = trackHeight(trackIdx);
-    return QRect(headerWidth() - 32, top + (h - 20) / 2, 20, 20);
+    return QRect(headerWidth() - 54, top + (h - 20) / 2, 20, 20);
 }
 
 QRect NleTimelineView::lockBadgeRect(const int trackIdx) const
 {
     const int top = trackY(trackIdx);
     const int h = trackHeight(trackIdx);
-    return QRect(headerWidth() - 58, top + (h - 20) / 2, 20, 20);
+    return QRect(headerWidth() - 82, top + (h - 20) / 2, 20, 20);
+}
+
+QRect NleTimelineView::soloBadgeRect(const int trackIdx) const
+{
+    const int top = trackY(trackIdx);
+    const int h = trackHeight(trackIdx);
+    return QRect(headerWidth() - 26, top + (h - 20) / 2, 20, 20);
 }
 
 // nearest lane of the requested type for a y position (free drags

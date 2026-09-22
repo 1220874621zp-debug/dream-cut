@@ -39,6 +39,7 @@ public:
         QString name;
         bool audio = false;
         bool locked = false;    // persistent: spec carries it
+        bool solo = false;      // persistent: spec carries it
         bool muted = false;     // mirror: all of the track's layers hidden
         int height = 0;         // 0 = type default
     };
@@ -173,6 +174,7 @@ public:
     bool requestTrackRemove(const int trackId);
     void requestTrackRename(const int trackId, const QString &name);
     void requestTrackSetLocked(const int trackId, const bool locked);
+    void requestTrackToggleSolo(const int trackId);
     void requestTrackSetHeight(const int trackId, const int height);
     // Shift extends the toggle to every track of the same type
     void requestTrackToggleMute(const int trackId, const bool allSameType);
@@ -246,6 +248,10 @@ private:
     QHash<eBoxOrSound*, int> mLayerToClipId;
     int mNextClipId = 1;
     QSet<int> mSelected;
+    // 独奏压制台账：solo 生效期间被藏掉的层（恢复即 visible=true，
+    // 剪映语义：取消独奏该回来的都会回来）；仅内存态不进工程文件
+    QSet<eBoxOrSound*> mSoloSaved;
+    QSet<eBoxOrSound*> mSoloSuppressed;
     qreal mFps = 25.;
     bool mMagnetic = false;
     bool mInWriteback = false;
