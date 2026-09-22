@@ -91,8 +91,11 @@ public:
     QSet<int> collectTangleExemptions(const QSet<int> &moving) const;
     // trim range [lo, hi] (in frames) for the neighbor-edge clamp:
     // lo = previous clip's out point, hi = next clip's start; clips
-    // in the moving set never clamp
+    // in the moving set never clamp, exempt (press-time tangled)
+    // clips don't either - a legacy overlap layout must not pin the
+    // edge BEHIND its own current position
     void trimBounds(const int clipId, const QSet<int> &moving,
+                    const QSet<int> &exempt,
                     int *lo, int *hi) const;
     // Ctrl insert drop: the run the dropped clip touches on the lane
     // slides right as one rigid block (returns empty when nothing

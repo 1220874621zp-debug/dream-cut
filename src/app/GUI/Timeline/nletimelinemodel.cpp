@@ -122,6 +122,7 @@ QSet<int> NleTimelineModel::collectTangleExemptions(
 
 void NleTimelineModel::trimBounds(const int clipId,
                                   const QSet<int> &moving,
+                                  const QSet<int> &exempt,
                                   int *lo, int *hi) const
 {
     const auto c = clip(clipId);
@@ -130,6 +131,7 @@ void NleTimelineModel::trimBounds(const int clipId,
     int h = INT_MAX;
     for (const auto &o : mClips) {
         if (o.clipId == clipId || moving.contains(o.clipId)) { continue; }
+        if (exempt.contains(o.clipId)) { continue; }
         if (o.trackId != c->trackId) { continue; }
         const int oEnd = o.start + o.duration;
         if (oEnd <= c->start) { l = qMax(l, oEnd); }

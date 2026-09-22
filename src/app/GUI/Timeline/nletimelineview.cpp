@@ -724,8 +724,10 @@ bool NleTimelineView::dropLegal(const int primaryId,
 // magnetic follow (CapCut): every same-track clip that started at or
 // after the old out point shifts by the same amount the out point
 // moved - shortening slides the chain left onto the new out point (no
-// gap), lengthening pushes it right (no overlap). Computed from the
-// pristine model state every move, so it is idempotent/reversible.
+// gap), lengthening pushes it right (no overlap). A clip STRADDLING
+// the old out point (legacy overlap layouts) parks itself at the new
+// out point instead of shifting by delta. Computed from the pristine
+// model state every move, so it is idempotent/reversible.
 QVector<NleTimelineModel::Move> NleTimelineView::magneticFollowMoves(
         const int clipId, const int oldEnd, const int newEnd) const
 {
@@ -739,6 +741,11 @@ QVector<NleTimelineModel::Move> NleTimelineView::magneticFollowMoves(
         if (o.start >= oldEnd) {
             moves.append({o.clipId, o.trackId,
                           qMax(0, o.start + shift), o.duration});
+        } else if (o.start + o.duration > oldEnd) {
+            // straddler: its head already sits inside the trimmed
+            // clip - the tight chain wants it at the new out point
+            moves.append({o.clipId, o.trackId,
+                          qMax(0, newEnd), o.duration});
         }
     }
     return moves;
@@ -1320,10 +1327,11 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
         const int sT = snapFrame(ns, {mDragClipId}, &snapped);
         if (snapped) { ns = sT; mSnapTarget = sT; }
         // neighbor edge: the left handle cannot cross the previous
-        // clip on the lane
+        // clip on the lane (tangled legacy overlaps are exempt so
+        // the edge never gets pinned behind its own position)
         int lo = 0;
         int hi = 0;
-        mModel->trimBounds(mDragClipId, mMovingIds, &lo, &hi);
+        mModel->trimBounds(mDragClipId, mMovingIds, mTangled, &lo, &hi);
         lo = qMin(lo, end - minDur);
         ns = qMax(ns, lo);
         mCandidates.insert(mDragClipId,
@@ -1364,19 +1372,27 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
         bool snapped = false;
         const int sT = snapFrame(ne, {mDragClipId}, &snapped);
         if (snapped) { ne = sT; mSnapTarget = sT; }
-        // neighbor edge: the right handle cannot cross the next clip's
-        // start on the lane
-        int lo = 0;
-        int hi = INT_MAX;
-        mModel->trimBounds(mDragClipId, mMovingIds, &lo, &hi);
-        hi = qMax(hi, c->start + minDur);
-        ne = qMin(ne, hi);
-        mCandidates.insert(mDragClipId,
-                           {mDragClipId, c->trackId, c->start, ne - c->start});
-        // magnetic follow: shortening the out point slides attached
-        // neighbours left; Alt keeps them in place for a plain trim
+        // magnetic follow: shortening slides attached neighbours left;
+        // Alt keeps them in place for a plain trim (and a plain trim
+        // respects the neighbor edge - the magnetic one pushes the
+        // chain instead of clamping, that is the whole point of the
+        // mode: extending a clip into its neighbour moves the
+        // neighbour, it must not pin the edge at the current out)
         const bool follow = mModel->magnetic() &&
                 !(e->modifiers() & Qt::AltModifier);
+        if (!follow) {
+            // neighbor edge: the right handle cannot cross the next
+            // clip's start on the lane (tangled legacy overlaps are
+            // exempt, or the edge would be pinned BEHIND its own out
+            // point and could only ever shrink)
+            int lo = 0;
+            int hi = INT_MAX;
+            mModel->trimBounds(mDragClipId, mMovingIds, mTangled, &lo, &hi);
+            hi = qMax(hi, c->start + minDur);
+            ne = qMin(ne, hi);
+        }
+        mCandidates.insert(mDragClipId,
+                           {mDragClipId, c->trackId, c->start, ne - c->start});
         const int oldEnd = c->start + c->duration;
         const auto followers = magneticFollowMoves(mDragClipId, oldEnd, ne);
         if (follow) {

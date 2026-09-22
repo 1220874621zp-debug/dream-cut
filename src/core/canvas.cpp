@@ -1776,7 +1776,13 @@ void Canvas::splitBoxesAtFrame(const int frame)
         if (!cRect) { continue; }
 
         bBox->startMinFramePosTransform();
-        bBox->getDurationRectangle()->setMinAbsFrame(frame);
+        // clean cut: the copy keeps [min..frame], the original keeps
+        // [frame+1..max]. Sharing the boundary frame made adjacent
+        // halves overlap by one frame, which tripped every
+        // no-overlap mechanism downstream (the NLE trim clamp saw
+        // the neighbor start BEHIND the clip's own out point, so a
+        // right-edge trim could only shrink, never extend)
+        bBox->getDurationRectangle()->setMinAbsFrame(frame + 1);
         bBox->finishMinFramePosTransform();
 
         box->startMaxFramePosTransform();
@@ -1850,7 +1856,9 @@ void Canvas::splitSoundsAtFrame(const QList<eIndependentSound*>& sounds,
         if (!cRect) { continue; }
 
         sound->startMinFramePosTransform();
-        sound->getDurationRectangle()->setMinAbsFrame(frame);
+        // clean cut, same convention as the box split (no shared
+        // boundary frame - see splitBoxesAtFrame)
+        sound->getDurationRectangle()->setMinAbsFrame(frame + 1);
         sound->finishMinFramePosTransform();
 
         clone->startMaxFramePosTransform();
