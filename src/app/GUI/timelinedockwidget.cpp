@@ -75,6 +75,8 @@
 #include "appsupport.h"
 #include "editortimelinewidget.h"
 #include "editortimelinesync.h"
+#include "directplayer.h"
+#include "Sound/audiohandler.h"
 
 namespace {
 // recursively gather every keyed QrealAnimator under prop (property
@@ -195,7 +197,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     , mCurrentFrameSpin(nullptr)
     , mRenderProgressAct(nullptr)
     , mRenderProgress(nullptr)
-    , mStepPreviewTimer(nullptr)
     , mPausedPreviewState({false, 0})
 {
     connect(RenderHandler::sInstance, &RenderHandler::previewFinished,
@@ -545,8 +546,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
                 this, [this]() { matchSelectedToCanvas(false); });
     }
 
-    mStepPreviewTimer = new QTimer(this);
-
     mFrameStartSpin = new FrameSpinBox(this);
     mFrameStartSpin->setKeyboardTracking(false);
     mFrameStartSpin->setObjectName("LeftSpinBox");
@@ -806,8 +805,21 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     connect(&mDocument, &Document::activeSceneSet,
             this, &TimelineDockWidget::updateSettingsForCurrentCanvas);
 
-    connect(mStepPreviewTimer, &QTimer::timeout,
-            this, &TimelineDockWidget::stepPreview);
+    // Kdenlive-style direct playback (composites on demand, audio
+    // clock master, frame drops on slow compositions, half-res preview)
+    mDirectPlayer = new DirectPlayer(mDocument, *AudioHandler::sInstance, this);
+    connect(mDirectPlayer, &DirectPlayer::started,
+            this, &TimelineDockWidget::previewBeingPlayed);
+    connect(mDirectPlayer, &DirectPlayer::finished,
+            this, &TimelineDockWidget::previewFinished);
+    connect(mDirectPlayer, &DirectPlayer::frameChanged,
+            this, [this](const int frame) {
+        // NLE playhead follows playback without a panel rebuild
+        if (!mEditorTimeline) { return; }
+        const auto scene = mDocument.fActiveScene.data();
+        const qreal fps = scene ? scene->getFps() : 25.;
+        if (fps > 0.) { mEditorTimeline->setPlayheadSec(frame / fps); }
+    });
 
     setupPropertyShortcuts();
 }
@@ -1037,7 +1049,7 @@ void TimelineDockWidget::spaceToggle()
     // diagnostic: distinguishes "Space never reached this slot" from
     // "reached but wrong branch" when users report dead Space keys
     qWarning() << "[SPACE] spaceToggle state=" << int(state)
-               << "stepTimer=" << mStepPreviewTimer->isActive();
+               << "directPlay=" << (mDirectPlayer ? mDirectPlayer->playing() : false);
     // Space = play <-> full stop: any preview activity (rendering,
     // playing, paused) stops the preview completely; the next press
     // starts playback again
@@ -1045,8 +1057,8 @@ void TimelineDockWidget::spaceToggle()
         state == PreviewState::playing ||
         state == PreviewState::paused) {
         interruptPreview();
-    } else if (mStepPreviewTimer->isActive()) {
-        pausePreview();
+    } else if (mDirectPlayer && mDirectPlayer->playing()) {
+        mDirectPlayer->stop();
     } else {
         // AE-style start: when the range ahead is not fully cached,
         // warm the cache first (visible progress, auto-plays when
@@ -1093,7 +1105,7 @@ bool TimelineDockWidget::processKeyPress(QKeyEvent *event)
     const bool jumpFrame = (mods & (Qt::ShiftModifier | Qt::AltModifier)) == (Qt::ShiftModifier | Qt::AltModifier);
     if (key == Qt::Key_Escape) { // stop playback
         if (state != PreviewState::stopped ||
-            mStepPreviewTimer->isActive()) { interruptPreview(); }
+            (mDirectPlayer && mDirectPlayer->playing())) { interruptPreview(); }
         else { return false; }
 
     } else if (key == Qt::Key_Space && (mods & Qt::ShiftModifier)) { // play from first frame
@@ -1289,7 +1301,8 @@ void TimelineDockWidget::resumePreview()
 
 void TimelineDockWidget::setStepPreviewStop(const bool pause)
 {
-    mStepPreviewTimer->stop();
+    // direct playback has no paused state: Space is play <-> full stop
+    if (mDirectPlayer) { mDirectPlayer->stop(); }
     if (pause) { previewPaused(); }
     else { previewFinished(); }
 }
@@ -1297,23 +1310,15 @@ void TimelineDockWidget::setStepPreviewStop(const bool pause)
 void TimelineDockWidget::setStepPreviewStart()
 {
     if (eSettings::instance().fPreviewCache) { return; }
-
-    const auto scene = *mDocument.fActiveScene;
-    if (!scene) { return; }
-
-    if (mStepPreviewTimer->isActive()) {
-        mStepPreviewTimer->stop();
+    if (!mDirectPlayer) { return; }
+    mDirectPlayer->setLoop(mLoopButton && mLoopButton->isChecked());
+    mDirectPlayer->setPlayResolution(0.5);
+    if (!mDirectPlayer->play()) {
+        previewFinished();
+        mMainWindow->statusBar()->showMessage(
+                    tr("Cannot play: the preview range is empty - "
+                       "check the In/Out points"), 5000);
     }
-
-    const auto state = RenderHandler::sInstance->currentPreviewState();
-    if (state != PreviewState::stopped) {
-        RenderHandler::sInstance->interruptPreview();
-    }
-
-    int fps = scene->getFps();
-    mStepPreviewTimer->setInterval(1000 / fps);
-    mStepPreviewTimer->start();
-    previewBeingPlayed();
 }
 
 void TimelineDockWidget::gotoFrame(int frame)
@@ -1394,10 +1399,7 @@ void TimelineDockWidget::updateSettingsForCurrentCanvas(Canvas* const canvas)
         mCurrentFrameSpin->updateFps(fps);
         mFrameStartSpin->updateFps(fps);
         mFrameEndSpin->updateFps(fps);
-        if (mStepPreviewTimer->isActive()) {
-            mStepPreviewTimer->setInterval(
-                        qMax(1, qRound(1000. / qMax(0.001, fps))));
-        }
+
     });
     connect(canvas, &Canvas::displayTimeCodeChanged,
             this, [this](const bool enabled) {
@@ -1516,37 +1518,6 @@ void TimelineDockWidget::jumpToIntermediateFrame(bool forward) {
     mDocument.actionFinished();
 }
 
-void TimelineDockWidget::stepPreview()
-{
-    const auto scene = *mDocument.fActiveScene;
-    if (!scene) { return; }
-    int currentFrame = scene->anim_getCurrentAbsFrame();
-    int nextFrame = currentFrame + 1;
-
-    if (scene->getFrameIn().enabled && currentFrame < scene->getFrameIn().frame) {
-        nextFrame = scene->getFrameIn().frame;
-    }
-
-    int frameOut = scene->getFrameRange().fMax;
-    if (scene->getFrameOut().enabled) {
-        frameOut = scene->getFrameOut().frame;
-    }
-
-    if (nextFrame > frameOut) {
-        if (mLoopButton->isChecked()) {
-            nextFrame = scene->getFrameRange().fMin;
-            if (scene->getFrameIn().enabled) {
-                nextFrame = scene->getFrameIn().frame;
-            }
-        } else {
-            mStepPreviewTimer->stop();
-            previewFinished();
-            return;
-        }
-    }
-    scene->anim_setAbsFrame(nextFrame);
-    mDocument.actionFinished();
-}
 
 namespace {
 

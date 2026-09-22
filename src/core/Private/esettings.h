@@ -145,7 +145,9 @@ public:
 
     int fDefaultFillStrokeIndex = 0;
 
-    bool fPreviewCache = true;
+    // false = Kdenlive-style direct playback (default); true = the
+    // classic AE-style RAM preview pass
+    bool fPreviewCache = false;
 
     // timeline settings
     bool fTimelineAlternateRow = true;

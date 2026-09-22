@@ -65,6 +65,7 @@ class LayoutHandler;
 class BrushContexedWrapper;
 class EditorTimelineWidget;
 class EditorTimelineSync;
+class DirectPlayer;
 
 enum class CanvasMode : short;
 
@@ -164,6 +165,7 @@ private:
     QWidget *mNlePage = nullptr;
     EditorTimelineWidget *mEditorTimeline = nullptr;
     EditorTimelineSync *mEditorSync = nullptr;
+    DirectPlayer *mDirectPlayer = nullptr;
 
     QToolBar *mToolBar;
 
@@ -206,7 +208,6 @@ private:
     QAction *mRenderProgressAct;
     QProgressBar *mRenderProgress;
 
-    QTimer *mStepPreviewTimer;
 
     QList<TimelineWidget*> mTimelineWidgets;
     //AnimationDockWidget *mAnimationDockWidget;

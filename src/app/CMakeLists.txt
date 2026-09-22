@@ -235,6 +235,7 @@ set(
     GUI/editortimelinewidget.cpp
     GUI/editortimelinesync.cpp
     GUI/timelinethumbprovider.cpp
+    GUI/directplayer.cpp
     GUI/textanimpresetpanel.cpp
     GUI/timelinebasewrappernode.cpp
     GUI/timelinedockwidget.cpp
@@ -305,6 +306,7 @@ set(
     GUI/editortimelinewidget.h
     GUI/editortimelinesync.h
     GUI/timelinethumbprovider.h
+    GUI/directplayer.h
     GUI/timelinehighlightwidget.h
     GUI/timelinewidget.h
     GUI/timelinewrappernode.h
