@@ -26,6 +26,7 @@
 #include "timelinedockwidget.h"
 
 #include <QKeyEvent>
+#include <QMouseEvent>
 #include <QScrollBar>
 #include <QShortcut>
 #include <QPainter>
@@ -74,6 +75,8 @@
 #include "layouthandler.h"
 #include "memoryhandler.h"
 #include "appsupport.h"
+#include "actions.h"
+#include "misc/keyfocustarget.h"
 #include "GUI/Timeline/nletimelinemodel.h"
 #include "GUI/Timeline/nletimelineview.h"
 #include "GUI/Timeline/nletimelinecontroller.h"
@@ -1081,6 +1084,20 @@ void TimelineDockWidget::setupNleActions()
     });
     insertAct(mMagneticAct);
     mMainWindow->cmdAddAction(mMagneticAct);
+
+    // kdenlive insert/overwrite toggle: when on, a drop pushes the
+    // touched run right instead of requiring free space; Ctrl flips
+    // it for a single gesture
+    mNleInsertAct = new QAction(tr("插入模式"), this);
+    mNleInsertAct->setCheckable(true);
+    mNleInsertAct->setToolTip(
+                tr("插入模式（kdenlive）：拖放时落点处的现有块整体右移让位；按住 Ctrl 可临时反转"));
+    mNleInsertAct->setData(mNleInsertAct->toolTip());
+    connect(mNleInsertAct, &QAction::toggled, this, [this](const bool on) {
+        if (mNleView) { mNleView->setInsertMode(on); }
+    });
+    insertAct(mNleInsertAct);
+    mMainWindow->cmdAddAction(mNleInsertAct);
 
     mNleZoomFitAct = new QAction(tr("适配"), this);
     mNleZoomFitAct->setToolTip(tr("时间轴缩放适配窗口宽度"));

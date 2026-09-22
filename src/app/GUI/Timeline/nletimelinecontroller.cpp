@@ -5,7 +5,9 @@
 #include "Private/document.h"
 #include "GUI/timelinethumbprovider.h"
 #include "Boxes/animationbox.h"
+#include "Boxes/videobox.h"
 #include "Sound/esoundobjectbase.h"
+#include "Sound/evideosound.h"
 #include "canvas.h"
 #include "Boxes/containerbox.h"
 #include "Boxes/boundingbox.h"
@@ -185,6 +187,29 @@ void NleTimelineController::requestMedia()
         // video family (VideoBox / image sequences): decoded filmstrip
         const auto animBox = dynamic_cast<AnimationBox*>(box);
         if (animBox) {
+            // kdenlive A/V clip parity: a VideoBox with an embedded
+            // sound also gets its waveform peaks fed (the view draws
+            // them as a bottom strip under the thumbnails)
+            const auto vidBox = enve_cast<VideoBox*>(box);
+            const auto vSound = vidBox ? vidBox->sound() : nullptr;
+            if (vSound) {
+                const int sec0 = qMax(0, int(viewA / fps));
+                const int sec1 = int(viewB / fps) + 1;
+                const int minSec = dur->getMinAbsFrame() / fps;
+                const int maxSec = dur->getMaxAbsFrame() / fps + 1;
+                const QString vsKey = QStringLiteral("%1")
+                        .arg(reinterpret_cast<qulonglong>(vSound), 0, 16);
+                for (int absSec = sec0; absSec <= sec1; ++absSec) {
+                    if (absSec < minSec || absSec > maxSec) { continue; }
+                    const auto relRange = vSound->absSecondToRelSeconds(absSec);
+                    if (!relRange.isValid()) { continue; }
+                    mWaveRoutes[
+                            QStringLiteral("%1:%2").arg(vsKey).arg(relRange.fMin)
+                            ].append({c.clipId, absSec});
+                    mThumbProvider->requestWavePeaks(vsKey, relRange.fMin,
+                                                     vSound);
+                }
+            }
             const auto handler = animBox->getAnimationFramesHandler();
             if (!handler) { continue; }
             const QString hKey = QStringLiteral("%1")

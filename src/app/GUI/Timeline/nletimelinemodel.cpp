@@ -6,6 +6,7 @@
 #include "Boxes/boundingbox.h"
 #include "Animators/eboxorsound.h"
 #include "Sound/esound.h"
+#include "Sound/eindependentsound.h"
 #include "Timeline/durationrectangle.h"
 #include "Boxes/animationbox.h"
 #include "smartPointers/ememory.h"
@@ -442,25 +443,36 @@ bool NleTimelineModel::requestSplitAtFrame(const int frame)
     }
 
     QList<BoundingBox*> boxes;
+    QList<eIndependentSound*> sounds;
     for (const int id : mSelected) {
         const auto c = clip(id);
         if (!c || !c->layer) { continue; }
+        const auto snd = enve_cast<eIndependentSound*>(c->layer.data());
+        if (snd) { sounds << snd; continue; }
         const auto box = enve_cast<BoundingBox*>(c->layer.data());
         if (box) { boxes << box; }
     }
     // CapCut-style fallback: no selection cuts EVERY unlocked-track
-    // clip under the frame in one press
-    if (boxes.isEmpty()) {
+    // clip under the frame in one press (sounds included)
+    if (boxes.isEmpty() && sounds.isEmpty()) {
         for (const auto &c : mClips) {
             if (!(c.start <= frame && frame < c.start + c.duration)) { continue; }
             if (trackLocked(c.trackId)) { continue; }
             if (!c.layer) { continue; }
+            const auto snd = enve_cast<eIndependentSound*>(c.layer.data());
+            if (snd) { sounds << snd; continue; }
             const auto box = enve_cast<BoundingBox*>(c.layer.data());
             if (box) { boxes << box; }
         }
     }
-    if (boxes.isEmpty()) { return false; }
-    return splitBoxes(boxes, frame);
+    if (boxes.isEmpty() && sounds.isEmpty()) { return false; }
+    bool did = false;
+    if (!boxes.isEmpty()) { did = splitBoxes(boxes, frame) || did; }
+    if (!sounds.isEmpty()) {
+        scene->splitSoundsAtFrame(sounds, frame);
+        did = true;
+    }
+    return did;
 }
 
 bool NleTimelineModel::requestRazorCut(const QSet<int> &clipIds,
@@ -470,29 +482,36 @@ bool NleTimelineModel::requestRazorCut(const QSet<int> &clipIds,
     const auto scene = mPanelScene.data();
     if (!scene || mFps <= 0.) { return false; }
 
+    // kdenlive parity: the razor cuts every clip kind - boxes go
+    // through the box clipboard, independent sounds through the
+    // clone-and-trim sound split
     QList<BoundingBox*> boxes;
-    int skippedSounds = 0;
+    QList<eIndependentSound*> sounds;
     int skippedEdges = 0;
     for (const int id : clipIds) {
         const auto c = clip(id);
         if (!c || !c->layer) { continue; }
-        const auto box = enve_cast<BoundingBox*>(c->layer.data());
-        if (!box) { ++skippedSounds; continue; }
         // the cut must leave at least one frame on both sides
         if (!(c->start < frame && frame < c->start + c->duration - 1)) {
             ++skippedEdges;
             continue;
         }
-        boxes << box;
-    }
-    if (skippedSounds > 0) {
-        emit logMessage(QStringLiteral("剪刀暂不支持音频块，已跳过 %1 块").arg(skippedSounds));
+        const auto snd = enve_cast<eIndependentSound*>(c->layer.data());
+        if (snd) { sounds << snd; continue; }
+        const auto box = enve_cast<BoundingBox*>(c->layer.data());
+        if (box) { boxes << box; }
     }
     if (skippedEdges > 0) {
         emit logMessage(QStringLiteral("%1 块在切点边缘，无需分割").arg(skippedEdges));
     }
-    if (boxes.isEmpty()) { return false; }
-    return splitBoxes(boxes, frame);
+    if (boxes.isEmpty() && sounds.isEmpty()) { return false; }
+    bool did = false;
+    if (!boxes.isEmpty()) { did = splitBoxes(boxes, frame) || did; }
+    if (!sounds.isEmpty()) {
+        scene->splitSoundsAtFrame(sounds, frame);
+        did = true;
+    }
+    return did;
 }
 
 bool NleTimelineModel::requestFreeze(const QSet<int> &clipIds,
@@ -1085,6 +1104,15 @@ void NleTimelineModel::refreshFromDocument()
         }
         c.name = it.first->prp_getName();
         c.audio = it.second;
+        // playback rate for the clip badge: stretch > 1 = slower, the
+        // rate shown to the editor is its inverse
+        qreal stretch = 1.;
+        if (const auto sndObj = enve_cast<eSoundObjectBase*>(it.first)) {
+            stretch = sndObj->getStretch();
+        } else if (const auto animBox = enve_cast<AnimationBox*>(it.first)) {
+            stretch = animBox->getStretch();
+        }
+        c.speed = stretch > 0. ? 1. / stretch : 1.;
         c.trackId = mTracks.value(lane[i]).id;
         c.start = qMax(0, start);
         c.duration = qMax(1, length);

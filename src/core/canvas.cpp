@@ -40,6 +40,7 @@
 #include "Boxes/imagebox.h"
 #include "Animators/eboxorsound.h"
 #include "Sound/soundcomposition.h"
+#include "Sound/eindependentsound.h"
 #include "Boxes/textbox.h"
 #include "GUI/global.h"
 #include "appsupport.h"
@@ -1794,6 +1795,67 @@ void Canvas::splitBoxesAtFrame(const int frame)
             mSelectedBoxes.addObj(bBox);
             bBox->setSelected(true);
         }
+    }
+
+    mDocument.actionFinished();
+}
+
+// kdenlive razor parity: independent sounds split like any other clip.
+// They cannot go through BoxesClipboard, so each sound is cloned over
+// the generic Clipboard serialization channel using the exact stream
+// shape writeAllContained produces for a sound child, then the two
+// halves are trimmed with the same undoable transform path as the box
+// split (original keeps the right half, clone the left half)
+void Canvas::splitSoundsAtFrame(const QList<eIndependentSound*>& sounds,
+                                const int frame)
+{
+    QList<eIndependentSound*> toSplit;
+    for (const auto sound : sounds) {
+        if (!sound) { continue; }
+        const auto dRect = sound->getDurationRectangle();
+        if (!dRect) { continue; }
+        if (!dRect->getAbsFrameRange().inRange(frame)) { continue; }
+        toSplit.append(sound);
+    }
+    if (toSplit.isEmpty()) { return; }
+
+    pushUndoRedoName(tr("Split Clip"));
+
+    for (auto *sound : toSplit) {
+        auto parentGroup = sound->getParentGroup();
+        if (!parentGroup) { parentGroup = mCurrentContainer; }
+
+        const auto tempClipboard = enve::make_shared<Clipboard>(
+                    ClipboardType::misc);
+        tempClipboard->write([sound](eWriteStream& dst) {
+            const bool isBox = false;
+            dst << isBox;
+            sound->prp_writeProperty_impl(dst);
+            dst.writeCheckpoint();
+        });
+        qsptr<eIndependentSound> clone;
+        tempClipboard->read([&clone](eReadStream& src) {
+            bool isBox;
+            src >> isBox;
+            clone = enve::make_shared<eIndependentSound>();
+            clone->prp_readProperty_impl(src);
+            src.readCheckpoint("Error reading sound clone");
+        });
+        if (!clone) { continue; }
+        const QString name = clone->prp_getName();
+        parentGroup->addContained(clone);
+        clone->prp_setName(name);
+
+        const auto cRect = clone->getDurationRectangle();
+        if (!cRect) { continue; }
+
+        sound->startMinFramePosTransform();
+        sound->getDurationRectangle()->setMinAbsFrame(frame);
+        sound->finishMinFramePosTransform();
+
+        clone->startMaxFramePosTransform();
+        cRect->setMaxAbsFrame(frame);
+        clone->finishMaxFramePosTransform();
     }
 
     mDocument.actionFinished();

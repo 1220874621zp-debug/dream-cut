@@ -69,6 +69,7 @@ class ExternalLinkBox;
 struct ShaderEffectCreator;
 class VideoBox;
 class ImageBox;
+class eIndependentSound;
 class Document;
 class NullObject;
 
@@ -762,6 +763,12 @@ public:
     void cutAction();
     void splitAction();
     void splitBoxesAtFrame(const int frame);
+    // NLE razor: split independent sounds at the frame - sounds cannot
+    // travel through BoxesClipboard, so this clones them through the
+    // generic serialization channel and trims both halves (same
+    // left/right convention as the box split)
+    void splitSoundsAtFrame(const QList<eIndependentSound*>& sounds,
+                            const int frame);
     void duplicateAction();
     void selectAllAction();
     void clearSelectionAction();

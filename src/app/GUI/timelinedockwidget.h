@@ -208,6 +208,7 @@ private:
     QAction *mMagneticAct = nullptr;
     QAction *mNleDeleteAct = nullptr;
     QAction *mNleRippleAct = nullptr;
+    QAction *mNleInsertAct = nullptr;
     QAction *mNleZoomFitAct = nullptr;
 
     QAction *mRenderProgressAct;

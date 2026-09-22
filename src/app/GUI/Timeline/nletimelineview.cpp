@@ -24,6 +24,9 @@
 
 static const int SNAP_PX = 8;
 static const int TRIM_PX = 6;
+// kdenlive MouseArea drag.threshold equivalent: presses stay clicks
+// until the pointer crosses this many pixels
+static const int DRAG_THRESHOLD_PX = 5;
 
 NleTimelineView::NleTimelineView(NleTimelineModel * const model,
                                  QWidget * const parent)
@@ -440,6 +443,50 @@ QPixmap NleTimelineView::thumbnailTile(const int clipId, const int hueSeed,
     return pm;
 }
 
+// centered waveform strip: real peaks when the controller fed them
+// (clip id keyed), deterministic pseudo wave otherwise (audio-only
+// clips before their media lands)
+void NleTimelineView::drawWave(QPainter &p, const QRectF &body,
+                               const NleTimelineModel::Clip &c)
+{
+    if (body.width() <= 4 || body.height() <= 4) { return; }
+    const qreal fps = qMax(1.0, mModel->fps());
+    p.save();
+    p.setClipRect(body, Qt::IntersectClip);
+    p.setPen(QPen(cAudioWave, 1));
+    const double mid = body.center().y();
+    const auto waveIt = mWaves.constFind(c.clipId);
+    const bool hasWave = waveIt != mWaves.constEnd() && !waveIt.value().isEmpty();
+    const int n = int(body.width());
+    for (int i = 0; i <= n; ++i) {
+        double amp = 0.;
+        const int frame = xToFrame(int(body.left()) + i);
+        if (hasWave) {
+            // real peaks: column time -> second + bucket lookup
+            const double t = frame / fps;
+            const int sec = int(t);
+            const auto peaks = waveIt.value().constFind(sec);
+            if (peaks != waveIt.value().constEnd() && !peaks.value().isEmpty()) {
+                const qreal frac = t - sec;
+                const int bucket = qBound(
+                            0, int(frac * peaks.value().size()),
+                            peaks.value().size() - 1);
+                amp = peaks.value().at(bucket);
+            }
+        } else {
+            // deterministic pseudo waveform until the real one lands
+            quint32 hsh = quint32(c.clipId * 2654435761u) ^ quint32(i * 40503u);
+            hsh ^= hsh >> 13; hsh *= 0x5bd1e995u; hsh ^= hsh >> 15;
+            amp = (hsh % 1000) / 1000.0;
+            amp = 0.15 + 0.85 * amp * (0.55 + 0.45 * qSin(i * 0.05));
+        }
+        const double x = body.left() + i;
+        p.drawLine(QPointF(x, mid - amp * body.height() / 2),
+                   QPointF(x, mid + amp * body.height() / 2));
+    }
+    p.restore();
+}
+
 void NleTimelineView::drawClip(QPainter &p,
                                const NleTimelineModel::Clip &c,
                                const bool ghost)
@@ -468,13 +515,26 @@ void NleTimelineView::drawClip(QPainter &p,
     path.addRoundedRect(r, 4, 4);
 
     const int nameBarH = 16;
-    const qreal fps = qMax(1.0, mModel->fps());
+
+    // embedded-audio flag: a video-family clip with fed peaks shows
+    // the kdenlive A/V layout (thumbs top, waveform strip bottom)
+    const auto waveIt = mWaves.constFind(c.clipId);
+    const bool hasEmbeddedWave = !c.audio &&
+            waveIt != mWaves.constEnd() && !waveIt.value().isEmpty();
 
     if (!c.audio) {
         // body
         p.fillPath(path, QColor(0x2a, 0x2a, 0x2c));
         // thumbnail filmstrip below the name bar
-        QRectF body(r.left(), r.top() + nameBarH, r.width(), r.height() - nameBarH);
+        QRectF body(r.left(), r.top() + nameBarH, r.width(),
+                    r.height() - nameBarH);
+        QRectF waveBody;
+        if (hasEmbeddedWave && body.height() > 16) {
+            // kdenlive A/V clip: thumbs on top, embedded audio below
+            waveBody = body;
+            waveBody.setTop(body.top() + body.height() * 0.68);
+            body.setHeight(body.height() * 0.68);
+        }
         if (body.height() > 4) {
             p.save();
             p.setClipRect(body, Qt::IntersectClip);
@@ -505,6 +565,10 @@ void NleTimelineView::drawClip(QPainter &p,
             }
             p.restore();
         }
+        if (waveBody.height() > 4) {
+            p.fillRect(waveBody, QColor(0x16, 0x1d, 0x2c));
+            drawWave(p, waveBody.adjusted(2, 1, -2, -1), c);
+        }
         // name bar
         p.save();
         p.setClipRect(r, Qt::IntersectClip);
@@ -515,39 +579,7 @@ void NleTimelineView::drawClip(QPainter &p,
         // audio: dark blue body + waveform
         p.fillPath(path, cAudioBody);
         QRectF body = r.adjusted(2, nameBarH + 2, -2, -3);
-        if (body.width() > 4 && body.height() > 4) {
-            p.setPen(QPen(cAudioWave, 1));
-            const double mid = body.center().y();
-            const auto waveIt = mWaves.constFind(c.clipId);
-            const bool hasWave = waveIt != mWaves.constEnd() && !waveIt.value().isEmpty();
-            const int n = int(body.width());
-            for (int i = 0; i <= n; ++i) {
-                double amp = 0.;
-                const int frame = xToFrame(int(body.left()) + i);
-                if (hasWave) {
-                    // real peaks: column time -> second + bucket lookup
-                    const double t = frame / fps;
-                    const int sec = int(t);
-                    const auto peaks = waveIt.value().constFind(sec);
-                    if (peaks != waveIt.value().constEnd() && !peaks.value().isEmpty()) {
-                        const qreal frac = t - sec;
-                        const int bucket = qBound(
-                                    0, int(frac * peaks.value().size()),
-                                    peaks.value().size() - 1);
-                        amp = peaks.value().at(bucket);
-                    }
-                } else {
-                    // deterministic pseudo waveform until the real one lands
-                    quint32 hsh = quint32(c.clipId * 2654435761u) ^ quint32(i * 40503u);
-                    hsh ^= hsh >> 13; hsh *= 0x5bd1e995u; hsh ^= hsh >> 15;
-                    amp = (hsh % 1000) / 1000.0;
-                    amp = 0.15 + 0.85 * amp * (0.55 + 0.45 * qSin(i * 0.05));
-                }
-                const double x = body.left() + i;
-                p.drawLine(QPointF(x, mid - amp * body.height() / 2),
-                           QPointF(x, mid + amp * body.height() / 2));
-            }
-        }
+        drawWave(p, body, c);
         p.save();
         p.setClipRect(r, Qt::IntersectClip);
         p.fillRect(QRectF(r.left(), r.top(), r.width(), nameBarH), cAudioBody.lighter(135));
@@ -562,6 +594,17 @@ void NleTimelineView::drawClip(QPainter &p,
     p.drawText(r.adjusted(5, 0, -4, -(r.height() - nameBarH)),
                Qt::AlignVCenter | Qt::AlignLeft,
                p.fontMetrics().elidedText(c.name, Qt::ElideRight, int(r.width() - 8)));
+
+    // speed badge (kdenlive shows the rate on sped-up clips): right
+    // end of the name bar, e.g. "2x" / "0.5x"
+    if (qAbs(c.speed - 1.) > 0.001) {
+        const QString tag = QStringLiteral("%1x")
+                .arg(QString::number(c.speed, 'g', 3));
+        const QRectF tagRect(r.right() - 44, r.top() + 1, 42, nameBarH - 2);
+        p.fillRect(tagRect, QColor(0, 0, 0, 110));
+        p.setPen(QColor(0xff, 0xd1, 0x54));
+        p.drawText(tagRect, Qt::AlignCenter, tag);
+    }
 
     // border: selected = accent, hovered = lighter
     p.setBrush(Qt::NoBrush); // drawPath would otherwise fill with the leftover badge brush
@@ -849,12 +892,18 @@ void NleTimelineView::trackSelectAll(const QPoint &pos, const bool backward)
 void NleTimelineView::mousePressEvent(QMouseEvent *e)
 {
     setFocus();
+    // take the app keyboard routing with the click (kdenlive
+    // tracksArea.focus): timeline keys stop falling through to the
+    // canvas window from this click on
+    KFT_setFocus();
     mPressPos = e->pos();
 
     // heal a drag whose release was lost (dock hidden mid-drag,
     // alt-tab with button held): a fresh press always starts clean
-    if (mDrag != DragMode::None) {
+    if (mDrag != DragMode::None || mPending != DragMode::None) {
         mDrag = DragMode::None;
+        mPending = DragMode::None;
+        mPendingRoll = false;
         mDragClipId = -1;
         mDragTrackIdx = -1;
         mSnapTarget = -1;
@@ -942,12 +991,15 @@ void NleTimelineView::mousePressEvent(QMouseEvent *e)
                 mSpacerOrig.append({c.clipId, c.start});
             }
             if (!mSpacerOrig.isEmpty()) {
-                mModel->setGestureActive(true);
                 mModel->setSelection(ids);
                 mMovingIds = ids;
                 mTangled = mModel->collectTangleExemptions(ids);
                 mCandidates.clear();
-                mDrag = DragMode::SpacerMove;
+                // pending until the threshold: a plain click only
+                // selects the run (kdenlive spacer)
+                mPending = DragMode::SpacerMove;
+                mPendingRoll = false;
+                mDrag = DragMode::None;
                 mDragClipId = -1;
                 mDropIllegal = false;
                 mSpacerPressFrame = frame;
@@ -997,18 +1049,23 @@ void NleTimelineView::mousePressEvent(QMouseEvent *e)
         mTangled = mModel->collectTangleExemptions(mMovingIds);
 
         if (laneLocked) {
-            mDrag = DragMode::None; // selectable but not editable
+            mPending = DragMode::None; // selectable but not editable
             mDragClipId = -1;
         } else {
-            mModel->setGestureActive(true);
+            // pending until the drag threshold: a plain click only
+            // selects (kdenlive MouseArea drag.threshold), a micro
+            // jitter during the click must never rearrange a track
             const bool nearL = qAbs(e->pos().x() - r.left()) <= TRIM_PX;
             const bool nearR = qAbs(e->pos().x() - r.right()) <= TRIM_PX;
+            mDrag = DragMode::None;
+            mPendingRoll = (e->modifiers() & Qt::ControlModifier) &&
+                    !mModel->magnetic();
             if (nearL && !nearR) {
-                mDrag = DragMode::TrimLeft;
+                mPending = DragMode::TrimLeft;
             } else if (nearR) {
-                mDrag = DragMode::TrimRight;
+                mPending = DragMode::TrimRight;
             } else {
-                mDrag = DragMode::MoveClip;
+                mPending = DragMode::MoveClip;
                 mGrabOffsetFrames = xToFrame(e->pos().x()) - c->start;
             }
         }
@@ -1028,8 +1085,38 @@ void NleTimelineView::mousePressEvent(QMouseEvent *e)
     update();
 }
 
+// promote the parked press gesture into a live drag once the pointer
+// crossed the threshold; everything before that is click territory
+void NleTimelineView::activatePendingDrag()
+{
+    mDrag = mPending;
+    mPending = DragMode::None;
+    mRoll = mPendingRoll;
+    mPendingRoll = false;
+    if (mDrag != DragMode::None) { mModel->setGestureActive(true); }
+}
+
+// live drag status feedback (kdenlive shows these as a drag tooltip):
+// deduped so a frame-identical move does not re-light the status bar
+void NleTimelineView::feedback(const QString &msg)
+{
+    if (msg == mLastFeedback) { return; }
+    mLastFeedback = msg;
+    emit logMessage(msg);
+}
+
 void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
 {
+    // kdenlive drag.threshold: a pending gesture activates only after
+    // the pointer moved a few pixels - until then the press stays a
+    // click (select) and must not touch anything
+    if (mPending != DragMode::None && mDrag == DragMode::None) {
+        if ((e->pos() - mPressPos).manhattanLength() < DRAG_THRESHOLD_PX) {
+            return;
+        }
+        activatePendingDrag();
+    }
+
     if (mDrag == DragMode::None && !mRubber) {
         // hover + cursor feedback
         const int clipId = clipAt(e->pos());
@@ -1141,6 +1228,11 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
                 }
                 mCandidates = cand;
                 mDropIllegal = false;
+                feedback(QStringLiteral("偏移 %1%2 · 位置 %3").arg(
+                             delta < 0 ? QStringLiteral("-")
+                                       : QStringLiteral("+"),
+                             timecode(qAbs(delta)),
+                             timecode(newStart)));
             } else {
                 mDropIllegal = true;
             }
@@ -1152,10 +1244,12 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
         if (snapped) { newStart = sT; mSnapTarget = sT; }
 
         // overlap hard constraint: an illegal candidate keeps the last
-        // legal state and flags the dragged clip red. Ctrl = insert
-        // mode (kdenlive): overlapping drops are allowed live and the
-        // release pushes the run right instead
-        const bool insertMode = e->modifiers() & Qt::ControlModifier;
+        // legal state and flags the dragged clip red. Insert mode
+        // (kdenlive toolbar toggle, Ctrl flips it for one gesture):
+        // overlapping drops are allowed live and the release pushes
+        // the run right instead
+        const bool insertMode = mInsertMode ^
+                bool(e->modifiers() & Qt::ControlModifier);
         QHash<int, NleTimelineModel::Move> cand = mCandidates;
         cand.insert(mDragClipId, {mDragClipId, trId, newStart, c->duration});
         // group move: every other selected clip rides the same time
@@ -1171,6 +1265,13 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
         if (laneOk && (insertMode || dropLegal(mDragClipId, trId, newStart))) {
             mCandidates = cand;
             mDropIllegal = false;
+            feedback(QStringLiteral("%1 · 偏移 %2%3 · 位置 %4").arg(
+                         insertMode ? QStringLiteral("插入模式")
+                                    : QStringLiteral("覆盖模式"),
+                         delta < 0 ? QStringLiteral("-")
+                                   : QStringLiteral("+"),
+                         timecode(qAbs(delta)),
+                         timecode(newStart)));
         } else {
             mDropIllegal = true;
             mSnapTarget = -1;
@@ -1182,6 +1283,28 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
         if (!c) { break; }
         const int end = c->start + c->duration;
         const int minDur = mModel->minClipFrames();
+        // kdenlive roll (Ctrl at press, non-magnetic): dragging the
+        // shared cut drags BOTH sides - the previous clip's out point
+        // follows this clip's in point, total length stays constant
+        if (mRoll) {
+            const NleTimelineModel::Clip *prev = nullptr;
+            for (const auto &o : mModel->clips()) {
+                if (o.clipId == c->clipId || o.trackId != c->trackId) { continue; }
+                if (o.start + o.duration == c->start) { prev = &o; break; }
+            }
+            if (prev) {
+                int ns = qBound(prev->start + minDur, curFrame,
+                                end - minDur);
+                mCandidates.insert(mDragClipId,
+                                   {mDragClipId, c->trackId, ns, end - ns});
+                mCandidates.insert(prev->clipId,
+                                   {prev->clipId, prev->trackId,
+                                    prev->start, ns - prev->start});
+                feedback(QStringLiteral("卷动 · 左块出点 %1 · 右块入点 %2")
+                             .arg(timecode(ns), timecode(ns)));
+                break;
+            }
+        }
         int ns = qBound(0, curFrame, end - minDur);
         bool snapped = false;
         const int sT = snapFrame(ns, {mDragClipId}, &snapped);
@@ -1195,12 +1318,38 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
         ns = qMax(ns, lo);
         mCandidates.insert(mDragClipId,
                            {mDragClipId, c->trackId, ns, end - ns});
+        feedback(QStringLiteral("入点 %1 · 时长 %2")
+                     .arg(timecode(ns), timecode(end - ns)));
         break;
     }
     case DragMode::TrimRight: {
         const auto c = mModel->clip(mDragClipId);
         if (!c) { break; }
         const int minDur = mModel->minClipFrames();
+        // kdenlive roll (Ctrl at press, non-magnetic): dragging the
+        // shared cut drags BOTH sides - the next clip's in point
+        // follows this clip's out point, total length stays constant
+        if (mRoll) {
+            const NleTimelineModel::Clip *next = nullptr;
+            for (const auto &o : mModel->clips()) {
+                if (o.clipId == c->clipId || o.trackId != c->trackId) { continue; }
+                if (o.start == c->start + c->duration) { next = &o; break; }
+            }
+            if (next) {
+                const int nextEnd = next->start + next->duration;
+                int ne = qBound(c->start + minDur, curFrame,
+                                nextEnd - minDur);
+                mCandidates.insert(mDragClipId,
+                                   {mDragClipId, c->trackId,
+                                    c->start, ne - c->start});
+                mCandidates.insert(next->clipId,
+                                   {next->clipId, next->trackId,
+                                    ne, nextEnd - ne});
+                feedback(QStringLiteral("卷动 · 左块出点 %1 · 右块入点 %2")
+                             .arg(timecode(ne), timecode(ne)));
+                break;
+            }
+        }
         int ne = qMax(curFrame, c->start + minDur);
         bool snapped = false;
         const int sT = snapFrame(ne, {mDragClipId}, &snapped);
@@ -1233,6 +1382,8 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
                 }
             }
         }
+        feedback(QStringLiteral("出点 %1 · 时长 %2")
+                     .arg(timecode(ne), timecode(ne - c->start)));
         break;
     }
     default: break;
@@ -1261,8 +1412,9 @@ void NleTimelineView::finishGestureCommit(const bool insertMode)
     for (auto it = mCandidates.constBegin(); it != mCandidates.constEnd(); ++it) {
         moves.append(it.value());
     }
-    // the Ctrl insert-mode push-aside belongs to overwrite dragging;
-    // magnetic mode already rearranged the whole track live
+    // the insert-mode push-aside belongs to overwrite dragging; the
+    // toolbar toggle and the Ctrl gesture-flip arrive here as one
+    // flag; magnetic mode already rearranged the whole track live
     if (insertMode && !mModel->magnetic() &&
             mDrag == DragMode::MoveClip && mDragClipId >= 0) {
         const auto pm = mCandidates.value(mDragClipId);
@@ -1282,9 +1434,11 @@ void NleTimelineView::finishGestureCommit(const bool insertMode)
     mSpacerOrig.clear();
     const DragMode drag = mDrag;
     mDrag = DragMode::None;
+    mRoll = false;
     mDragClipId = -1;
     mSnapTarget = -1;
     mDropIllegal = false;
+    mLastFeedback.clear();
     // releasing the gesture flushes queued rebuilds first (the doc is
     // still pristine - the gesture never wrote anything), then the
     // commit writes everything in one undoable pass. A magnetic move
@@ -1301,6 +1455,20 @@ void NleTimelineView::finishGestureCommit(const bool insertMode)
 void NleTimelineView::mouseReleaseEvent(QMouseEvent *e)
 {
     if (e->button() != Qt::LeftButton) { return; }
+
+    // a press that never crossed the drag threshold: plain click, the
+    // selection applied at press IS the whole edit (kdenlive
+    // click-vs-drag semantics)
+    if (mPending != DragMode::None) {
+        mPending = DragMode::None;
+        mPendingRoll = false;
+        mSpacerOrig.clear();
+        mMovingIds.clear();
+        mTangled.clear();
+        mCandidates.clear();
+        update();
+        return;
+    }
 
     if (mRubber) {
         mRubber = false;
@@ -1335,7 +1503,8 @@ void NleTimelineView::mouseReleaseEvent(QMouseEvent *e)
     }
 
     if (mDrag != DragMode::None) {
-        finishGestureCommit(e->modifiers() & Qt::ControlModifier);
+        finishGestureCommit(mInsertMode ^
+                            bool(e->modifiers() & Qt::ControlModifier));
         const auto sel = mModel->selection();
         if (sel.size() == 1) {
             const auto c = mModel->clip(*sel.constBegin());
@@ -1386,46 +1555,79 @@ void NleTimelineView::wheelEvent(QWheelEvent *e)
     Q_UNUSED(fps)
 }
 
-void NleTimelineView::keyPressEvent(QKeyEvent *e)
+// ---------------------------------------------------------------- keys
+
+void NleTimelineView::KFT_setFocusToWidget()
 {
-    if ((e->key() == Qt::Key_Delete || e->key() == Qt::Key_Backspace)
-            && !mModel->selection().isEmpty()) {
-        requestDelete(e->modifiers() & Qt::ShiftModifier);
-        return;
+    setFocus();
+    update();
+}
+
+// timeline keyboard主权 (kdenlive parity): every key handled here is
+// consumed for the WHOLE app - returning true stops the KFT chain, so
+// the canvas window never sees Delete again (it used to delete the
+// stale canvas selection and steal the Qt focus back)
+bool NleTimelineView::KFT_keyPressEvent(QKeyEvent *e)
+{
+    const int key = e->key();
+    const auto mods = e->modifiers();
+    if (key == Qt::Key_Delete || key == Qt::Key_Backspace) {
+        if (mModel->selection().isEmpty()) {
+            emit logMessage(tr("无选中的块"));
+        } else {
+            requestDelete(mods & Qt::ShiftModifier);
+        }
+        return true;
     }
-    if (e->key() == Qt::Key_S || e->key() == Qt::Key_Slash) {
+    if ((key == Qt::Key_S || key == Qt::Key_Slash) &&
+            mods == Qt::NoModifier) {
         // no-selection press still splits: the model falls back to
         // every unlocked-lane clip under the playhead
         splitAtPlayhead();
-        return;
+        return true;
     }
-    if (e->key() == Qt::Key_A && e->modifiers() & Qt::ControlModifier) {
+    if (key == Qt::Key_A && mods == Qt::ControlModifier) {
         mModel->selectAll();
-        return;
+        return true;
+    }
+    if (key == Qt::Key_Escape) {
+        mModel->clearSelection();
+        return true;
+    }
+    if (key == Qt::Key_Home && mods == Qt::NoModifier) {
+        setPlayheadFrame(0);
+        emit playheadDragged(0);
+        return true;
+    }
+    if (key == Qt::Key_End && mods == Qt::NoModifier) {
+        const int end = qMax(0, contentFrames() - 1);
+        setPlayheadFrame(end);
+        emit playheadDragged(end);
+        return true;
     }
     // PR-style tool keys: V select, B razor, A track-select forward,
     // Shift+A track-select backward, D spacer
-    if (e->key() == Qt::Key_V && e->modifiers() == Qt::NoModifier) {
+    if (key == Qt::Key_V && mods == Qt::NoModifier) {
         setTool(EditTool::Select);
-        return;
+        return true;
     }
-    if (e->key() == Qt::Key_B && e->modifiers() == Qt::NoModifier) {
+    if (key == Qt::Key_B && mods == Qt::NoModifier) {
         setTool(EditTool::Razor);
-        return;
+        return true;
     }
-    if (e->key() == Qt::Key_A && e->modifiers() == Qt::NoModifier) {
+    if (key == Qt::Key_A && mods == Qt::NoModifier) {
         setTool(EditTool::TrackForward);
-        return;
+        return true;
     }
-    if (e->key() == Qt::Key_A && e->modifiers() & Qt::ShiftModifier) {
+    if (key == Qt::Key_A && mods & Qt::ShiftModifier) {
         setTool(EditTool::TrackBackward);
-        return;
+        return true;
     }
-    if (e->key() == Qt::Key_D && e->modifiers() == Qt::NoModifier) {
+    if (key == Qt::Key_D && mods == Qt::NoModifier) {
         setTool(EditTool::Spacer);
-        return;
+        return true;
     }
-    QWidget::keyPressEvent(e);
+    return false;
 }
 
 void NleTimelineView::leaveEvent(QEvent *)
@@ -1440,6 +1642,9 @@ void NleTimelineView::hideEvent(QHideEvent *)
     // dock toggled off: drop any drag state so reopening starts clean
     // (also unlocks queued rebuilds)
     mDrag = DragMode::None;
+    mPending = DragMode::None;
+    mPendingRoll = false;
+    mRoll = false;
     mDragClipId = -1;
     mDragTrackIdx = -1;
     mSnapTarget = -1;

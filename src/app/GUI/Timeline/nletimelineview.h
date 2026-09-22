@@ -10,6 +10,7 @@
 #include <QPair>
 
 #include "nletimelinemodel.h"
+#include "misc/keyfocustarget.h"
 
 class QScrollBar;
 
@@ -20,7 +21,12 @@ class QScrollBar;
 // model (which therefore stays the press-time snapshot) and painted
 // as an overlay; the release turns them into one model commit.
 // Everything works in absolute frames on the scene frame grid.
-class NleTimelineView : public QWidget
+//
+// The view is also a KeyFocusTarget (friction's keyboard routing):
+// clicking it takes the KFT focus, so timeline keys (Delete, tools,
+// split ...) never fall through to the canvas window - the kdenlive
+// equivalent of tracksArea owning the keyboard while the user edits.
+class NleTimelineView : public QWidget, public KeyFocusTarget
 {
     Q_OBJECT
 public:
@@ -40,6 +46,12 @@ public:
 
     // toolbar zoom slider (0-100, right = zoom in), playhead-anchored
     void setZoomLevel(const int level);
+
+    // kdenlive insert/overwrite toggle (toolbar): when on, drops push
+    // the touched run right instead of requiring free space; Ctrl
+    // during a drag flips it for that gesture only
+    void setInsertMode(const bool on) { mInsertMode = on; }
+    bool insertMode() const { return mInsertMode; }
 
     // ruler markers (abs frames + titles) and the scene in/out band
     // (frames; negative = disabled), fed by the controller
@@ -90,10 +102,18 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
     void contextMenuEvent(QContextMenuEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
-    void keyPressEvent(QKeyEvent *event) override;
     void leaveEvent(QEvent *event) override;
     void hideEvent(QHideEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
+
+    // ---- KeyFocusTarget (friction keyboard routing) ----
+    // timeline keys are consumed here once the view holds the KFT
+    // focus (any click takes it): Delete NEVER falls through to the
+    // canvas window, which would otherwise delete the canvas
+    // selection and steal the focus back
+    bool KFT_keyPressEvent(QKeyEvent *e) override;
+    void KFT_setFocusToWidget() override;
+    void KFT_clearFocus() override {}
 
 private:
     // ---- layout / mapping (frames <-> pixels) ----
@@ -115,6 +135,10 @@ private:
     void drawClip(QPainter &p, const NleTimelineModel::Clip &c,
                   bool ghost = false);
     void drawMove(QPainter &p, const NleTimelineModel::Move &m);
+    // centered waveform strip (real peaks when the controller fed
+    // them, deterministic pseudo wave otherwise)
+    void drawWave(QPainter &p, const QRectF &body,
+                  const NleTimelineModel::Clip &c);
     void drawPlayhead(QPainter &p);
     QPixmap thumbnailTile(const int clipId, const int hueSeed, const int h);
     QString timecode(const int frame) const;
@@ -179,7 +203,15 @@ private:
 
     // ---- gesture state (candidates only - the model stays pristine
     // and doubles as the press-time snapshot) ----
+    // a press first parks its intended gesture in mPending; only
+    // moving past DRAG_THRESHOLD_PX promotes it to a live mDrag
+    // (kdenlive MouseArea drag.threshold semantics) - a plain click
+    // selects and nothing else, no micro-jitter rearrangement
     DragMode mDrag = DragMode::None;
+    DragMode mPending = DragMode::None;
+    bool mPendingRoll = false;  // Ctrl at press: trim as a kdenlive roll
+    bool mRoll = false;         // active gesture trims as a roll
+    void activatePendingDrag();
     int mDragClipId = -1;      // primary clip of the gesture
     int mGrabOffsetFrames = 0; // move: cursor frame - clip start
     QHash<int, NleTimelineModel::Move> mCandidates;
@@ -198,6 +230,9 @@ private:
     QPoint mHoverPos;          // live cursor pos for the razor guide
     bool mRubber = false;      // rubber band selection in progress
     QPoint mRubberStart;
+    bool mInsertMode = false;  // kdenlive insert/overwrite default
+    QString mLastFeedback;     // dedupe live drag TC status messages
+    void feedback(const QString &msg);
 
     QScrollBar *mScrollBar = nullptr;
     // media caches (clip ids are stable across rebuilds, so these

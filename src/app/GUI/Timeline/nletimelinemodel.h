@@ -49,6 +49,7 @@ public:
         int duration = 0;       // frames, >= 1
         QString name;
         bool audio = false;
+        qreal speed = 1.;       // playback rate (1 = original)
         QPointer<eBoxOrSound> layer;
     };
     // one clip placement to write into the document (commitMoves) or
