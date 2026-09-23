@@ -114,8 +114,12 @@ public:
                                   const int dropStart, const int dropDur,
                                   const QSet<int> &moving) const;
     // magnetic (CapCut): close every genuine gap, keep overlaps;
-    // returns only the clips that actually move
-    QVector<Move> compactGapsPlan() const;
+    // returns only the clips that actually move. fromZero=false only
+    // closes INTERNAL gaps (a deliberately placed leading gap
+    // survives - 剪映: 拖动主轨视频停在哪就是哪); fromZero=true
+    // additionally compacts the chain head toward frame 0, used by
+    // the deletion path so the chain closes over the removed span
+    QVector<Move> compactGapsPlan(const bool fromZero = false) const;
     // kdenlive-style magnetic drag rearrange (方案A): the dragged clip
     // lands at the drop frame 1:1; clips fully left of the drop
     // compact toward 0; every other same-track clip chains tightly

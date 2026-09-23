@@ -721,6 +721,7 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
 
     setupPropertyShortcuts();
 
+
 }
 
 void TimelineDockWidget::setupNleActions()

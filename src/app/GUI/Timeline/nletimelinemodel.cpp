@@ -206,12 +206,16 @@ QVector<NleTimelineModel::Move> NleTimelineModel::insertShiftPlan(
     return moves;
 }
 
-QVector<NleTimelineModel::Move> NleTimelineModel::compactGapsPlan() const
+QVector<NleTimelineModel::Move> NleTimelineModel::compactGapsPlan(
+        const bool fromZero) const
 {
     // MAIN TRACK ONLY (CapCut): per start order a clip that begins
     // after the previous one ends slides left onto that out point;
     // overlays keep their positions. Overlaps (merged layouts) are
-    // kept as-is, so only genuine gaps close
+    // kept as-is, so only genuine gaps close. The chain head is NOT
+    // pinned to frame 0 (剪映对齐: a deliberately dragged main clip
+    // stays where dropped); the deletion path passes fromZero=true
+    // so the chain closes up over the removed span
     const int mainId = mainTrackId();
     QVector<Move> moves;
     for (const auto &t : mTracks) {
@@ -225,9 +229,10 @@ QVector<NleTimelineModel::Move> NleTimelineModel::compactGapsPlan() const
         // 恰好路过的刷新才闭合（用户感知=磁吸刷新迟钝/不刷新）
         if (order.isEmpty()) { continue; }
         std::sort(order.begin(), order.end());
-        int cursor = 0; // CapCut rule: the chain head always sits at
-                        // frame 1 (time 00) - the fallback compaction
-                        // pulls a strayed head back too
+        // fromZero=false: the cursor starts at the FIRST clip's own
+        // start, so only gaps BETWEEN clips close; fromZero=true:
+        // everything compacts toward frame 0 (deletion closure)
+        int cursor = fromZero ? 0 : order.first().first;
         for (const auto &p : order) {
             const auto c = clip(p.second);
             if (!c) { continue; }
@@ -431,8 +436,10 @@ bool NleTimelineModel::commitMoves(const QVector<Move> &moves,
             }
             if (!deltas.isEmpty()) {
                 QVector<Move> rides;
+                // 剪映联动含音效：音频块与其他覆盖块一样跟随其头部
+                // 所锚的主轨块同位移
                 for (const auto &o : mClips) {
-                    if (o.audio || o.trackId == mainId) { continue; }
+                    if (o.trackId == mainId) { continue; }
                     if (movingIds.contains(o.clipId)) { continue; }
                     if (!o.layer) { continue; }
                     const Clip *anchor = nullptr;
@@ -758,7 +765,12 @@ bool NleTimelineModel::requestDelete(const QSet<int> &clipIds,
             const auto c = clip(id);
             if (c) { affectedTracks.insert(c->trackId); }
         }
+        const int mainIdR = mainTrackId();
         for (const int trackId : affectedTracks) {
+            // magnetic main track skips the classic slide: the
+            // from-zero closure below subsumes it (both would
+            // double-slide the chain)
+            if (mMagnetic && trackId == mainIdR) { continue; }
             for (const auto &c : mClips) {
                 if (victimIds.contains(c.clipId)) { continue; }
                 if (c.trackId != trackId || !c.layer) { continue; }
@@ -772,24 +784,105 @@ bool NleTimelineModel::requestDelete(const QSet<int> &clipIds,
                 if (removedBefore > 0) { shiftLayer(c.layer.data(), -removedBefore); }
             }
         }
-        // CapCut overlay following: clips on NON-main video tracks
-        // slide by the MAIN-track victims removed before them (their
-        // anchors are gone; everything after closes up); off with the
-        // 轨道联动 toggle
-        const int mainId = mFollowLinked ? mainTrackId() : -1;
-        if (mainId >= 0) {
-            for (const auto &o : mClips) {
-                if (o.audio || o.trackId == mainId) { continue; }
-                if (victimIds.contains(o.clipId) || !o.layer) { continue; }
-                int removedBefore = 0;
-                for (const int vid : victimIds) {
-                    const auto v = clip(vid);
-                    if (v && !v->audio && v->trackId == mainId &&
-                            v->start < o.start) {
-                        removedBefore += v->duration;
+        // 非磁吸波纹的覆盖块随动（联动）：头部锚在被删主轨块上的
+        // 块=锚已毁不随（落进相邻幸存块后自然重锚）；只统计完整
+        // 位于头部之前的受害块，位移量恒 ≤ 头部帧号，配合钳制
+        // 永不越到帧 0 之前（旧 victim 累计版会把锚中覆盖块推出
+        // 负帧位——min 负值后表内 qMax(0) 掩盖成错位假象）
+        if (!mMagnetic && mFollowLinked) {
+            const int mainId = mainTrackId();
+            if (mainId >= 0) {
+                for (const auto &o : mClips) {
+                    if (o.trackId == mainId ||
+                            victimIds.contains(o.clipId) || !o.layer) {
+                        continue;
+                    }
+                    int removedBefore = 0;
+                    bool anchorLost = false;
+                    for (const int vid : victimIds) {
+                        const auto v = clip(vid);
+                        if (!v || v->trackId != mainId) { continue; }
+                        if (v->start <= o.start &&
+                                o.start < v->start + v->duration) {
+                            anchorLost = true;
+                            break;
+                        }
+                        if (v->start + v->duration <= o.start) {
+                            removedBefore += v->duration;
+                        }
+                    }
+                    if (anchorLost) { continue; }
+                    const int ns = qMax(0, o.start - removedBefore);
+                    if (ns != o.start) {
+                        shiftLayer(o.layer.data(), ns - o.start);
                     }
                 }
-                if (removedBefore > 0) { shiftLayer(o.layer.data(), -removedBefore); }
+            }
+        }
+        // 磁吸下的覆盖随动由下方从零闭链的锚定 rides 一次完成
+        // （victim 累计版与闭链双移已废）
+    }
+
+    // CapCut magnetic deletion: close the main chain over the removed
+    // span FROM ZERO - deletion-driven leading gaps close (磁吸删除
+    // 后接缝归位), while a deliberately dragged leading gap survives
+    // (the fallback compactor only closes internal gaps). Overlaid
+    // clips (audio included) ride their anchors by the same deltas
+    // when 轨道联动 is on. Planned against the survivors of the
+    // PRE-removal table, applied inside the writeback below
+    QVector<Move> closure;
+    QList<QPair<int, int>> closureRides; // clipId, newStart
+    if (mMagnetic) {
+        const int mainId = mainTrackId();
+        if (mainId >= 0) {
+            QList<QPair<int, int>> order; // start, clipId
+            for (const auto &c : mClips) {
+                if (c.trackId != mainId ||
+                        victimIds.contains(c.clipId)) { continue; }
+                order.append({c.start, c.clipId});
+            }
+            if (!order.isEmpty()) {
+                std::sort(order.begin(), order.end());
+                int cursor = 0;
+                for (const auto &p : order) {
+                    const auto c = clip(p.second);
+                    if (!c) { continue; }
+                    int newStart = c->start;
+                    if (c->start > cursor) { newStart = cursor; }
+                    if (newStart != c->start) {
+                        closure.append({c->clipId, c->trackId,
+                                        newStart, c->duration});
+                    }
+                    cursor = qMax(cursor, newStart + c->duration);
+                }
+                if (mFollowLinked && !closure.isEmpty()) {
+                    QHash<int, int> deltas;
+                    for (const auto &m : closure) {
+                        const auto oc = clip(m.clipId);
+                        if (oc) { deltas.insert(m.clipId,
+                                                m.start - oc->start); }
+                    }
+                    for (const auto &o : mClips) {
+                        if (o.trackId == mainId ||
+                                victimIds.contains(o.clipId) ||
+                                !o.layer) { continue; }
+                        const Clip *anchor = nullptr;
+                        for (const auto &p : order) {
+                            const auto mc = clip(p.second);
+                            if (mc && mc->start <= o.start &&
+                                    o.start < mc->start + mc->duration) {
+                                anchor = mc;
+                                break;
+                            }
+                        }
+                        if (!anchor) { continue; }
+                        const int delta = deltas.value(anchor->clipId, 0);
+                        if (delta != 0) {
+                            closureRides.append({o.clipId,
+                                                 qMax(0, o.start + delta)});
+                        }
+                    }
+                }
             }
         }
     }
@@ -804,6 +897,23 @@ bool NleTimelineModel::requestDelete(const QSet<int> &clipIds,
         if (!victimIds.contains(c.clipId)) { members[c.trackId]++; }
     }
     purgeEmptyTracks(members);
+    if (!closure.isEmpty() || !closureRides.isEmpty()) {
+        // UI-state tidy like the fallback compactor (not part of the
+        // undo entry - the removal itself stays undoable)
+        const auto undoBlock = scene->blockUndoRedo();
+        for (const auto &m : closure) {
+            const auto oc = clip(m.clipId);
+            if (oc && oc->layer) {
+                shiftLayer(oc->layer.data(), m.start - oc->start);
+            }
+        }
+        for (const auto &r : closureRides) {
+            const auto oc = clip(r.first);
+            if (oc && oc->layer) {
+                shiftLayer(oc->layer.data(), r.second - oc->start);
+            }
+        }
+    }
     mInWriteback = false;
     finishAction();
     return true;
@@ -886,6 +996,34 @@ bool NleTimelineModel::requestInsertMedia(const QString &path,
             const auto oc = clip(m.clipId);
             if (oc && oc->layer) {
                 shiftLayer(oc->layer.data(), m.start - oc->start);
+            }
+        }
+        // 联动随动：插在主轨的让位把锚定其上的覆盖块（音频含）
+        // 一并带右——否则监视器拖入主轨后覆盖块与主轨内容静默
+        // 错位（此处绕过 commitMoves，兜底压实只闭隙不修错位）
+        if (mFollowLinked && trackId == mainTrackId() && !pushes.isEmpty()) {
+            QHash<int, int> deltas;
+            for (const auto &m : pushes) {
+                const auto oc = clip(m.clipId);
+                if (oc) { deltas.insert(m.clipId, m.start - oc->start); }
+            }
+            for (const auto &o : mClips) {
+                if (o.trackId == trackId || !o.layer ||
+                        deltas.contains(o.clipId)) { continue; }
+                const Clip *anchor = nullptr;
+                for (const auto &mc : mClips) {
+                    if (mc.trackId != trackId) { continue; }
+                    if (mc.start <= o.start &&
+                            o.start < mc.start + mc.duration) {
+                        anchor = &mc;
+                        break;
+                    }
+                }
+                if (!anchor) { continue; }
+                const int delta = deltas.value(anchor->clipId, 0);
+                if (delta == 0) { continue; }
+                const int ns = qMax(0, o.start + delta);
+                if (ns != o.start) { shiftLayer(o.layer.data(), ns - o.start); }
             }
         }
         const auto box = enve::make_shared<VideoBox>();
@@ -1398,11 +1536,12 @@ QVector<NleTimelineModel::Move> NleTimelineModel::magneticRearrangePlan(
         const QSet<int> &movingIds) const
 {
     // kdenlive 方案A: dragged clip = drop frame 1:1; left package
-    // (end <= drop) compacts toward 0 - the user's CapCut rule: the
-    // chain head ALWAYS sits at frame 1 (time 00); everything else
-    // chains tightly after the dragged clip's new out point. A clip
-    // straddling the drop point belongs to the right package and
-    // moves as a whole.
+    // (end <= drop) compacts to close its INTERNAL gaps only - the
+    // leading gap survives (剪映对齐: a deliberately dragged main
+    // clip stays where dropped, the chain head is not yanked back to
+    // frame 0); everything else chains tightly after the dragged
+    // clip's new out point. A clip straddling the drop point belongs
+    // to the right package and moves as a whole.
     QVector<Move> moves;
     const auto dragged = clip(draggedId);
     if (!dragged) { return moves; }
@@ -1422,14 +1561,15 @@ QVector<NleTimelineModel::Move> NleTimelineModel::magneticRearrangePlan(
     std::sort(left.begin(), left.end(), byStart);
     std::sort(right.begin(), right.end(), byStart);
 
-    int cursor = 0;
+    // left pack closes its own internal gaps; the cursor starts at
+    // the pack's first clip so the leading gap stays where the user
+    // put it
+    int cursor = left.isEmpty() ? drop : left.first()->start;
     for (const Clip *c : left) {
         if (cursor != c->start) {
             moves.append({c->clipId, trackId, cursor, c->duration});
         }
-        cursor = cursor + c->duration; // kdenlive compaction toward 0:
-                                       // the head clip always lands at
-                                       // frame 1 (time 00)
+        cursor = cursor + c->duration;
     }
     moves.append({draggedId, trackId, drop, dur});
     cursor = drop + dur;
@@ -1787,10 +1927,22 @@ void NleTimelineModel::refreshFromDocument()
             if (typedAdoptLane.contains(i)) {
                 laneIdx = typedAdoptLane.value(i);
             } else {
-                for (int t = 0; t < trackCount; ++t) {
-                    if (mTracks.at(t).audio == items[i].second) {
-                        laneIdx = t;
-                        break;
+                // CapCut: imported media lands on the MAIN track -
+                // typed lanes sit ABOVE main, so "first matching
+                // lane" would capture every later import onto a
+                // 文字/图形矮轨; main first, other lanes as fallback
+                if (!items[i].second) {
+                    const int mid = mainTrackId();
+                    for (int t = 0; t < trackCount; ++t) {
+                        if (mTracks.at(t).id == mid) { laneIdx = t; break; }
+                    }
+                }
+                if (laneIdx < 0) {
+                    for (int t = 0; t < trackCount; ++t) {
+                        if (mTracks.at(t).audio == items[i].second) {
+                            laneIdx = t;
+                            break;
+                        }
                     }
                 }
             }
@@ -2066,8 +2218,9 @@ void NleTimelineModel::refreshFromDocument()
                 struct Ride { int clipId; int newStart; };
                 QList<Ride> rides;
                 if (mFollowLinked) {
+                    // 剪映联动含音效：音频块同样跟随锚定的主轨块
                     for (const auto &o : mClips) {
-                        if (o.audio || o.trackId == mainId || !o.layer) { continue; }
+                        if (o.trackId == mainId || !o.layer) { continue; }
                         const Clip *anchor = nullptr;
                         for (const auto &mc : mClips) {
                             if (mc.audio || mc.trackId != mainId) { continue; }

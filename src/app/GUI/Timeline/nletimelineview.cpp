@@ -1798,8 +1798,9 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
                 trId == mModel->mainTrackId()) {
             // kdenlive 方案A: the clip follows the mouse 1:1 on the
             // frame grid - no edge snapping, no refusals - and the
-            // whole track rearranges around the drop live (left pack
-            // compacts to 0, the rest chains tightly after)
+            // whole track rearranges around the drop live (the left
+            // pack closes its internal gaps, the rest chains tightly
+            // after; a deliberately placed leading gap survives)
             if (laneOk) {
                 QHash<int, NleTimelineModel::Move> cand;
                 for (const auto &m : mModel->magneticRearrangePlan(
@@ -1814,6 +1815,37 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
                     if (!oc) { continue; }
                     cand.insert(id, {id, oc->trackId,
                                      qMax(0, oc->start + delta), oc->duration});
+                }
+                // 剪映联动实时跟手：联动开时，其他轨道（音频含）
+                // 头部锚在主轨块上的块随该块同位移，拖哪跟哪；联动
+                // 关只有主轨块动。落定提交走同一份候选（commitMoves
+                // 的 movingIds 去重防二次随动）
+                if (mModel->followLinked()) {
+                    const auto clips = mModel->clips();
+                    for (const auto &o : clips) {
+                        if (o.trackId == trId ||
+                                mMovingIds.contains(o.clipId) ||
+                                cand.contains(o.clipId) || !o.layer) {
+                            continue;
+                        }
+                        const NleTimelineModel::Clip *anchor = nullptr;
+                        for (const auto &mc : clips) {
+                            if (mc.trackId != trId) { continue; }
+                            if (mc.start <= o.start &&
+                                    o.start < mc.start + mc.duration) {
+                                anchor = &mc;
+                                break;
+                            }
+                        }
+                        if (!anchor) { continue; }
+                        const auto ait = cand.constFind(anchor->clipId);
+                        if (ait == cand.constEnd()) { continue; }
+                        const int ad = ait->start - anchor->start;
+                        if (ad == 0) { continue; }
+                        cand.insert(o.clipId,
+                                    {o.clipId, o.trackId,
+                                     qMax(0, o.start + ad), o.duration});
+                    }
                 }
                 mCandidates = cand;
                 mDropIllegal = false;
@@ -1852,6 +1884,40 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
                              qMax(0, oc->start + delta), oc->duration});
         }
         if (laneOk && (insertMode || dropLegal(mDragClipId, trId, newStart))) {
+            // 剪映联动实时跟手（非磁吸主轨拖拽同款）：被拖块在
+            // 主轨时，其他轨道（音频含）头部锚在其上的块随同位移
+            // 预览；落定提交经 movingIds 去重不二次随动。锚在旧
+            // 布局上解析，跨轨拖离/幽灵轨落点同样跟手（提交侧
+            // commitMoves 对旧轨属主轨的块一视同仁）
+            if (c->trackId == mModel->mainTrackId() &&
+                    mModel->followLinked()) {
+                const int mainId = mModel->mainTrackId();
+                const auto clips = mModel->clips();
+                for (const auto &o : clips) {
+                    if (o.trackId == mainId ||
+                            mMovingIds.contains(o.clipId) ||
+                            cand.contains(o.clipId) || !o.layer) {
+                        continue;
+                    }
+                    const NleTimelineModel::Clip *anchor = nullptr;
+                    for (const auto &mc : clips) {
+                        if (mc.trackId != mainId) { continue; }
+                        if (mc.start <= o.start &&
+                                o.start < mc.start + mc.duration) {
+                            anchor = &mc;
+                            break;
+                        }
+                    }
+                    if (!anchor) { continue; }
+                    const auto ait = cand.constFind(anchor->clipId);
+                    if (ait == cand.constEnd()) { continue; }
+                    const int ad = ait->start - anchor->start;
+                    if (ad == 0) { continue; }
+                    cand.insert(o.clipId,
+                                {o.clipId, o.trackId,
+                                 qMax(0, o.start + ad), o.duration});
+                }
+            }
             mCandidates = cand;
             mDropIllegal = false;
             feedback(QStringLiteral("%1 · 偏移 %2%3 · 位置 %4").arg(
