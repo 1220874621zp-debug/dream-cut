@@ -277,9 +277,10 @@ private:
     QHash<eBoxOrSound*, int> mLayerToClipId;
     int mNextClipId = 1;
     QSet<int> mSelected;
-    // 独奏压制台账：solo 生效期间被藏掉的层（恢复即 visible=true，
-    // 剪映语义：取消独奏该回来的都会回来）；仅内存态不进工程文件
-    QSet<eBoxOrSound*> mSoloSaved;
+    // 独奏压制台账：solo 生效期间被藏掉的层 -> 压制前的真实可见性
+    // （恢复时写回保存值而非恒 true，否则用户静音/停用会被取消独奏
+    // 无声抹掉）；仅内存态不进工程文件
+    QHash<eBoxOrSound*, bool> mSoloSaved;
     QSet<eBoxOrSound*> mSoloSuppressed;
     // 停用片段台账（会话内存）：停用前的可见性，恢复时回写；
     // solo 压制中的层取消停用不点亮（压制机制优先）。

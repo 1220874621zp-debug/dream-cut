@@ -220,7 +220,10 @@ QVector<NleTimelineModel::Move> NleTimelineModel::compactGapsPlan() const
         for (const auto &c : mClips) {
             if (c.trackId == t.id) { order.append({c.start, c.clipId}); }
         }
-        if (order.size() < 2) { continue; }
+        // 单块轨也要走：块数 >= 2 的早退会让"只剩一块"的主轨
+        // 永远不校验头块归帧 1——删除链头后的缺口拖到下一次
+        // 恰好路过的刷新才闭合（用户感知=磁吸刷新迟钝/不刷新）
+        if (order.isEmpty()) { continue; }
         std::sort(order.begin(), order.end());
         int cursor = 0; // CapCut rule: the chain head always sits at
                         // frame 1 (time 00) - the fallback compaction
@@ -940,6 +943,9 @@ void NleTimelineModel::requestSetDisabled(const QSet<int> &clipIds,
     if (!scene) { return; }
     const auto undoBlock = scene->blockUndoRedo();
     int changed = 0;
+    // writeback 守卫：setVisible 会发 visibilityChanged → refresh，
+    // 中途重建表会让下面的行指针悬垂（铁律 1）
+    mInWriteback = true;
     for (const int id : clipIds) {
         const auto c = clip(id);
         if (!c || !c->layer) { continue; }
@@ -947,7 +953,12 @@ void NleTimelineModel::requestSetDisabled(const QSet<int> &clipIds,
         if (disabled) {
             if (mDisabledIds.contains(id)) { continue; }
             mDisabledIds.insert(id);
-            mDisabledSaved.insert(id, layer->isVisible());
+            // 压制中的层记录压制前可见性（solo 结束后启用应回到它，
+            // 而不是压制期的 false）；否则记录当前可见性
+            mDisabledSaved.insert(id,
+                    mSoloSaved.contains(layer)
+                        ? mSoloSaved.value(layer)
+                        : layer->isVisible());
             layer->setVisible(false);
             ++changed;
         } else {
@@ -961,6 +972,7 @@ void NleTimelineModel::requestSetDisabled(const QSet<int> &clipIds,
             ++changed;
         }
     }
+    mInWriteback = false;
     if (changed == 0) { return; }
     const QString what = disabled ? QStringLiteral("停用片段")
                                   : QStringLiteral("启用片段");
@@ -1434,6 +1446,13 @@ void NleTimelineModel::connectChildren(Canvas * const scene)
         // menus, undo) must re-map the lanes
         mChildConns << connect(layer, &eBoxOrSound::trackIdChanged,
                                this, [this](const int) { refreshFromDocument(); });
+        // 旁路可见性变化（经典图层面板眼睛、画布显示操作、脚本）
+        // 同步进时间轴：块压暗/喇叭镜像只在 refresh 里重算，不接
+        // 这条线就一直显示旧状态。模型自身的写回路径（solo 压制/
+        // 静音/停用）都在 mInWriteback 守卫内发 setVisible，此处
+        // 不会重入；工程读取直写 mVisible 不发信号，开档零风暴
+        mChildConns << connect(layer, &eBoxOrSound::visibilityChanged,
+                               this, [this](const bool) { refreshFromDocument(); });
         const auto dur = layer->getDurationRectangle();
         if (dur) {
             mChildConns << connect(dur, &DurationRectangle::minRelFrameChanged,
@@ -1785,7 +1804,7 @@ void NleTimelineModel::refreshFromDocument()
         }
         // 剪枝已删图层：只比指针不解引用
         for (auto it = mSoloSaved.begin(); it != mSoloSaved.end();) {
-            if (!live.contains(*it)) { it = mSoloSaved.erase(it); }
+            if (!live.contains(it.key())) { it = mSoloSaved.erase(it); }
             else { ++it; }
         }
         mSoloSuppressed.intersect(live);
@@ -1804,13 +1823,23 @@ void NleTimelineModel::refreshFromDocument()
             for (eBoxOrSound* l : laneMembers[t]) {
                 if (!l) { continue; }
                 if (anySolo && !mTracks.at(t).solo) {
-                    mSoloSaved.insert(l);
+                    // 记录压制前的真实可见性（首次压制时），恢复时写
+                    // 回它——用户静音/停用的层取消独奏后不能被点亮
+                    if (!mSoloSaved.contains(l)) {
+                        mSoloSaved.insert(l, l->isVisible());
+                    }
                     if (l->isVisible()) { l->setVisible(false); }
                     mSoloSuppressed.insert(l);
                 } else if (mSoloSaved.contains(l)) {
-                    l->setVisible(true);
-                    mSoloSaved.remove(l);
+                    // 恢复到压制前的可见性（而非恒 true）；停用机制
+                    // 优先：停用片段取消独奏后保持隐藏，由启用片段
+                    // 的台账（mDisabledSaved）决定它回来时的可见性
+                    const bool savedVis = mSoloSaved.take(l);
                     mSoloSuppressed.remove(l);
+                    bool vis = savedVis;
+                    const int cid = mLayerToClipId.value(l, -1);
+                    if (cid >= 0 && mDisabledIds.contains(cid)) { vis = false; }
+                    if (l->isVisible() != vis) { l->setVisible(vis); }
                 }
             }
         }
@@ -1966,13 +1995,9 @@ void NleTimelineModel::refreshFromDocument()
                     const auto oc = clip(m.clipId);
                     if (oc) { deltas.insert(m.clipId, m.start - oc->start); }
                 }
-                mInWriteback = true;
-                const auto undoBlock = scene->blockUndoRedo();
-                for (const auto &m : moves) {
-                    const auto oc = clip(m.clipId);
-                    if (oc && oc->layer) { shiftLayer(oc->layer.data(), m.start - oc->start); }
-                }
-                // 覆盖块随动尊重轨道联动开关（关=覆盖块原地不动）
+                // 覆盖块随动锚点必须在旧布局上解析（任何表更新之前）
+                struct Ride { int clipId; int newStart; };
+                QList<Ride> rides;
                 if (mFollowLinked) {
                     for (const auto &o : mClips) {
                         if (o.audio || o.trackId == mainId || !o.layer) { continue; }
@@ -1987,10 +2012,40 @@ void NleTimelineModel::refreshFromDocument()
                         }
                         if (!anchor) { continue; }
                         const int delta = deltas.value(anchor->clipId, 0);
-                        if (delta != 0) { shiftLayer(o.layer.data(), delta); }
+                        if (delta != 0) {
+                            rides.append({o.clipId,
+                                          qMax(0, o.start + delta)});
+                        }
+                    }
+                }
+                mInWriteback = true;
+                const auto undoBlock = scene->blockUndoRedo();
+                for (const auto &m : moves) {
+                    const auto oc = clip(m.clipId);
+                    if (oc && oc->layer) { shiftLayer(oc->layer.data(), m.start - oc->start); }
+                }
+                for (const auto &r : rides) {
+                    const auto oc = clip(r.clipId);
+                    if (oc && oc->layer) {
+                        shiftLayer(oc->layer.data(),
+                                   r.newStart - oc->start);
                     }
                 }
                 mInWriteback = false;
+                // 模型表同步到终态：本分支没有后续重建，不同步的话
+                // 本次 modelChanged 画的还是移动前的旧位，要等下一
+                // 次恰好路过的刷新才自愈（用户感知=磁吸刷新迟钝）
+                const auto syncRow = [this](const int clipId,
+                                            const int newStart) {
+                    for (auto &row : mClips) {
+                        if (row.clipId == clipId) {
+                            row.start = qMax(0, newStart);
+                            return;
+                        }
+                    }
+                };
+                for (const auto &m : moves) { syncRow(m.clipId, m.start); }
+                for (const auto &r : rides) { syncRow(r.clipId, r.newStart); }
             }
         }
     }
