@@ -1654,19 +1654,23 @@ void NleTimelineModel::refreshFromDocument()
             for (int i2 = 0; i2 < items.size(); ++i2) {
                 if (items[i2].second || !isTypedLayer(items[i2].first)) { continue; }
                 if (laneById.contains(items[i2].first->trackId())) { continue; }
+                // 文字层用固定的「文字」轨名（专属文字轨语
+                // 感），其余用层名
+                const auto tb = enve_cast<BoundingBox*>(items[i2].first);
+                const bool isText = tb &&
+                        tb->getBoxType() == eBoxType::text;
+                const QString laneName = isText ? QObject::tr("文字")
+                        : items[i2].first->prp_getName();
                 int newId = -1;
                 {
                     const auto undoBlock = scene->blockUndoRedo();
-                    newId = scene->addTrackSpec(
-                                false, items[i2].first->prp_getName(),
-                                specMainIdx);
+                    newId = scene->addTrackSpec(false, laneName, specMainIdx);
                     if (newId >= 0) { scene->setTrackSpecHeight(newId, 0); }
                 }
                 if (newId < 0) { continue; }
                 specs.insert(specMainIdx,
                              eTrackSpec{}); // 占位对齐（下面立刻重建）
-                mTracks.insert(insertAt, {newId,
-                                          items[i2].first->prp_getName(),
+                mTracks.insert(insertAt, {newId, laneName,
                                           false, false, false, false, 0});
                 laneById.clear();
                 for (int t = 0; t < mTracks.size(); ++t) {
@@ -1707,17 +1711,24 @@ void NleTimelineModel::refreshFromDocument()
         laneMembers[laneIdx].append(items[i].first);
     }
 
-    // typed-only 轨道（文字/图形/固态/调整/矢量容器这些无媒体层）
-    // 默认压到最小行高 36（CapCut 辅助层矮轨）；用户手调过的
+    // typed-only 轨道（文字/图形/调整/矢量容器这些辅助层）默认压到
+    // 最小行高 36（CapCut 矮轨）；固态层除外——friction/AE 语义它是
+    // 画布尺寸纯色平面的普通图层，保持普通轨高；用户手调过的
     // （spec.mHeight > 0）不动
     {
+        const auto isCompactLayer = [&isTypedLayer](
+                eBoxOrSound * const layer) {
+            if (!isTypedLayer(layer)) { return false; }
+            const auto box = enve_cast<BoundingBox*>(layer);
+            return box && box->getBoxType() != eBoxType::solid;
+        };
         for (int t = 0; t < trackCount; ++t) {
             if (mTracks.at(t).audio || mTracks.at(t).height > 0) { continue; }
             const auto &members = laneMembers.at(t);
             if (members.isEmpty()) { continue; }
             bool allTyped = true;
             for (const auto l : members) {
-                if (!isTypedLayer(l)) { allTyped = false; break; }
+                if (!isCompactLayer(l)) { allTyped = false; break; }
             }
             if (allTyped) { mTracks[t].height = 36; }
         }

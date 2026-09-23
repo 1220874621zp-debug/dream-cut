@@ -27,6 +27,7 @@
 #include <QSvgRenderer>
 #include <QHash>
 #include "Boxes/videobox.h"
+#include "Boxes/pathbox.h"
 #include "Sound/evideosound.h"
 #include "Sound/eindependentsound.h"
 #include "Animators/qrealkey.h"
@@ -895,13 +896,12 @@ void NleTimelineView::drawClip(QPainter &p,
         case eBoxType::text:
             typeBody = QColor(0xf5, 0xa6, 0x23); break;            // 黄
         case eBoxType::adjustmentLayer:
-            typeBody = QColor(0xd8, 0xd8, 0xd8);                   // 白
+            typeBody = QColor(0xff, 0xff, 0xff);                   // 白
             isAdjust = true;
             break;
         case eBoxType::vectorPath:
         case eBoxType::circle:
         case eBoxType::rectangle:
-        case eBoxType::solid:
         case eBoxType::layer:
             typeBody = QColor(0x2f, 0x6f, 0xd8); break;            // 蓝
         default:
@@ -910,7 +910,32 @@ void NleTimelineView::drawClip(QPainter &p,
     }
     const bool typed = typeBody.isValid();
 
-    if (typed) {
+    // 固态层（friction/AE 语义：画布尺寸纯色平面）：正常满高块，
+    // 块体直接用该层的填充色——一眼看出这是什么颜色的底板
+    const bool isSolid = clipBox &&
+            clipBox->getBoxType() == eBoxType::solid;
+    QColor solidColor;
+    if (isSolid) {
+        const auto pathBox = enve_cast<PathBox*>(clipBox);
+        if (pathBox && pathBox->getFillSettings()) {
+            solidColor = pathBox->getFillSettings()->getColor();
+        }
+        if (!solidColor.isValid()) { solidColor = QColor(0x88, 0x88, 0x88); }
+    }
+
+    if (isSolid) {
+        p.fillPath(path, solidColor);
+        p.fillRect(QRectF(r.left(), r.top(), r.width(), nameBarH),
+                   solidColor.darker(160));
+        p.setPen(QColor(0xff, 0xff, 0xff));
+        QFont sf = font();
+        sf.setPixelSize(10);
+        p.setFont(sf);
+        p.drawText(r.adjusted(5, 0, -4, -(r.height() - nameBarH)),
+                   Qt::AlignVCenter | Qt::AlignLeft,
+                   p.fontMetrics().elidedText(
+                       c.name, Qt::ElideRight, int(r.width() - 8)));
+    } else if (typed) {
         // 矮条居中（默认最小轨高 36px）：纯色 + 名称，无缩略图/名条。
         // 命中与拖动区域仍是整轨高的块矩形
         const qreal barH = qMin(r.height(), 36.);
@@ -1003,7 +1028,7 @@ void NleTimelineView::drawClip(QPainter &p,
     QFont f = font();
     f.setPixelSize(10);
     p.setFont(f);
-    if (!typed) { // typed 块的名称已画在矮条里，别再画一遍
+    if (!typed && !isSolid) { // typed/solid 块已画过自己的名称
         p.drawText(r.adjusted(5, 0, -4, -(r.height() - nameBarH)),
                    Qt::AlignVCenter | Qt::AlignLeft,
                    p.fontMetrics().elidedText(c.name, Qt::ElideRight, int(r.width() - 8)));
