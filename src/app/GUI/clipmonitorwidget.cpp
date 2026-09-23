@@ -12,6 +12,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPolygonF>
+#include <QScrollBar>
 #include <QSvgRenderer>
 #include <QToolButton>
 #include <QUrl>
@@ -241,6 +242,8 @@ public:
     // Ctrl+滚轮以鼠标为锚缩放，播放头越窗自动滚动追边
     int mZoomFrom = 0;
     int mZoomFrames = 0; // 0 = 跟随全长（未初始化）
+    // 缩放窗口变化通知（面板侧同步滑动条）；内嵌类不走 moc 用回调
+    std::function<void()> mOnZoomChanged;
 
     enum class Grab { None, Seek, InEdge, OutEdge };
     Grab mGrab = Grab::None;
@@ -256,7 +259,18 @@ public:
         mZoomFrom = 0;
         mZoomFrames = mFrameCount;
         update();
+        notifyZoom();
     }
+    // 滑动条平移入口（只挪窗口不动播放头）
+    void panTo(const int from) {
+        const int zf = zoomFrames();
+        const int f = qBound(0, from, qMax(0, mFrameCount - zf));
+        if (f == mZoomFrom) { return; }
+        mZoomFrom = f;
+        update();
+        notifyZoom();
+    }
+    void notifyZoom() { if (mOnZoomChanged) { mOnZoomChanged(); } }
 
 private:
     ClipMonitorWidget * const mMon;
@@ -466,6 +480,7 @@ protected:
         mZoomFrom = from;
         mZoomFrames = nz;
         update();
+        notifyZoom();
         e->accept();
     }
 
@@ -493,12 +508,14 @@ public:
         if (!zoomed() || zf <= 0 || width() <= 0) { return; }
         const int edge = qMax(1, width() / 12);
         const int px = (mCurrent - mZoomFrom) * width() / zf;
+        const int oldFrom = mZoomFrom;
         if (px < edge && mZoomFrom > 0) {
             mZoomFrom = qMax(0, mCurrent - edge * zf / width());
         } else if (px > width() - edge) {
             mZoomFrom = qMin(qMax(0, mFrameCount - zf),
                              mCurrent - (width() - edge) * zf / width());
         }
+        if (mZoomFrom != oldFrom) { notifyZoom(); }
     }
 };
 
@@ -563,6 +580,7 @@ ClipMonitorWidget::ClipMonitorWidget(QWidget *parent) : QWidget(parent) {
                         0, mRuler->mZoomFrom,
                         qMax(0, mFrameCount - mRuler->zoomFrames()));
             mRuler->update();
+            mRuler->notifyZoom();
             return;
         }
         mZoneResetPending = false;
@@ -575,6 +593,7 @@ ClipMonitorWidget::ClipMonitorWidget(QWidget *parent) : QWidget(parent) {
         mRuler->mZoomFrom = 0;
         mRuler->mZoomFrames = mFrameCount;
         mRuler->update();
+        mRuler->notifyZoom();
         updateControls();
         emit zoneChanged();
     });
@@ -587,6 +606,35 @@ ClipMonitorWidget::ClipMonitorWidget(QWidget *parent) : QWidget(parent) {
     mView->mEmptyText = QStringLiteral(
                 "打开素材或单击项目面板条目\n按住画面拖到时间轴放置");
     mRuler = new MonitorRuler(this);
+    // 标尺滑动条：放大后出现（全宽隐藏），拖动=平移可视窗口
+    // （不动播放头）；缩放/追边反向同步滑块位置
+    mZoomScroll = new QScrollBar(Qt::Horizontal, this);
+    mZoomScroll->setFixedHeight(10);
+    {
+        // 暗色细条样式（同面板底色语言）
+        mZoomScroll->setStyleSheet(QStringLiteral(
+                    "QScrollBar:horizontal{background:#1c1c1e;height:10px;"
+                    "margin:0;border:none;}"
+                    "QScrollBar::handle:horizontal{background:#4b4b52;"
+                    "min-width:24px;margin:2px;border-radius:3px;}"
+                    "QScrollBar::handle:horizontal:hover{background:#5d5d66;}"
+                    "QScrollBar::add-line:horizontal,"
+                    "QScrollBar::sub-line:horizontal{height:0;width:0;}"
+                    "QScrollBar::add-page:horizontal,"
+                    "QScrollBar::sub-page:horizontal{background:none;}"));
+    }
+    mZoomScroll->hide();
+    connect(mZoomScroll, &QScrollBar::valueChanged, this,
+            [this](const int v) { mRuler->panTo(v); });
+    mRuler->mOnZoomChanged = [this]() {
+        const QSignalBlocker block(mZoomScroll);
+        const int zf = mRuler->zoomFrames();
+        const bool zoomed = mRuler->zoomed() && mRuler->mFrameCount > 0;
+        mZoomScroll->setRange(0, qMax(0, mRuler->mFrameCount - zf));
+        mZoomScroll->setPageStep(qMax(1, zf));
+        mZoomScroll->setValue(mRuler->mZoomFrom);
+        mZoomScroll->setVisible(zoomed);
+    };
 
     // ---- 控制栏（kdenlive 布局：左=走带，右=zone）----
     const auto mkBtn = [this](const char * const svg, const QString &tip)
@@ -671,6 +719,7 @@ ClipMonitorWidget::ClipMonitorWidget(QWidget *parent) : QWidget(parent) {
     layout->setSpacing(2);
     layout->addWidget(mView, 1);
     layout->addWidget(mRuler);
+    layout->addWidget(mZoomScroll);
     layout->addWidget(mFileLabel);
     layout->addLayout(controls);
 

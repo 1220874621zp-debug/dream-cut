@@ -12,6 +12,7 @@ class QMediaPlayer;
 class QAudioOutput;
 class QVideoSink;
 class QLabel;
+class QScrollBar;
 class QToolButton;
 class MonitorView;
 class MonitorRuler;
@@ -59,6 +60,7 @@ private:
 
     MonitorView *mView = nullptr;
     MonitorRuler *mRuler = nullptr;
+    QScrollBar *mZoomScroll = nullptr;
     QMediaPlayer *mPlayer = nullptr;
     QAudioOutput *mAudio = nullptr;
     QVideoSink *mSink = nullptr;
