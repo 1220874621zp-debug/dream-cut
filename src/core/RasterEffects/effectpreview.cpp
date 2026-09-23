@@ -359,10 +359,6 @@ NamedScan namedScanFor(const RasterEffectType type) {
         return { "time", nullptr, 0., 1. };
     case RasterEffectType::NOISE_FADE:
         return { "time", nullptr, 0., 1. };
-    case RasterEffectType::ROUGHEN_EDGES:
-        // the CPU path now mirrors the shader: evolution drives the
-        // fringe creep
-        return { "evolution", nullptr, 0., 100. };
     case RasterEffectType::COLORIZE:
         // pink <-> magenta swing around the 330 base
         return { "hue", nullptr, 300., 355. };
@@ -502,11 +498,6 @@ void setupDefaults(RasterEffect* const eff, const RasterEffectType type) {
         setParam("temperature", 30.);
         setParam("saturation", 30.);
         break;
-    case RasterEffectType::ROUGHEN_EDGES:
-        // much stronger frayed edge than the subtle factory default
-        setParam("border", 45.);
-        setParam("complexity", 5.);
-        break;
     case RasterEffectType::LAYER_STYLES: {
         // factory default is all-styles-off = null caller; enable a
         // bold set (same setters the PSD import uses)
@@ -550,9 +541,9 @@ QList<QImage> renderEffectFrames(const RasterEffectType type,
         // the look offscreen): liquid glass needs the composite below
         // the layer; fractal noise's CPU path ignores parameters.
         // Roughen edges and lattice warp now run their real CPU
-        // callers. (motion blur / rain retired with their effects)
+        // callers. (motion blur / rain / fractal noise retired with
+        // their effects)
         if (type == RasterEffectType::LIQUID_GLASS ||
-            type == RasterEffectType::FRACTAL_NOISE ||
             type == RasterEffectType::LATTICE_WARP) {
             for (int i = 0; i < nFrames; i++) {
                 const qreal t = i / static_cast<qreal>(nFrames);

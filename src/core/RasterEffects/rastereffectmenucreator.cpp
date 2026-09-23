@@ -69,8 +69,6 @@ void RasterEffectMenuCreator::forEveryEffectCore(const EffectAdder &add)
         []() { return enve::make_shared<GlowEffect>(); });
     add(QObject::tr("Chromatic Aberration"), QObject::tr("Distort"),
         []() { return enve::make_shared<ChromaticAberrationEffect>(); });
-    add(QObject::tr("Wave Warp"), QObject::tr("Distort"),
-        []() { return enve::make_shared<WaveWarpEffect>(); });
     add(QObject::tr("Mirror"), QObject::tr("Distort"),
         []() { return enve::make_shared<MirrorEffect>(); });
     add(QObject::tr("Twirl"), QObject::tr("Distort"),
@@ -93,14 +91,8 @@ void RasterEffectMenuCreator::forEveryEffectCore(const EffectAdder &add)
         []() { return enve::make_shared<GlitchEffect>(); });
     add(QObject::tr("Halftone"), QObject::tr("Stylize"),
         []() { return enve::make_shared<HalftoneEffect>(); });
-    add(QObject::tr("Motion Tile"), QObject::tr("Stylize"),
-        []() { return enve::make_shared<MotionTileEffect>(); });
-    add(QObject::tr("Fractal Noise"), QObject::tr("Generate"),
-        []() { return enve::make_shared<FractalNoiseEffect>(); });
     add(QObject::tr("Light Sweep"), QObject::tr("Light"),
         []() { return enve::make_shared<LightSweepEffect>(); });
-    add(QObject::tr("Displacement Warp"), QObject::tr("Distort"),
-        []() { return enve::make_shared<DisplacementWarpEffect>(); });
     add(QObject::tr("Film Grain"), QObject::tr("Stylize"),
         []() { return enve::make_shared<FilmGrainEffect>(); });
     add(QObject::tr("Black-White Flash"), QObject::tr("Stylize"),
@@ -125,14 +117,10 @@ void RasterEffectMenuCreator::forEveryEffectCore(const EffectAdder &add)
         []() { return enve::make_shared<SlideEffect>(); });
     add(QObject::tr("圆形划像"), QObject::tr("Transitions"),
         []() { return enve::make_shared<WipeCircleEffect>(); });
-    add(QObject::tr("CC Smear"), QObject::tr("Distort"),
-        []() { return enve::make_shared<SmearEffect>(); });
     add(QObject::tr("卷页 (Page Curl)"), QObject::tr("Distort"),
         []() { return enve::make_shared<PageCurlEffect>(); });
     add(QObject::tr("晶格变形"), QObject::tr("Distort"),
         []() { return enve::make_shared<LatticeWarpEffect>(); });
-    add(QObject::tr("毛边粗糙化 (Roughen Edges)"), QObject::tr("Stylize"),
-        []() { return enve::make_shared<RoughenEdgesEffect>(); });
     add(QObject::tr("图层样式"), "",
         []() { return enve::make_shared<LayerStylesEffect>(); });
 }

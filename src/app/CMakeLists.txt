@@ -374,7 +374,7 @@ add_executable(
     ${WINDOWS_RESOURCE_FILE}
 )
 
-add_executable(dreamcut_effects_test effects_unittest.cpp AI/mcpserver.cpp AI/mcpdispatcher.cpp ${RESOURCES})
+add_executable(dreamcut_effects_test effects_unittest.cpp ${RESOURCES})
 target_link_directories(
     dreamcut_effects_test
     PRIVATE

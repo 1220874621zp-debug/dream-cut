@@ -243,7 +243,6 @@ set(
     RasterEffects/gloweffect.cpp
     RasterEffects/directionalblureffect.cpp
     RasterEffects/radialblureffect.cpp
-    RasterEffects/wavewarpeffect.cpp
     RasterEffects/edgedetecteffect.cpp
     RasterEffects/inverteffect.cpp
     RasterEffects/tinteffect.cpp
@@ -260,10 +259,7 @@ set(
     RasterEffects/zoomblureffect.cpp
     RasterEffects/colorgradingeffect.cpp
     RasterEffects/stripeeffect.cpp
-    RasterEffects/motiontileeffect.cpp
-    RasterEffects/fractalnoiseeffect.cpp
     RasterEffects/lightsweepeffect.cpp
-    RasterEffects/displacementwarpeffect.cpp
     RasterEffects/filmgraineffect.cpp
     RasterEffects/blackwhiteflasheffect.cpp
     RasterEffects/effectcanvaspoint.cpp
@@ -276,8 +272,6 @@ set(
     RasterEffects/slideeffect.cpp
     RasterEffects/wipecircleeffect.cpp
     RasterEffects/transitionanchor.cpp
-    RasterEffects/smeareffect.cpp
-    RasterEffects/roughenedgeseffect.cpp
     ReadWrite/ereadstream.cpp
     ReadWrite/ewritestream.cpp
     ReadWrite/filefooter.cpp
@@ -614,7 +608,6 @@ set(
     RasterEffects/gloweffect.h
     RasterEffects/directionalblureffect.h
     RasterEffects/radialblureffect.h
-    RasterEffects/wavewarpeffect.h
     RasterEffects/edgedetecteffect.h
     RasterEffects/inverteffect.h
     RasterEffects/tinteffect.h
@@ -631,10 +624,7 @@ set(
     RasterEffects/zoomblureffect.h
     RasterEffects/colorgradingeffect.h
     RasterEffects/stripeeffect.h
-    RasterEffects/motiontileeffect.h
-    RasterEffects/fractalnoiseeffect.h
     RasterEffects/lightsweepeffect.h
-    RasterEffects/displacementwarpeffect.h
     RasterEffects/filmgraineffect.h
     RasterEffects/blackwhiteflasheffect.h
     RasterEffects/effectcanvaspoint.h
@@ -642,8 +632,6 @@ set(
     RasterEffects/pixelarteffect.h
     RasterEffects/layerstyleseffect.h
     RasterEffects/wipeeffect.h
-    RasterEffects/smeareffect.h
-    RasterEffects/roughenedgeseffect.h
     ReadWrite/efuturepos.h
     ReadWrite/ereadstream.h
     ReadWrite/evformat.h

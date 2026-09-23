@@ -252,8 +252,6 @@ qsptr<RasterEffect> createRasterEffectForNonCustomType(const RasterEffectType ty
             return enve::make_shared<DirectionalBlurEffect>();
         case(RasterEffectType::RADIAL_BLUR):
             return enve::make_shared<RadialBlurEffect>();
-        case(RasterEffectType::WAVE_WARP):
-            return enve::make_shared<WaveWarpEffect>();
         case(RasterEffectType::EDGE_DETECT):
             return enve::make_shared<EdgeDetectEffect>();
         case(RasterEffectType::INVERT):
@@ -286,14 +284,8 @@ qsptr<RasterEffect> createRasterEffectForNonCustomType(const RasterEffectType ty
             return enve::make_shared<ColorGradingEffect>();
         case(RasterEffectType::STRIPE):
             return enve::make_shared<StripeEffect>();
-        case(RasterEffectType::MOTION_TILE):
-            return enve::make_shared<MotionTileEffect>();
-        case(RasterEffectType::FRACTAL_NOISE):
-            return enve::make_shared<FractalNoiseEffect>();
         case(RasterEffectType::LIGHT_SWEEP):
             return enve::make_shared<LightSweepEffect>();
-        case(RasterEffectType::DISPLACEMENT_WARP):
-            return enve::make_shared<DisplacementWarpEffect>();
         case(RasterEffectType::FILM_GRAIN):
             return enve::make_shared<FilmGrainEffect>();
         case(RasterEffectType::BLACK_WHITE_FLASH):
@@ -306,10 +298,6 @@ qsptr<RasterEffect> createRasterEffectForNonCustomType(const RasterEffectType ty
             return enve::make_shared<LayerStylesEffect>();
         case(RasterEffectType::CHROMA_KEY):
             return enve::make_shared<ChromaKeyEffect>();
-        case(RasterEffectType::SMEAR):
-            return enve::make_shared<SmearEffect>();
-        case(RasterEffectType::ROUGHEN_EDGES):
-            return enve::make_shared<RoughenEdgesEffect>();
         case(RasterEffectType::PAGE_CURL):
             return enve::make_shared<PageCurlEffect>();
         case(RasterEffectType::LATTICE_WARP):

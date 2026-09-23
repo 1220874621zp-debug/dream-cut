@@ -95,8 +95,8 @@ enum class RasterEffectType : short {
     GLOW,
     DIRECTIONAL_BLUR,
     RADIAL_BLUR,
-    WAVE_WARP,
-    // was RAIN (20, removed 2026-09-23, simulation - animator-only)
+    // 19 was WAVE_WARP (removed 2026-09-23, animator-style param
+    // warp - not a video-editing effect); 20 was RAIN ( removed 2026-09-23, simulation - animator-only)
     EDGE_DETECT = 21,
     INVERT,
     TINT,
@@ -113,20 +113,20 @@ enum class RasterEffectType : short {
     ZOOM_BLUR,
     COLOR_GRADING,
     STRIPE,
-    MOTION_TILE,
-    FRACTAL_NOISE,
-    LIGHT_SWEEP,
-    DISPLACEMENT_WARP,
-    FILM_GRAIN,
+    // 37 was MOTION_TILE / 38 was FRACTAL_NOISE (removed 2026-09-23,
+    // texture-generation & tiling - animator-only)
+    LIGHT_SWEEP = 39,
+    // 40 was DISPLACEMENT_WARP (removed 2026-09-23, needs a
+    // displacement map - not a video-editing workflow)
+    FILM_GRAIN = 41,
     BLACK_WHITE_FLASH,
     PIXEL_ART,
     // Photoshop-style layer styles container (shadow/glow/stroke);
     // appended last, never reorder - serialized ids must stay stable
     LAYER_STYLES,
-    // was SHATTER (45, removed 2026-09-23, simulation - animator-only)
-    SMEAR = 46,
-    ROUGHEN_EDGES,
-    // was PARTICLE (48, removed 2026-09-23, simulation - animator-only)
+    // 45 was SHATTER / 46 was SMEAR / 47 was ROUGHEN_EDGES / 48 was
+    // PARTICLE (all removed 2026-09-23 - simulation / smear / text
+    // fringe styling, animator-only)
     // cylindrical page curl with N.L shading (Foldspace-style roll)
     PAGE_CURL = 49,
     // AE Putty-style lattice (FFD) deformation - appended last,
