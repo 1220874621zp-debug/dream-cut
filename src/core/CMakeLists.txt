@@ -225,7 +225,6 @@ set(
     RasterEffects/latticewarpeffect.cpp
     RasterEffects/colorizeeffect.cpp
     RasterEffects/customrastereffect.cpp
-    RasterEffects/motionblureffect.cpp
     RasterEffects/trackmattecaller.cpp
     Boxes/adjustmentlayer.cpp
     Boxes/solidlayer.cpp
@@ -245,7 +244,6 @@ set(
     RasterEffects/directionalblureffect.cpp
     RasterEffects/radialblureffect.cpp
     RasterEffects/wavewarpeffect.cpp
-    RasterEffects/raineffect.cpp
     RasterEffects/edgedetecteffect.cpp
     RasterEffects/inverteffect.cpp
     RasterEffects/tinteffect.cpp
@@ -273,10 +271,13 @@ set(
     RasterEffects/pixelarteffect.cpp
     RasterEffects/layerstyleseffect.cpp
     RasterEffects/wipeeffect.cpp
-    RasterEffects/shattereffect.cpp
+    RasterEffects/dissolveeffect.cpp
+    RasterEffects/flashfadeeffect.cpp
+    RasterEffects/slideeffect.cpp
+    RasterEffects/wipecircleeffect.cpp
+    RasterEffects/transitionanchor.cpp
     RasterEffects/smeareffect.cpp
     RasterEffects/roughenedgeseffect.cpp
-    RasterEffects/particleeffect.cpp
     ReadWrite/ereadstream.cpp
     ReadWrite/ewritestream.cpp
     ReadWrite/filefooter.cpp
@@ -595,7 +596,6 @@ set(
     RasterEffects/latticewarpeffect.h
     RasterEffects/colorizeeffect.h
     RasterEffects/customrastereffect.h
-    RasterEffects/motionblureffect.h
     RasterEffects/noisefadeeffect.h
     RasterEffects/openglrastereffectcaller.h
     RasterEffects/rastereffect.h
@@ -615,7 +615,6 @@ set(
     RasterEffects/directionalblureffect.h
     RasterEffects/radialblureffect.h
     RasterEffects/wavewarpeffect.h
-    RasterEffects/raineffect.h
     RasterEffects/edgedetecteffect.h
     RasterEffects/inverteffect.h
     RasterEffects/tinteffect.h
@@ -643,10 +642,8 @@ set(
     RasterEffects/pixelarteffect.h
     RasterEffects/layerstyleseffect.h
     RasterEffects/wipeeffect.h
-    RasterEffects/shattereffect.h
     RasterEffects/smeareffect.h
     RasterEffects/roughenedgeseffect.h
-    RasterEffects/particleeffect.h
     ReadWrite/efuturepos.h
     ReadWrite/ereadstream.h
     ReadWrite/evformat.h

@@ -51,7 +51,6 @@ void RasterEffectMenuCreator::forEveryEffectCore(const EffectAdder &add)
     add(QObject::tr("Shadow"), "", []() { return enve::make_shared<ShadowEffect>(); });
     add(QObject::tr("Drop Shadow"), QObject::tr("Light"),
         []() { return enve::make_shared<DropShadowEffect>(); });
-    add(QObject::tr("Motion Blur"), "", []() { return enve::make_shared<MotionBlurEffect>(); });
     add(QObject::tr("Brightness-Contrast"), QObject::tr("Color"),
         []() { return enve::make_shared<BrightnessContrastEffect>(); });
     add(QObject::tr("Colorize"), QObject::tr("Color"),
@@ -110,20 +109,24 @@ void RasterEffectMenuCreator::forEveryEffectCore(const EffectAdder &add)
         []() { return enve::make_shared<LiquidGlassEffect>(); });
     add(QObject::tr("Pixel Art"), QObject::tr("Stylize"),
         []() { return enve::make_shared<PixelArtEffect>(); });
-    add(QObject::tr("Rain"), QObject::tr("Simulation"),
-        []() { return enve::make_shared<RainEffect>(); });
     add(QObject::tr("Wipe"), QObject::tr("Transitions"),
         []() { return enve::make_shared<WipeEffect>(); });
     add(QObject::tr("Stripe"), QObject::tr("Transitions"),
         []() { return enve::make_shared<StripeEffect>(); });
     add(QObject::tr("Noise Fade"), QObject::tr("Transitions"),
         []() { return enve::make_shared<NoiseFadeEffect>(); });
+    add(QObject::tr("叠化（淡入淡出）"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<DissolveEffect>(); });
+    add(QObject::tr("闪黑"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<FlashFadeEffect>(Qt::black); });
+    add(QObject::tr("闪白"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<FlashFadeEffect>(Qt::white); });
+    add(QObject::tr("滑动"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<SlideEffect>(); });
+    add(QObject::tr("圆形划像"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<WipeCircleEffect>(); });
     add(QObject::tr("CC Smear"), QObject::tr("Distort"),
         []() { return enve::make_shared<SmearEffect>(); });
-    add(QObject::tr("Shatter"), QObject::tr("Simulation"),
-        []() { return enve::make_shared<ShatterEffect>(); });
-    add(QObject::tr("粒子"), QObject::tr("Simulation"),
-        []() { return enve::make_shared<ParticleEffect>(); });
     add(QObject::tr("卷页 (Page Curl)"), QObject::tr("Distort"),
         []() { return enve::make_shared<PageCurlEffect>(); });
     add(QObject::tr("晶格变形"), QObject::tr("Distort"),

@@ -3,7 +3,6 @@
 
 #include "blureffect.h"
 #include "shadoweffect.h"
-#include "motionblureffect.h"
 #include "wipeeffect.h"
 #include "noisefadeeffect.h"
 #include "colorizeeffect.h"
@@ -16,7 +15,6 @@
 #include "directionalblureffect.h"
 #include "radialblureffect.h"
 #include "wavewarpeffect.h"
-#include "raineffect.h"
 #include "edgedetecteffect.h"
 #include "inverteffect.h"
 #include "tinteffect.h"
@@ -43,11 +41,13 @@
 #include "pixelarteffect.h"
 #include "chromakeyeffect.h"
 #include "layerstyleseffect.h"
-#include "shattereffect.h"
 #include "smeareffect.h"
 #include "roughenedgeseffect.h"
-#include "particleeffect.h"
 #include "pagecurleffect.h"
 #include "latticewarpeffect.h"
+#include "dissolveeffect.h"
+#include "flashfadeeffect.h"
+#include "slideeffect.h"
+#include "wipecircleeffect.h"
 
 #endif // RASTEREFFECTSINCLUDE_H

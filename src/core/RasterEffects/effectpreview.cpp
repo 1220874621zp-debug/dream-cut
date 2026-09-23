@@ -246,82 +246,6 @@ SkBitmap makeFractalSample(const int w, const int h, const qreal phase) {
     return out;
 }
 
-// motion-blur look: the image smeared along a direction with a
-// breathing trail length (the real effect needs layer motion from
-// the box render data; the sample stands in with a classic streak)
-SkBitmap makeMotionBlurSample(const int w, const int h, const qreal phase) {
-    const SkBitmap base = makeTextSample(w, h);
-    SkBitmap out;
-    out.allocN32Pixels(w, h);
-    out.eraseARGB(0, 0, 0, 0);
-    const uint32_t* const srcPixels =
-            static_cast<const uint32_t*>(base.getPixels());
-    uint32_t* const dstPixels =
-            static_cast<uint32_t*>(out.getPixels());
-    const qreal breath = 0.5 + 0.5 * std::sin(2. * M_PI * phase);
-    const int L = 2 + qRound(14 * breath);
-    constexpr int kPasses = 9;
-    for (int y = 0; y < h; y++) {
-        for (int x = 0; x < w; x++) {
-            qreal r = 0., g = 0., b = 0., a = 0., wsum = 0.;
-            for (int k = 0; k < kPasses; k++) {
-                const qreal u = k / static_cast<qreal>(kPasses - 1) - 0.5;
-                const int sx = qRound(x + u * 2. * L);
-                const int sy = qRound(y + u * 0.5 * L);
-                if (sx < 0 || sx >= w || sy < 0 || sy >= h) { continue; }
-                const uint32_t px = srcPixels[sy * w + sx];
-                const qreal wk = 1. - std::abs(u) * 1.4;
-                if (wk <= 0.) { continue; }
-                const qreal pa = SkColorGetA(px) / 255.;
-                r += SkColorGetR(px) * pa * wk;
-                g += SkColorGetG(px) * pa * wk;
-                b += SkColorGetB(px) * pa * wk;
-                a += pa * wk;
-                wsum += wk;
-            }
-            if (a > 0.004) {
-                const int ia = qBound(0, qRound(a / wsum * 255.), 255);
-                const int ir = qBound(0, qRound(r / a), 255);
-                const int ig = qBound(0, qRound(g / a), 255);
-                const int ib = qBound(0, qRound(b / a), 255);
-                dstPixels[y * w + x] =
-                        SkColorSetARGB(ia, ir, ig, ib);
-            }
-        }
-    }
-    return out;
-}
-
-// rain look: opaque black sky with white slanted streaks falling
-// (the user asked for exactly this readable readout)
-SkBitmap makeRainSample(const int w, const int h, const qreal phase) {
-    SkBitmap out;
-    out.allocN32Pixels(w, h);
-    SkCanvas c(out);
-    SkPaint p;
-    p.setAntiAlias(true);
-    p.setColor(SkColorSetRGB(8, 10, 14));
-    c.drawRect(SkRect::MakeWH(w, h), p);
-
-    const qreal slope = 0.22; // streak slant dx/dy
-    const int nDrops = 90;
-    for (int i = 0; i < nDrops; i++) {
-        const qreal rx = fxHash2(i * 3.1, 7.7);
-        const qreal rs = 0.5 + fxHash2(i * 9.3, 2.9);
-        const qreal rl = 10. + 26. * fxHash2(i * 5.7, 4.1);
-        const int alpha = qRound(90. + 150. * fxHash2(i * 1.7, 8.3));
-        const qreal span = h + rl * 3.;
-        const qreal y0 = fxHash2(i * 2.3, 6.1) * span
-                         + phase * rs * h * 2.2;
-        const qreal yy = std::fmod(y0, span) - rl;
-        const qreal xx = std::fmod(rx * w + yy * slope, w + 40.) - 20.;
-        p.setColor(SkColorSetARGB(alpha, 225, 232, 240));
-        c.drawLine(SkPoint::Make(xx, yy),
-                   SkPoint::Make(xx + rl * slope, yy + rl), p);
-    }
-    return out;
-}
-
 // lattice-warp look: the image warped by a breathing gaussian bulge
 // with a cyan lattice grid drawn over it, the grid lines bending
 // with the same deformation so the warp is directly readable. The
@@ -420,12 +344,21 @@ struct NamedScan {
 
 NamedScan namedScanFor(const RasterEffectType type) {
     switch (type) {
+    // clip transitions: no parameter sweep - from == to pins the
+    // fade length so the relFrame sweep alone drives the in -> hold
+    // -> out cycle in the tile
+    case RasterEffectType::TRANSITION_DISSOLVE:
+        return { "淡入时长", nullptr, 12., 12. };
+    case RasterEffectType::TRANSITION_FLASH:
+        return { "淡入时长", nullptr, 12., 12. };
+    case RasterEffectType::TRANSITION_SLIDE:
+        return { "滑入时长", nullptr, 12., 12. };
+    case RasterEffectType::TRANSITION_WIPE_CIRCLE:
+        return { "淡入时长", nullptr, 12., 12. };
     case RasterEffectType::WIPE:
         return { "time", nullptr, 0., 1. };
     case RasterEffectType::NOISE_FADE:
         return { "time", nullptr, 0., 1. };
-    case RasterEffectType::SHATTER:
-        return { "progress", nullptr, 0., 100. };
     case RasterEffectType::ROUGHEN_EDGES:
         // the CPU path now mirrors the shader: evolution drives the
         // fringe creep
@@ -598,9 +531,6 @@ void setupDefaults(RasterEffect* const eff, const RasterEffectType type) {
 namespace EffectPreview {
 
 bool canPreview(const RasterEffectType type) {
-    // motion blur reads layer motion from the box render data and
-    // crashes without a real layer behind it - a purpose-built
-    // streak sample stands in instead
     if (type == RasterEffectType::CUSTOM ||
         type == RasterEffectType::CUSTOM_SHADER) { return false; }
     return true;
@@ -618,15 +548,11 @@ QList<QImage> renderEffectFrames(const RasterEffectType type,
     try {
         // purpose-built sample paths (their callers cannot produce
         // the look offscreen): liquid glass needs the composite below
-        // the layer; fractal noise's CPU path ignores parameters;
-        // motion blur needs layer motion from the box render data;
-        // rain gets a plain black-sky/white-streaks animation per
-        // user request. Roughen edges and lattice warp now run their
-        // real CPU callers.
+        // the layer; fractal noise's CPU path ignores parameters.
+        // Roughen edges and lattice warp now run their real CPU
+        // callers. (motion blur / rain retired with their effects)
         if (type == RasterEffectType::LIQUID_GLASS ||
             type == RasterEffectType::FRACTAL_NOISE ||
-            type == RasterEffectType::MOTION_BLUR ||
-            type == RasterEffectType::RAIN ||
             type == RasterEffectType::LATTICE_WARP) {
             for (int i = 0; i < nFrames; i++) {
                 const qreal t = i / static_cast<qreal>(nFrames);
@@ -634,12 +560,6 @@ QList<QImage> renderEffectFrames(const RasterEffectType type,
                         type == RasterEffectType::LIQUID_GLASS
                         ? makeLiquidSample(imgSize.width(),
                                            imgSize.height(), t)
-                        : type == RasterEffectType::MOTION_BLUR
-                        ? makeMotionBlurSample(imgSize.width(),
-                                               imgSize.height(), t)
-                        : type == RasterEffectType::RAIN
-                        ? makeRainSample(imgSize.width(),
-                                         imgSize.height(), t)
                         : type == RasterEffectType::LATTICE_WARP
                         ? makeLatticeGridSample(imgSize.width(),
                                                 imgSize.height(), t)

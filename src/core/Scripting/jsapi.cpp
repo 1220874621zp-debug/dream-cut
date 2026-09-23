@@ -1202,7 +1202,6 @@ namespace Friction
             { RasterEffectType::GLITCH, "glitch|separate_rgb|rgb_split" },
             { RasterEffectType::DROP_SHADOW, "drop_shadow|shadow" },
             { RasterEffectType::BLUR, "blur|gaussian_blur" },
-            { RasterEffectType::MOTION_BLUR, "motion_blur" },
             { RasterEffectType::DIRECTIONAL_BLUR, "directional_blur" },
             { RasterEffectType::RADIAL_BLUR, "radial_blur" },
             { RasterEffectType::ZOOM_BLUR, "zoom_blur" },
@@ -1226,7 +1225,6 @@ namespace Friction
             { RasterEffectType::FRACTAL_NOISE, "fractal_noise" },
             { RasterEffectType::MOTION_TILE, "motion_tile" },
             { RasterEffectType::EDGE_DETECT, "edge_detect" },
-            { RasterEffectType::RAIN, "rain" },
             { RasterEffectType::MIRROR, "mirror" },
             { RasterEffectType::CHROMA_KEY, "chroma_key" },
             { RasterEffectType::DISPLACEMENT_WARP, "displacement_warp|displacement|turbulent_displace|displacement_map" },
@@ -1234,9 +1232,12 @@ namespace Friction
             { RasterEffectType::LETTERBOX, "letterbox" },
             { RasterEffectType::NOISE_FADE, "noise_fade" },
             { RasterEffectType::WIPE, "wipe" },
-            { RasterEffectType::SHATTER, "shatter" },
             { RasterEffectType::SMEAR, "smear|cc_smear" },
-            { RasterEffectType::ROUGHEN_EDGES, "roughen_edges|roughen|roughenedges" }
+            { RasterEffectType::ROUGHEN_EDGES, "roughen_edges|roughen|roughenedges" },
+            { RasterEffectType::TRANSITION_DISSOLVE, "dissolve|crossfade|x dissolve" },
+            { RasterEffectType::TRANSITION_FLASH, "flash_fade|fade_black|fade_white" },
+            { RasterEffectType::TRANSITION_SLIDE, "slide|slide_in" },
+            { RasterEffectType::TRANSITION_WIPE_CIRCLE, "wipe_circle|circle_wipe|iris" }
         };
 
         QString normalizeEffectName(const QString &name)

@@ -75,8 +75,10 @@ enum class RasterEffectType : short {
     SHADOW,
     CUSTOM, // C++
     CUSTOM_SHADER, // xml, GLSL
-    MOTION_BLUR,
-    WIPE,
+    // 4 was MOTION_BLUR (removed 2026-09-23, animator-only: samples
+    // the layer motion path, useless for video clips) - reserved so
+    // the serialized ids below do not shift against old project files
+    WIPE = 5,
     // 6 was BONE_WARP (removed) - kept reserved so the serialized ids
     // of the effects below do not shift against old project files
     NOISE_FADE = 7,
@@ -94,8 +96,8 @@ enum class RasterEffectType : short {
     DIRECTIONAL_BLUR,
     RADIAL_BLUR,
     WAVE_WARP,
-    RAIN,
-    EDGE_DETECT,
+    // was RAIN (20, removed 2026-09-23, simulation - animator-only)
+    EDGE_DETECT = 21,
     INVERT,
     TINT,
     PIXELATE,
@@ -121,16 +123,22 @@ enum class RasterEffectType : short {
     // Photoshop-style layer styles container (shadow/glow/stroke);
     // appended last, never reorder - serialized ids must stay stable
     LAYER_STYLES,
-    SHATTER,
-    SMEAR,
+    // was SHATTER (45, removed 2026-09-23, simulation - animator-only)
+    SMEAR = 46,
     ROUGHEN_EDGES,
-    // analytic particle emitter (stateless, per-frame deterministic)
-    PARTICLE,
+    // was PARTICLE (48, removed 2026-09-23, simulation - animator-only)
     // cylindrical page curl with N.L shading (Foldspace-style roll)
-    PAGE_CURL,
+    PAGE_CURL = 49,
     // AE Putty-style lattice (FFD) deformation - appended last,
     // never reorder, serialized ids must stay stable
-    LATTICE_WARP
+    LATTICE_WARP,
+    // CapCut-style clip transitions (kdenlive ports): dissolve alpha
+    // crossfade / flash color fade / slide translation / circle wipe,
+    // anchored to the clip head/tail windows
+    TRANSITION_DISSOLVE,
+    TRANSITION_FLASH,
+    TRANSITION_SLIDE,
+    TRANSITION_WIPE_CIRCLE
 };
 
 struct BoxRenderData;

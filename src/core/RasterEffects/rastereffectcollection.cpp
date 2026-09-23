@@ -230,8 +230,6 @@ qsptr<RasterEffect> createRasterEffectForNonCustomType(const RasterEffectType ty
             return enve::make_shared<BlurEffect>();
         case(RasterEffectType::SHADOW):
             return enve::make_shared<ShadowEffect>();
-        case(RasterEffectType::MOTION_BLUR):
-            return enve::make_shared<MotionBlurEffect>();
         case(RasterEffectType::WIPE):
             return enve::make_shared<WipeEffect>();
         case(RasterEffectType::NOISE_FADE):
@@ -256,8 +254,6 @@ qsptr<RasterEffect> createRasterEffectForNonCustomType(const RasterEffectType ty
             return enve::make_shared<RadialBlurEffect>();
         case(RasterEffectType::WAVE_WARP):
             return enve::make_shared<WaveWarpEffect>();
-        case(RasterEffectType::RAIN):
-            return enve::make_shared<RainEffect>();
         case(RasterEffectType::EDGE_DETECT):
             return enve::make_shared<EdgeDetectEffect>();
         case(RasterEffectType::INVERT):
@@ -310,18 +306,22 @@ qsptr<RasterEffect> createRasterEffectForNonCustomType(const RasterEffectType ty
             return enve::make_shared<LayerStylesEffect>();
         case(RasterEffectType::CHROMA_KEY):
             return enve::make_shared<ChromaKeyEffect>();
-        case(RasterEffectType::SHATTER):
-            return enve::make_shared<ShatterEffect>();
         case(RasterEffectType::SMEAR):
             return enve::make_shared<SmearEffect>();
         case(RasterEffectType::ROUGHEN_EDGES):
             return enve::make_shared<RoughenEdgesEffect>();
-        case(RasterEffectType::PARTICLE):
-            return enve::make_shared<ParticleEffect>();
         case(RasterEffectType::PAGE_CURL):
             return enve::make_shared<PageCurlEffect>();
         case(RasterEffectType::LATTICE_WARP):
             return enve::make_shared<LatticeWarpEffect>();
+        case(RasterEffectType::TRANSITION_DISSOLVE):
+            return enve::make_shared<DissolveEffect>();
+        case(RasterEffectType::TRANSITION_FLASH):
+            return enve::make_shared<FlashFadeEffect>(Qt::black);
+        case(RasterEffectType::TRANSITION_SLIDE):
+            return enve::make_shared<SlideEffect>();
+        case(RasterEffectType::TRANSITION_WIPE_CIRCLE):
+            return enve::make_shared<WipeCircleEffect>();
         default: return nullptr;
     }
 }

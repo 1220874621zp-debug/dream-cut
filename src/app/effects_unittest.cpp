@@ -94,7 +94,6 @@ int main(int argc, char *argv[])
         const RasterEffectType types[] = {
             RasterEffectType::BLUR,
             RasterEffectType::SHADOW,
-            RasterEffectType::MOTION_BLUR,
             RasterEffectType::WIPE,
             RasterEffectType::NOISE_FADE,
             RasterEffectType::COLORIZE,
@@ -107,7 +106,6 @@ int main(int argc, char *argv[])
             RasterEffectType::DIRECTIONAL_BLUR,
             RasterEffectType::RADIAL_BLUR,
             RasterEffectType::WAVE_WARP,
-            RasterEffectType::RAIN,
             RasterEffectType::EDGE_DETECT,
             RasterEffectType::INVERT,
             RasterEffectType::TINT,
@@ -134,7 +132,11 @@ int main(int argc, char *argv[])
             RasterEffectType::PIXEL_ART,
             RasterEffectType::CHROMA_KEY,
             RasterEffectType::LAYER_STYLES,
-            RasterEffectType::PAGE_CURL
+            RasterEffectType::PAGE_CURL,
+            RasterEffectType::TRANSITION_DISSOLVE,
+            RasterEffectType::TRANSITION_FLASH,
+            RasterEffectType::TRANSITION_SLIDE,
+            RasterEffectType::TRANSITION_WIPE_CIRCLE
         };
 
         for (const auto t : types) {
@@ -164,7 +166,6 @@ int main(int argc, char *argv[])
             RasterEffectType::DIRECTIONAL_BLUR,
             RasterEffectType::RADIAL_BLUR,
             RasterEffectType::WAVE_WARP,
-            RasterEffectType::RAIN,
             RasterEffectType::EDGE_DETECT,
             RasterEffectType::INVERT,
             RasterEffectType::TINT,
@@ -345,7 +346,6 @@ int main(int argc, char *argv[])
         const RasterEffectType types[] = {
             RasterEffectType::BLUR,
             RasterEffectType::SHADOW,
-            RasterEffectType::MOTION_BLUR,
             RasterEffectType::WIPE,
             RasterEffectType::NOISE_FADE,
             RasterEffectType::COLORIZE,
@@ -360,7 +360,6 @@ int main(int argc, char *argv[])
             RasterEffectType::DIRECTIONAL_BLUR,
             RasterEffectType::RADIAL_BLUR,
             RasterEffectType::WAVE_WARP,
-            RasterEffectType::RAIN,
             RasterEffectType::EDGE_DETECT,
             RasterEffectType::INVERT,
             RasterEffectType::TINT,
@@ -385,12 +384,14 @@ int main(int argc, char *argv[])
             RasterEffectType::BLACK_WHITE_FLASH,
             RasterEffectType::PIXEL_ART,
             RasterEffectType::LAYER_STYLES,
-            RasterEffectType::SHATTER,
             RasterEffectType::SMEAR,
             RasterEffectType::ROUGHEN_EDGES,
-            RasterEffectType::PARTICLE,
             RasterEffectType::PAGE_CURL,
-            RasterEffectType::LATTICE_WARP
+            RasterEffectType::LATTICE_WARP,
+            RasterEffectType::TRANSITION_DISSOLVE,
+            RasterEffectType::TRANSITION_FLASH,
+            RasterEffectType::TRANSITION_SLIDE,
+            RasterEffectType::TRANSITION_WIPE_CIRCLE
         };
         QString dumpDir;
         if (argc >= 3) {
@@ -456,11 +457,9 @@ int main(int argc, char *argv[])
             RasterEffectType::SHAKE,
             RasterEffectType::GLITCH,
             RasterEffectType::FRACTAL_NOISE,
-            RasterEffectType::RAIN,
             RasterEffectType::FILM_GRAIN,
             RasterEffectType::NOISE,
             RasterEffectType::WAVE_WARP,
-            RasterEffectType::SHATTER,
             RasterEffectType::SMEAR,
             RasterEffectType::GLOW,
             RasterEffectType::DISPLACEMENT_WARP
