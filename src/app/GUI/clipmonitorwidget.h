@@ -26,7 +26,7 @@ public:
 
     QString path() const { return mPath; }
     int zoneIn() const { return mZoneIn; }
-    // -1 = 未设（拖出按全片段）
+    // 装载后恒为全片段或更窄（kdenlive：zone 永远可见，I/O 挪边）
     int zoneOut() const { return mZoneOut; }
     int frameCount() const { return mFrameCount; }
     bool hasZone() const { return mZoneOut >= mZoneIn && mFrameCount > 0; }
@@ -39,7 +39,7 @@ signals:
     void openRequested();
 
 protected:
-    bool eventFilter(QObject *watched, QEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
 
 private:
     friend class MonitorView;

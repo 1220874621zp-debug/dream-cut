@@ -8,6 +8,7 @@
 #include <QMediaMetaData>
 #include <QMediaPlayer>
 #include <QMimeData>
+#include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPolygonF>
@@ -174,6 +175,9 @@ protected:
     }
 
     void mousePressEvent(QMouseEvent *e) override {
+        // 面板拿焦点：I/O/空格才能路由进监视器（否则被时间轴 dock
+        // 的 processKeyPress 抢走设了场景入出点，监视器毫无反应）
+        mMon->setFocus(Qt::MouseFocusReason);
         if (e->button() != Qt::LeftButton) { return; }
         mPressPos = e->pos();
         mDragging = false;
@@ -356,6 +360,7 @@ protected:
     }
 
     void mousePressEvent(QMouseEvent *e) override {
+        mMon->setFocus(Qt::MouseFocusReason);
         if (mFrameCount <= 0) { return; }
         if (e->button() != Qt::LeftButton) { return; }
         const bool hasZone = mZoneOut >= mZoneIn;
@@ -475,8 +480,11 @@ ClipMonitorWidget::ClipMonitorWidget(QWidget *parent) : QWidget(parent) {
                     QMediaMetaData::VideoFrameRate);
         mFps = rate.isValid() && rate.toReal() > 1. ? rate.toReal() : 30.;
         mFrameCount = qMax(1, int(qRound(mDurationMs * mFps / 1000.)));
+        // kdenlive 装载即 zone=全片段（monitor.cpp setZone(0, dur)）：
+        // zone 永远可见，I/O 只是挪边，"清除"恢复全片段。之前未设态
+        // (-1) 只按 I 无任何视觉反馈 = 用户"设不了出入点"的感知源
         mZoneIn = 0;
-        mZoneOut = -1; // kdenlive：装载复位为未设
+        mZoneOut = mFrameCount - 1;
         mRuler->mFrameCount = mFrameCount;
         mRuler->mZoneIn = mZoneIn;
         mRuler->mZoneOut = mZoneOut;
@@ -536,7 +544,7 @@ ClipMonitorWidget::ClipMonitorWidget(QWidget *parent) : QWidget(parent) {
         if (hasZone()) { seekTo(mZoneOut); }
     });
     auto * const zClearBtn = mkBtn(
-                kSvgZoneClear, QStringLiteral("清除出入点（未设=全片段）"));
+                kSvgZoneClear, QStringLiteral("重置为全片段"));
     connect(zClearBtn, &QToolButton::clicked, this, [this]() { resetZone(); });
     auto * const openBtn = mkBtn(kSvgOpen, QStringLiteral("打开素材文件"));
     connect(openBtn, &QToolButton::clicked, this,
@@ -580,35 +588,36 @@ ClipMonitorWidget::ClipMonitorWidget(QWidget *parent) : QWidget(parent) {
     layout->addWidget(mFileLabel);
     layout->addLayout(controls);
 
+    // StrongFocus：点击面板（view/ruler 的 setFocus）后键盘进面板
     setFocusPolicy(Qt::StrongFocus);
-    installEventFilter(this);
 }
 
-bool ClipMonitorWidget::eventFilter(QObject *watched, QEvent *event) {
-    if (event->type() == QEvent::KeyPress) {
-        const auto key = static_cast<QKeyEvent*>(event)->key();
-        const bool shift =
-                static_cast<QKeyEvent*>(event)->modifiers() &
-                Qt::ShiftModifier;
-        // kdenlive：I/O 设 zone，Shift+I/O 跳 zone 首尾
-        if (key == Qt::Key_I && !shift) { setZoneIn(mCurrentFrame); return true; }
-        if (key == Qt::Key_O && !shift) { setZoneOut(mCurrentFrame); return true; }
-        if (key == Qt::Key_I && shift && hasZone()) { seekTo(mZoneIn); return true; }
-        if (key == Qt::Key_O && shift && hasZone()) { seekTo(mZoneOut); return true; }
-        if (key == Qt::Key_Space) { togglePlay(); return true; }
-        if (key == Qt::Key_Left) { stepFrame(-1); return true; }
-        if (key == Qt::Key_Right) { stepFrame(1); return true; }
-        if (key == Qt::Key_Home) { seekTo(0); return true; }
-        if (key == Qt::Key_End) { seekToEnd(); return true; }
+// 键盘路由（kdenlive 快捷键）：焦点在面板或从子控件冒泡都收。
+// 焦点不在面板时 I/O 归时间轴 dock（friction 原生场景入出点）
+void ClipMonitorWidget::keyPressEvent(QKeyEvent *event) {
+    const int key = event->key();
+    const bool shift = event->modifiers() & Qt::ShiftModifier;
+    // kdenlive：I/O 设 zone，Shift+I/O 跳 zone 首尾
+    if (key == Qt::Key_I && !shift) { setZoneIn(mCurrentFrame); return; }
+    if (key == Qt::Key_O && !shift) { setZoneOut(mCurrentFrame); return; }
+    if (key == Qt::Key_I && shift && hasZone()) { seekTo(mZoneIn); return; }
+    if (key == Qt::Key_O && shift && hasZone()) { seekTo(mZoneOut); return; }
+    if (key == Qt::Key_Space && !(event->modifiers() & Qt::ShiftModifier)) {
+        togglePlay();
+        return;
     }
-    return QWidget::eventFilter(watched, event);
+    if (key == Qt::Key_Left) { stepFrame(-1); return; }
+    if (key == Qt::Key_Right) { stepFrame(1); return; }
+    if (key == Qt::Key_Home) { seekTo(0); return; }
+    if (key == Qt::Key_End) { seekToEnd(); return; }
+    QWidget::keyPressEvent(event);
 }
 
 void ClipMonitorWidget::loadFile(const QString &path) {
     if (path.isEmpty()) { return; }
     mPath = path;
     mZoneIn = 0;
-    mZoneOut = -1;
+    mZoneOut = -1; // 加载完成（LoadedMedia）后置全片段
     mFrameCount = 0;
     mCurrentFrame = 0;
     mView->mFrame = QImage();
@@ -682,11 +691,13 @@ void ClipMonitorWidget::setZone(const int in, const int out) {
     emit zoneChanged();
 }
 
+// 清除 = 恢复全片段（kdenlive：zone 恒存在，清除即回全片段）
 void ClipMonitorWidget::resetZone() {
+    if (mFrameCount <= 0) { return; }
     mZoneIn = 0;
-    mZoneOut = -1;
-    mRuler->mZoneIn = 0;
-    mRuler->mZoneOut = -1;
+    mZoneOut = mFrameCount - 1;
+    mRuler->mZoneIn = mZoneIn;
+    mRuler->mZoneOut = mZoneOut;
     mRuler->update();
     updateControls();
     emit zoneChanged();
