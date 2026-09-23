@@ -10,6 +10,7 @@
 #include "Boxes/videobox.h"
 #include "Sound/evideosound.h"
 #include "Timeline/durationrectangle.h"
+#include "Timeline/fixedlenanimationrect.h"
 #include "Boxes/animationbox.h"
 #include "clipboardcontainer.h"
 #include "smartPointers/ememory.h"
@@ -302,17 +303,26 @@ void NleTimelineModel::setLayerRange(eBoxOrSound * const layer,
     const int newMax = start + duration - 1;
     const int oldMin = dur->getMinAbsFrame();
     const int oldMax = dur->getMaxAbsFrame();
-    // rel/abs shift is constant, so abs deltas are valid rel moves
-    if (newMin != oldMin) {
+    // rel/abs shift is constant, so abs deltas are valid rel moves.
+    // Order by direction (shiftLayer's rule): moving min first on a
+    // right shift crosses min past max and the illegal-state clamp
+    // pins it back to the OLD max - the clip then spans the wrong
+    // range with an inflated duration (drag release looked like the
+    // clip vanished into a wrong span)
+    const auto moveMin = [&dur, newMin, oldMin]() {
+        if (newMin == oldMin) { return; }
         dur->startMinFramePosTransform();
         dur->moveMinFrame(newMin - oldMin);
         dur->finishMinFramePosTransform();
-    }
-    if (newMax != oldMax) {
+    };
+    const auto moveMax = [&dur, newMax, oldMax]() {
+        if (newMax == oldMax) { return; }
         dur->startMaxFramePosTransform();
         dur->moveMaxFrame(newMax - oldMax);
         dur->finishMaxFramePosTransform();
-    }
+    };
+    if (newMin > oldMin || newMax > oldMax) { moveMax(); moveMin(); }
+    else { moveMin(); moveMax(); }
 }
 
 void NleTimelineModel::shiftLayer(eBoxOrSound * const layer,
@@ -1619,6 +1629,40 @@ void NleTimelineModel::refreshFromDocument()
             }
         }
         mInWriteback = false;
+    }
+
+    // 无窗口层补窗口（CapCut 新元素语义）：画布形状、调整层、固态
+    // 层、矢量容器、文字这些菜单/工具/脚本新建的层没有 durRect——
+    // 在时间轴上表现为整条场景兜底长块，且拖动/修剪落不了地
+    // （setLayerRange 对 null 跳过）。一次性补上：锚定播放头，默认
+    // 5 秒（与收编同款的一次性写入，不进撤销栈）
+    if (scene) {
+        const int head = scene->anim_getCurrentAbsFrame();
+        const int len = qMax(1, qRound(5. * mFps));
+        bool anyWindowless = false;
+        for (int i = 0; i < items.size(); ++i) {
+            if (items[i].second) { continue; } // sounds always own one
+            if (items[i].first->getDurationRectangle()) { continue; }
+            anyWindowless = true;
+            break;
+        }
+        if (anyWindowless) {
+            mInWriteback = true;
+            const auto undoBlock = scene->blockUndoRedo();
+            for (int i = 0; i < items.size(); ++i) {
+                const auto layer = items[i].first;
+                if (items[i].second ||
+                        layer->getDurationRectangle()) { continue; }
+                const auto dur = enve::make_shared<
+                            FixedLenAnimationRect>(*layer);
+                dur->setMinAbsFrame(head);
+                dur->setMaxAbsFrame(head + len - 1);
+                // QSharedPointer<FixedLen> converts to
+                // QSharedPointer<DurationRectangle> implicitly
+                layer->setDurationRectangle(dur);
+            }
+            mInWriteback = false;
+        }
     }
     // ---- solo 压制：同类任一轨独奏时未独奏轨的成员层隐藏。
     // 压制即层可见性（声音可听性=可见性，与静音同一机制），恢复恒
