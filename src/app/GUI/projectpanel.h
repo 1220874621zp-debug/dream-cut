@@ -51,6 +51,10 @@ public:
 protected:
     void showEvent(QShowEvent* const e);
 
+signals:
+    // 双击素材条目：请求把该文件导入当前场景（系统预览留在右键菜单）
+    void importRequested(const QString& filePath);
+
 private:
     struct FolderInfo {
         int id = 0;

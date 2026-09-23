@@ -1517,16 +1517,16 @@ bool nleCarriesContent(BoundingBox * const box, const int depth = 0)
     return false;
 }
 
-// CapCut has no track for these: solid layers and pure vector shape
-// containers live on the canvas only. A mask-host layer group (which
-// carries a video/image child) stays a real clip; adjustment layers
-// stay too (their block renders as a translucent action bar)
+// CapCut has no track for these: solid layers, adjustment layers and
+// pure vector shape containers live on the canvas only. A mask-host
+// layer group (which carries a video/image child) stays a real clip
 bool nleIsAuxLayer(eBoxOrSound * const layer)
 {
     const auto box = enve_cast<BoundingBox*>(layer);
     if (!box) { return false; } // sounds always show
     const auto t = box->getBoxType();
     if (t == eBoxType::solid) { return true; }
+    if (t == eBoxType::adjustmentLayer) { return true; }
     if (t == eBoxType::layer) {
         return !nleCarriesContent(box);
     }

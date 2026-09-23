@@ -1726,6 +1726,16 @@ void MainWindow::setupLayout()
     // AND the imported file assets; scenes can be dragged onto the
     // active canvas to create a scene link
     mProjectPanel = new ProjectPanel(mDocument, this);
+    // 双击项目面板素材：导入到当前场景（与导入按钮同路径，同文件
+    // 共享解码缓存）
+    connect(mProjectPanel, &ProjectPanel::importRequested,
+            this, [this](const QString& path) {
+        try {
+            mActions.importFile(path);
+        } catch (const std::exception& e) {
+            gPrintExceptionCritical(e);
+        }
+    });
     mProjectDock = makeDock(tr("Project"), QStringLiteral("dockProject"),
                             mProjectPanel);
 

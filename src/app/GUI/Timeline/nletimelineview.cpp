@@ -883,26 +883,7 @@ void NleTimelineView::drawClip(QPainter &p,
     const bool hasEmbeddedWave = !c.audio &&
             waveIt != mWaves.constEnd() && !waveIt.value().isEmpty();
 
-    // adjustment layer: an action layer, not content - translucent
-    // accent body with a dashed border instead of any thumbnail
-    const auto clipBox = enve_cast<BoundingBox*>(c.layer.data());
-    const bool isAdjust = clipBox &&
-            clipBox->getBoxType() == eBoxType::adjustmentLayer;
-
-    if (isAdjust) {
-        p.fillPath(path, QColor(cAccent.red(), cAccent.green(),
-                                cAccent.blue(), 36));
-        p.setPen(QPen(QColor(cAccent.red(), cAccent.green(),
-                             cAccent.blue(), 170), 1, Qt::DashLine));
-        p.drawPath(path);
-        p.setPen(QColor(0xec, 0xec, 0xec));
-        QFont af = font();
-        af.setPixelSize(10);
-        p.setFont(af);
-        p.drawText(r.adjusted(5, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
-                   p.fontMetrics().elidedText(
-                       c.name, Qt::ElideRight, int(r.width() - 8)));
-    } else if (!c.audio) {
+    if (!c.audio) {
         // body
         p.fillPath(path, QColor(0x2a, 0x2a, 0x2c));
         // thumbnail filmstrip below the name bar
@@ -972,11 +953,9 @@ void NleTimelineView::drawClip(QPainter &p,
     QFont f = font();
     f.setPixelSize(10);
     p.setFont(f);
-    if (!isAdjust) {
-        p.drawText(r.adjusted(5, 0, -4, -(r.height() - nameBarH)),
-                   Qt::AlignVCenter | Qt::AlignLeft,
-                   p.fontMetrics().elidedText(c.name, Qt::ElideRight, int(r.width() - 8)));
-    }
+    p.drawText(r.adjusted(5, 0, -4, -(r.height() - nameBarH)),
+               Qt::AlignVCenter | Qt::AlignLeft,
+               p.fontMetrics().elidedText(c.name, Qt::ElideRight, int(r.width() - 8)));
 
     // speed badge (kdenlive shows the rate on sped-up clips): right
     // end of the name bar, e.g. "2x" / "0.5x"

@@ -290,9 +290,9 @@ ProjectPanel::ProjectPanel(Document& doc, QWidget* const parent) :
         if (const auto scene = sceneAt(item)) {
             switchToScene(scene);
         } else if (const auto handler = fileAt(item)) {
-            // preview with the system default viewer
-            QDesktopServices::openUrl(
-                        QUrl::fromLocalFile(handler->path()));
+            // 双击导入：把素材加进当前场景（同文件复用解码缓存）；
+            // 系统播放器预览保留在右键菜单
+            emit importRequested(handler->path());
         }
     });
     // folders expand/collapse on a single click (frequent organizing
