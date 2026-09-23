@@ -223,7 +223,7 @@ TimelineWidget::TimelineWidget(Document &document,
         layerBtn->setAutoRaise(true);
         layerBtn->setPopupMode(QToolButton::InstantPopup);
         auto layerMenu = new QMenu(layerBtn);
-        layerMenu->addAction(tr("Adjustment Layer"), this, [this]() {
+        layerMenu->addAction(tr("调整图层"), this, [this]() {
             const auto scroller = mBoxesListWidget ?
                         mBoxesListWidget->getBoxScroller() : nullptr;
             if(const auto scene = scroller ?
@@ -231,7 +231,7 @@ TimelineWidget::TimelineWidget(Document &document,
                 scene->addAdjustmentLayerAction();
             }
         });
-        layerMenu->addAction(tr("Solid Layer"), this, [this]() {
+        layerMenu->addAction(tr("固态层"), this, [this]() {
             const auto scroller = mBoxesListWidget ?
                         mBoxesListWidget->getBoxScroller() : nullptr;
             if(const auto scene = scroller ?

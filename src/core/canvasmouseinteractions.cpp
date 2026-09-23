@@ -84,7 +84,7 @@ void Canvas::addActionsToMenu(QMenu *const menu)
 {
     // new adjustment layer (applies its raster effects to the layers
     // below inside the same parent)
-    menu->addAction(QObject::tr("New Adjustment Layer"), [this]() {
+    menu->addAction(QObject::tr("新建调整图层"), [this]() {
         const auto adj = enve::make_shared<AdjustmentLayer>();
         mCurrentContainer->addContained(adj);
         adj->planUpdate(UpdateReason::userChange);
@@ -92,7 +92,7 @@ void Canvas::addActionsToMenu(QMenu *const menu)
     });
 
     // new solid layer (AE-style flat-color plane, canvas-sized)
-    menu->addAction(QObject::tr("New Solid Layer"), [this]() {
+    menu->addAction(QObject::tr("新建固态层"), [this]() {
         addSolidLayerAction();
     });
 
