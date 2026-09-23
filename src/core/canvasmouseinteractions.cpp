@@ -110,13 +110,13 @@ void Canvas::addActionsToMenu(QMenu *const menu)
 
     const auto clipboard = mDocument.getBoxesClipboard();
     if (clipboard) {
-        QAction * const pasteAct = menu->addAction(tr("Paste"), this,
+        QAction * const pasteAct = menu->addAction(tr("粘贴"), this,
                                                    &Canvas::pasteAction);
         pasteAct->setShortcut(QStringLiteral("Ctrl+V"));
     }
 
     menu->addAction(QIcon::fromTheme("duplicate"),
-                    tr("Duplicate Scene"), [this]() {
+                    tr("复制场景"), [this]() {
         const auto newScene = Document::sInstance->createNewScene();
         newScene->setCanvasSize(mWidth, mHeight);
         newScene->setFps(mFps);
@@ -127,16 +127,16 @@ void Canvas::addActionsToMenu(QMenu *const menu)
 
     const auto parentWidget = menu->parentWidget();
     menu->addAction(QIcon::fromTheme("file_movie"),
-                    tr("Map to Different Fps"), [this, parentWidget]() {
+                    tr("映射到不同帧率"), [this, parentWidget]() {
         bool ok;
         const qreal newFps = QInputDialog::getDouble(
-                    parentWidget, "Map to Different Fps",
-                    "New Fps:", mFps, 1, 999, 2, &ok);
+                    parentWidget, tr("映射到不同帧率"),
+                    tr("新帧率："), mFps, 1, 999, 2, &ok);
         if (ok) { changeFpsTo(newFps); }
     });
 
     menu->addAction(QIcon::fromTheme("sequence"),
-                    tr("Scene Properties"), [this]() {
+                    tr("场景属性"), [this]() {
         const auto& dialogs = DialogsInterface::instance();
         dialogs.showSceneSettingsDialog(this);
     });
@@ -175,11 +175,10 @@ void Canvas::handleRightButtonMouseRelease(const eMouseEvent& e)
             for (const auto& box : mSelectedBoxes) { box->setupCanvasMenu(&menu); }
             qMenu.exec(e.fGlobalPos);
         } else {
+            // 监视器式视口：画布空白右键不再弹新建菜单（命令已迁
+            // 时间轴加号下拉），仅保留点击空白清除选择的语义
             clearPointsSelection();
             clearBoxesSelection();
-            QMenu menu(e.fWidget);
-            addActionsToMenu(&menu);
-            menu.exec(e.fGlobalPos);
         }
     }
     mDocument.actionFinished();

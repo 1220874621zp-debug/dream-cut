@@ -189,6 +189,7 @@ private:
     class QActionGroup *mToolGroup = nullptr;
     QAction *mToolActs[6] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
     QAction *mNleToolSeps[3] = { nullptr, nullptr, nullptr };
+    QToolButton *mNleAddBtn = nullptr;
     QAction *mNleSplitAtAct = nullptr;
     QAction *mNleFreezeAct = nullptr;
     QAction *mNleUndoAct = nullptr;

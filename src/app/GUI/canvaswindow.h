@@ -117,7 +117,6 @@ protected:
 
     void mousePressEvent(QMouseEvent *event);
     void mouseReleaseEvent(QMouseEvent *event);
-    void keyReleaseEvent(QKeyEvent *event);
     void mouseMoveEvent(QMouseEvent *event);
     void wheelEvent(QWheelEvent *event);
     void mouseDoubleClickEvent(QMouseEvent *event);
@@ -160,7 +159,6 @@ private:
     Document& mDocument;
     Actions& mActions;
 
-    QSize mOldSize{-1, -1};
     QTransform mViewTransform;
     QPointF mPrevMousePos;
     QPointF mPrevPressPos;
@@ -171,7 +169,6 @@ private:
     qsptr<WindowSingleWidgetTarget> mWindowSWTTarget;
 
     ConnContextPtr<Canvas> mCurrentCanvas;
-    bool mFitToSizeBlocked;
 
     //void paintEvent(QPaintEvent *);
 

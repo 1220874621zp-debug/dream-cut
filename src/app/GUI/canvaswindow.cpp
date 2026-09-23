@@ -65,7 +65,6 @@ CanvasWindow::CanvasWindow(Document &document,
     , mActions(*Actions::sInstance)
     , mBlockInput(false)
     , mMouseGrabber(false)
-    , mFitToSizeBlocked(false)
 {
     //setAttribute(Qt::WA_OpaquePaintEvent, true);
     connect(&mDocument, &Document::canvasModeSet,
@@ -221,6 +220,9 @@ void CanvasWindow::setCurrentCanvas(Canvas * const canvas)
         updatePivotIfNeeded();
         conn << connect(mCurrentCanvas, &Canvas::requestUpdate,
                         this, qOverload<>(&CanvasWindow::update));
+        // 监视器式视口：场景画布尺寸改变（新建/改分辨率）即重新适配
+        conn << connect(mCurrentCanvas, &Canvas::dimensionsChanged,
+                        this, [this]() { fitCanvasToSize(); });
         conn << connect(mCurrentCanvas, &Canvas::destroyed,
                         this, [this]() { setCurrentCanvas(nullptr); });
     }
@@ -494,12 +496,11 @@ void CanvasWindow::mousePressEvent(QMouseEvent *event)
     const auto button = event->button();
     bool leftAndAltPressed = (button == Qt::LeftButton) &&
                              QGuiApplication::keyboardModifiers().testFlag(Qt::AltModifier);
+    // 监视器式视口：中键/右键/Alt+左键不再进入平移态；右键释放仍走
+    // Canvas 菜单逻辑（对象/控制点菜单），空白新建菜单已迁时间轴加号
     if (button == Qt::MiddleButton ||
         button == Qt::RightButton ||
         leftAndAltPressed) {
-        if (button == Qt::MiddleButton || leftAndAltPressed) {
-            QApplication::setOverrideCursor(Qt::ClosedHandCursor);
-        }
         return;
     }
     KFT_setFocus();
@@ -560,15 +561,8 @@ void CanvasWindow::mousePressEvent(QMouseEvent *event)
 void CanvasWindow::mouseReleaseEvent(QMouseEvent *event)
 {
     const auto button = event->button();
-    bool leftAndAltPressed = (button == Qt::LeftButton) &&
-                             QGuiApplication::keyboardModifiers().testFlag(Qt::AltModifier);
-    if (button == Qt::MiddleButton || leftAndAltPressed) {
-        QApplication::restoreOverrideCursor();
-    } else if ((button == Qt::RightButton) &&
-               QApplication::overrideCursor()) {
-        QApplication::restoreOverrideCursor();
-        return;
-    }
+    // 监视器式视口：不再有平移态需要恢复；右键释放交给 Canvas
+    // 处理（对象/控制点菜单或清除选择）
     // PS-style guide drop: back onto the ruler = remove, into the
     // canvas = create/keep
     if (mDragGuide && button == Qt::LeftButton) {
@@ -610,14 +604,6 @@ void CanvasWindow::mouseReleaseEvent(QMouseEvent *event)
     finishAction();
 }
 
-void CanvasWindow::keyReleaseEvent(QKeyEvent *event)
-{
-    if (event->key() == Qt::Key_Alt &&
-        QApplication::overrideCursor()) {
-        QApplication::restoreOverrideCursor();
-    }
-}
-
 void CanvasWindow::mouseMoveEvent(QMouseEvent *event)
 {
     if (!mCurrentCanvas || mBlockInput) { return; }
@@ -629,17 +615,7 @@ void CanvasWindow::mouseMoveEvent(QMouseEvent *event)
         update();
         return;
     }
-    bool leftAndAltPressed = (event->buttons() & Qt::LeftButton) &&
-                             QGuiApplication::keyboardModifiers().testFlag(Qt::AltModifier);
-    if (event->buttons() & Qt::MiddleButton ||
-        event->buttons() & Qt::RightButton ||
-        leftAndAltPressed) {
-        if (!QApplication::overrideCursor()) {
-            QApplication::setOverrideCursor(Qt::ClosedHandCursor);
-        }
-        translateView(pos - mPrevMousePos);
-        pos = mPrevMousePos;
-    }
+    // 监视器式视口：不再支持中键/右键/Alt+左键拖动平移
     mCurrentCanvas->mouseMoveEvent(eMouseEvent(pos,
                                                mPrevMousePos,
                                                mPrevPressPos,
@@ -657,36 +633,8 @@ void CanvasWindow::mouseMoveEvent(QMouseEvent *event)
 
 void CanvasWindow::wheelEvent(QWheelEvent *event)
 {
-#ifdef Q_OS_MAC
-    const bool alt = event->modifiers() & Qt::AltModifier;
-    if (!alt && event->phase() != Qt::NoScrollPhase) {
-        if (event->phase() == Qt::ScrollUpdate ||
-            event->phase() == Qt::ScrollMomentum) {
-            auto pos = mPrevMousePos;
-            const qreal zoom = mViewTransform.m11() * 1.5;
-            if (event->angleDelta().y() != 0) {
-                pos.setY(pos.y() + event->angleDelta().y() / zoom);
-            }
-            if (event->angleDelta().x() != 0) {
-                pos.setX(pos.x() + event->angleDelta().x() / zoom);
-            }
-            translateView(pos - mPrevMousePos);
-            mPrevMousePos = pos;
-            update();
-        }
-        return;
-    }
-    if (event->angleDelta().y() == 0 &&
-        event->phase() != Qt::NoScrollPhase) { return; }
-#endif
-    if (!mCurrentCanvas) { return; }
-    const auto ePos = event->position();
-    if (event->angleDelta().y() > 0) {
-        zoomView(1.1, ePos);
-    } else {
-        zoomView(0.9, ePos);
-    }
-    update();
+    // 监视器式视口：滚轮不再缩放/平移，画布恒为适配窗口的完整场景
+    Q_UNUSED(event)
 }
 
 void CanvasWindow::mouseDoubleClickEvent(QMouseEvent *event)
@@ -743,7 +691,6 @@ void CanvasWindow::readState(eReadStream &src)
     });
 
     src >> mViewTransform;
-    mFitToSizeBlocked = true;
 }
 
 void CanvasWindow::readStateXEV(XevReadBoxesHandler& boxReadHandler,
@@ -761,8 +708,6 @@ void CanvasWindow::readStateXEV(XevReadBoxesHandler& boxReadHandler,
 
     const auto viewTransformStr = ele.attribute("viewTransform");
     mViewTransform = XmlExportHelpers::stringToMatrix(viewTransformStr);
-
-    mFitToSizeBlocked = true;
 }
 
 void CanvasWindow::writeStateXEV(QDomElement& ele,
@@ -806,15 +751,9 @@ bool CanvasWindow::handleTransformationKeyPress(QKeyEvent *event)
 {
     const int key = event->key();
     const bool keypad = event->modifiers() & Qt::KeypadModifier;
+    // 监视器式视口：仅保留小键盘 0 = 适配窗口；百分比缩放已无意义
     if (key == Qt::Key_0 && keypad) {
         fitCanvasToSize();
-    } else if (key == Qt::Key_1 && keypad) {
-        resetTransformation();
-    } else if (key == Qt::Key_Minus || key == Qt::Key_Plus) {
-       if (mCurrentCanvas->isPreviewingOrRendering()) { return false; }
-       const auto relPos = mapFromGlobal(QCursor::pos());
-       if (event->key() == Qt::Key_Plus) { zoomView(1.2, relPos); }
-       else { zoomView(0.8, relPos); }
     } else { return false; }
     update();
     return true;

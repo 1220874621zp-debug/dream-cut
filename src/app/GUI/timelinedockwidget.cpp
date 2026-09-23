@@ -42,6 +42,7 @@
 #include <QFile>
 #include <QApplication>
 #include <QActionGroup>
+#include <QMenu>
 
 #include <functional>
 
@@ -809,6 +810,31 @@ void TimelineDockWidget::setupNleActions()
     });
     insertAct(mNleSplitAtAct);
     mMainWindow->cmdAddAction(mNleSplitAtAct);
+
+    // "+" dropdown (CapCut 添加): hosts the canvas blank-area context
+    // commands (new adjustment/solid/vector/text layer, paste, scene
+    // commands) that used to live on the canvas right-click menu;
+    // sits between the tool cluster and 分割
+    mNleAddBtn = new QToolButton(this);
+    mNleAddBtn->setAutoRaise(true);
+    mNleAddBtn->setToolTip(tr("添加"));
+    mNleAddBtn->setIcon(QIcon::fromTheme("list-add"));
+    auto *addMenu = new QMenu(mNleAddBtn);
+    // rebuild on every open: actions bind to the active scene, which
+    // may change between openings
+    connect(addMenu, &QMenu::aboutToShow, this, [addMenu]() {
+        addMenu->clear();
+        const auto scene = *Document::sInstance->fActiveScene;
+        if (scene) { scene->addActionsToMenu(addMenu); }
+    });
+    mNleAddBtn->setMenu(addMenu);
+    mNleAddBtn->setPopupMode(QToolButton::InstantPopup);
+    mNleAddBtn->setEnabled(*mDocument.fActiveScene);
+    connect(&mDocument, &Document::activeSceneSet, mNleAddBtn,
+            [btn = mNleAddBtn](Canvas * const scene) {
+        btn->setEnabled(scene);
+    });
+    mToolBar->insertWidget(mNleSplitAtAct, mNleAddBtn);
 
     // freeze the selection at the playhead (CapCut 定格)
     mNleFreezeAct = new QAction(

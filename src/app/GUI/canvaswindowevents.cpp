@@ -54,27 +54,17 @@ void CanvasWindow::zoomView(const qreal scaleBy,
     mViewTransform.translate(transPoint.x(), transPoint.y());
 }
 
+// 监视器式视口（kdenlive 语义）：窗口尺寸变化即重新适配场景，
+// 画布永远完整可见，不再保留无限画布的平移补偿
 void CanvasWindow::resizeEvent(QResizeEvent *e)
 {
-    if (e->size().isValid()) {
-        if (mOldSize.isValid()) {
-            const auto dSize = e->size() - mOldSize;
-            const qreal div = 2 * mViewTransform.m11();
-            const QPointF trans{dSize.width() / div, dSize.height() / div};
-            translateView(trans);
-        }
-        // e->oldSize() returns {-1, -1} after changing parent
-        mOldSize = e->size();
-    }
+    Q_UNUSED(e)
+    fitCanvasToSize();
     GLWindow::resizeEvent(e);
 }
 
 void CanvasWindow::fitCanvasToSize(const bool &fitWidth)
 {
-    if (mFitToSizeBlocked) {
-        mFitToSizeBlocked = false;
-        return;
-    }
     if (!mCurrentCanvas) { return; }
     mViewTransform.reset();
     qreal pixelRatio = devicePixelRatioF();
