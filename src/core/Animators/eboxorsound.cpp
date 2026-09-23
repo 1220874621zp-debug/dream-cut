@@ -645,6 +645,17 @@ void eBoxOrSound::setVisible(const bool visible)
         prp_afterChangedAbsRange(updateRange, false);
     } else { prp_afterWholeInfluenceRangeChanged(); }
 
+    // 藏层立即失效已合并的声音秒缓存：内嵌 eVideoSound 的可听性挂
+    // 在宿主盒上（scheduleSecond 按宿主可见性过滤），宿主隐藏不会
+    // 触发声音自身的 prp_absFrameRangeChanged，秒缓存不清掉的话
+    // scheduleSecond 见缓存即跳过——NLE 轨道 solo/静音/停用后声音
+    // 照响、取消后不回来。独立声音自己会失效，这里重复失效无害
+    if (const auto scene = getParentScene()) {
+        if (const auto comp = scene->getSoundComposition()) {
+            comp->invalidateRange(prp_absInfluenceRange());
+        }
+    }
+
     SWT_scheduleContentUpdate(SWT_BoxRule::visible);
     SWT_scheduleContentUpdate(SWT_BoxRule::hidden);
 

@@ -77,6 +77,13 @@ public:
 
     const ConnContextObjList<qsptr<eSound>>& getSounds() const
     { return mSounds; }
+
+    // drop merged seconds covering the range so the next schedule
+    // re-merges against the CURRENT visibility set: visibility flips
+    // on host boxes never reach the embedded sounds' own
+    // prp_absFrameRangeChanged, so without this the stale mix keeps
+    // hitting the cache (track solo/mute kept sounding)
+    void invalidateRange(const FrameRange &range);
 private:
     SoundMerger * scheduleSecond(const int secondId);
 

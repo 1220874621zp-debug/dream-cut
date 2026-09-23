@@ -2050,6 +2050,14 @@ void NleTimelineModel::refreshFromDocument()
         }
     }
 
+    // 刷新内发生的文档可见性写入（solo 压制/恢复、停用/启用）需要
+    // actionFinished 泵一次才入队渲染：planUpdate 只挂起更新，
+    // requestTrackToggleSolo/requestSetDisabled 全程不调
+    // actionFinished，画布就停在旧帧直到下一次无关交互（用户感知
+    // =solo 后画面不刷新/迟迟才刷）。updateScenes 只做排队，无同步
+    // 重入风险
+    if (Document::sInstance) { Document::sInstance->actionFinished(); }
+
     emit modelChanged();
     emit guidesChanged();
     if (scene) { emit playheadFrameChanged(scene->anim_getCurrentAbsFrame()); }

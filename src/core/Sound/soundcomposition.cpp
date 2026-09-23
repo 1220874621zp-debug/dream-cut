@@ -99,6 +99,12 @@ SoundMerger *SoundComposition::scheduleFrame(const int frameId) {
     return scheduleSecond(qFloor(frameId/fps));
 }
 
+void SoundComposition::invalidateRange(const FrameRange &range) {
+    const qreal fps = mParent->getFps();
+    if(fps <= 0.) return;
+    secondRangeChanged({qFloor(range.fMin/fps), qCeil(range.fMax/fps)});
+}
+
 SoundMerger *SoundComposition::scheduleSecond(const int secondId) {
     if(mSounds.isEmpty()) return nullptr;
     if(mProcessingSeconds.contains(secondId)) return nullptr;
