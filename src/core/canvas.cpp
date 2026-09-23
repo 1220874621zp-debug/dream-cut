@@ -2771,6 +2771,24 @@ void Canvas::addSolidLayerAction() {
 // shapes drawn afterwards; creating it enters the layer (like AE's new
 // shape layer being the active shape target), double-click empty
 // canvas to leave it
+void Canvas::addTextLayerAction() {
+    const auto text = enve::make_shared<TextBox>();
+#ifdef Q_OS_LINUX
+    text->setFontFamilyAndStyle(QStringLiteral("Noto Sans CJK JP"),
+                                SkFontStyle());
+#else
+    text->setFontFamilyAndStyle(QStringLiteral("Microsoft YaHei"),
+                                SkFontStyle());
+#endif
+    text->setCurrentValue(QObject::tr("文字"));
+    ContainerBox* const parent = mCurrentContainer ? mCurrentContainer.data()
+                                                   : this;
+    parent->addContained(text);
+    text->planCenterPivotPosition();
+    text->planUpdate(UpdateReason::userChange);
+    if(Document::sInstance) Document::sInstance->actionFinished();
+}
+
 void Canvas::addVectorLayerAction() {
     const auto layer = enve::make_shared<ContainerBox>(
                 QObject::tr("矢量图层"), eBoxType::layer);

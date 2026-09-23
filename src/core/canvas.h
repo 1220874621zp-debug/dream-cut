@@ -960,6 +960,9 @@ public:
     // empty layer-type container for vector shapes; entering it makes
     // subsequent shape draws land inside (AE shape layer)
     void addVectorLayerAction();
+    // canvas right-click: a fresh text layer (defaults like the
+    // scripting addText) landing on its own NLE 文字 lane
+    void addTextLayerAction();
     // empty group flagged as a switch group, ready to receive layers
 
 

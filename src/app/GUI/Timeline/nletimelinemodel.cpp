@@ -1713,24 +1713,17 @@ void NleTimelineModel::refreshFromDocument()
         laneMembers[laneIdx].append(items[i].first);
     }
 
-    // typed-only 轨道（文字/图形/调整/矢量容器这些辅助层）默认压到
-    // 最小行高 36（CapCut 矮轨）；固态层除外——friction/AE 语义它是
-    // 画布尺寸纯色平面的普通图层，保持普通轨高；用户手调过的
+    // typed-only 轨道（文字/图形/固态/调整/矢量容器这些无媒体层）
+    // 默认压到最小行高 36（CapCut 矮轨）；用户手调过的
     // （spec.mHeight > 0）不动
     {
-        const auto isCompactLayer = [&isTypedLayer](
-                eBoxOrSound * const layer) {
-            if (!isTypedLayer(layer)) { return false; }
-            const auto box = enve_cast<BoundingBox*>(layer);
-            return box && box->getBoxType() != eBoxType::solid;
-        };
         for (int t = 0; t < trackCount; ++t) {
             if (mTracks.at(t).audio || mTracks.at(t).height > 0) { continue; }
             const auto &members = laneMembers.at(t);
             if (members.isEmpty()) { continue; }
             bool allTyped = true;
             for (const auto l : members) {
-                if (!isCompactLayer(l)) { allTyped = false; break; }
+                if (!isTypedLayer(l)) { allTyped = false; break; }
             }
             if (allTyped) { mTracks[t].height = 36; }
         }

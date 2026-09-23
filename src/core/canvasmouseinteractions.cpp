@@ -103,6 +103,11 @@ void Canvas::addActionsToMenu(QMenu *const menu)
         addVectorLayerAction();
     });
 
+    // fresh text layer: lands on its own NLE 文字 lane at the playhead
+    menu->addAction(QObject::tr("新建文字层"), [this]() {
+        addTextLayerAction();
+    });
+
     const auto clipboard = mDocument.getBoxesClipboard();
     if (clipboard) {
         QAction * const pasteAct = menu->addAction(tr("Paste"), this,
