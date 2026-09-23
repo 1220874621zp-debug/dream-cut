@@ -1799,8 +1799,8 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
             // kdenlive 方案A: the clip follows the mouse 1:1 on the
             // frame grid - no edge snapping, no refusals - and the
             // whole track rearranges around the drop live (the left
-            // pack closes its internal gaps, the rest chains tightly
-            // after; a deliberately placed leading gap survives)
+            // pack compacts toward 0 - 主轨首块恒靠左对齐时间起点,
+            // the rest chains tightly after)
             if (laneOk) {
                 QHash<int, NleTimelineModel::Move> cand;
                 for (const auto &m : mModel->magneticRearrangePlan(

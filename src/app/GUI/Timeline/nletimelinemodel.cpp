@@ -206,16 +206,14 @@ QVector<NleTimelineModel::Move> NleTimelineModel::insertShiftPlan(
     return moves;
 }
 
-QVector<NleTimelineModel::Move> NleTimelineModel::compactGapsPlan(
-        const bool fromZero) const
+QVector<NleTimelineModel::Move> NleTimelineModel::compactGapsPlan() const
 {
     // MAIN TRACK ONLY (CapCut): per start order a clip that begins
     // after the previous one ends slides left onto that out point;
     // overlays keep their positions. Overlaps (merged layouts) are
-    // kept as-is, so only genuine gaps close. The chain head is NOT
-    // pinned to frame 0 (剪映对齐: a deliberately dragged main clip
-    // stays where dropped); the deletion path passes fromZero=true
-    // so the chain closes up over the removed span
+    // kept as-is, so only genuine gaps close. 用户规则：主轨首块
+    // 恒靠左对齐时间起点（帧 1/时间 00），拖走的头块随刷新被
+    // 拉回，刻意的开头空隙在主轨不存在
     const int mainId = mainTrackId();
     QVector<Move> moves;
     for (const auto &t : mTracks) {
@@ -229,10 +227,9 @@ QVector<NleTimelineModel::Move> NleTimelineModel::compactGapsPlan(
         // 恰好路过的刷新才闭合（用户感知=磁吸刷新迟钝/不刷新）
         if (order.isEmpty()) { continue; }
         std::sort(order.begin(), order.end());
-        // fromZero=false: the cursor starts at the FIRST clip's own
-        // start, so only gaps BETWEEN clips close; fromZero=true:
-        // everything compacts toward frame 0 (deletion closure)
-        int cursor = fromZero ? 0 : order.first().first;
+        int cursor = 0; // CapCut rule: the chain head always sits at
+                        // frame 1 (time 00) - the fallback compaction
+                        // pulls a strayed head back too
         for (const auto &p : order) {
             const auto c = clip(p.second);
             if (!c) { continue; }
@@ -824,12 +821,11 @@ bool NleTimelineModel::requestDelete(const QSet<int> &clipIds,
     }
 
     // CapCut magnetic deletion: close the main chain over the removed
-    // span FROM ZERO - deletion-driven leading gaps close (磁吸删除
-    // 后接缝归位), while a deliberately dragged leading gap survives
-    // (the fallback compactor only closes internal gaps). Overlaid
-    // clips (audio included) ride their anchors by the same deltas
-    // when 轨道联动 is on. Planned against the survivors of the
-    // PRE-removal table, applied inside the writeback below
+    // span FROM ZERO (磁吸删除后接缝归位；主轨首块恒靠左对齐时间
+    // 起点，删除空出的开头同样闭合). Overlaid clips (audio included)
+    // ride their anchors by the same deltas when 轨道联动 is on.
+    // Planned against the survivors of the PRE-removal table,
+    // applied inside the writeback below
     QVector<Move> closure;
     QList<QPair<int, int>> closureRides; // clipId, newStart
     if (mMagnetic) {
@@ -1536,12 +1532,10 @@ QVector<NleTimelineModel::Move> NleTimelineModel::magneticRearrangePlan(
         const QSet<int> &movingIds) const
 {
     // kdenlive 方案A: dragged clip = drop frame 1:1; left package
-    // (end <= drop) compacts to close its INTERNAL gaps only - the
-    // leading gap survives (剪映对齐: a deliberately dragged main
-    // clip stays where dropped, the chain head is not yanked back to
-    // frame 0); everything else chains tightly after the dragged
-    // clip's new out point. A clip straddling the drop point belongs
-    // to the right package and moves as a whole.
+    // (end <= drop) compacts toward 0 - 用户规则：链头恒在帧 1 即
+    // 时间 00，主轨首块始终靠左对齐；everything else chains tightly
+    // after the dragged clip's new out point. A clip straddling the
+    // drop point belongs to the right package and moves as a whole.
     QVector<Move> moves;
     const auto dragged = clip(draggedId);
     if (!dragged) { return moves; }
@@ -1561,10 +1555,10 @@ QVector<NleTimelineModel::Move> NleTimelineModel::magneticRearrangePlan(
     std::sort(left.begin(), left.end(), byStart);
     std::sort(right.begin(), right.end(), byStart);
 
-    // left pack closes its own internal gaps; the cursor starts at
-    // the pack's first clip so the leading gap stays where the user
-    // put it
-    int cursor = left.isEmpty() ? drop : left.first()->start;
+    // kdenlive compaction toward 0: the head clip always lands at
+    // frame 1 (time 00) - 用户规则主轨首块恒靠左对齐时间起点，左
+    // 包从 0 起压收拢内部间隙
+    int cursor = 0;
     for (const Clip *c : left) {
         if (cursor != c->start) {
             moves.append({c->clipId, trackId, cursor, c->duration});
