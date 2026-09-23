@@ -1599,10 +1599,9 @@ void NleTimelineModel::refreshFromDocument()
                         true, s.mHeight});
     }
 
-    // typed 新层专用轨（CapCut 新建图层动线）：文字/图形/固态/调整/
-    // 矢量容器这些新建层不再挤进现有视频轨，落进 typed 专用轨——已
-    // 有（成员全 typed 的轨）用之，没有就在视频组尾新建一条（主轨
-    // 恒最底不受影响）
+    // typed 新层一轨一层（CapCut 新建图层动线）：文字/图形/固态/
+    // 调整/矢量容器这些新建层每个独占一条新轨，插在主轨正上方
+    // （后建的贴近主轨，先建的被动上移；主轨恒最底不受影响）
     const auto isTypedLayer = [](eBoxOrSound * const layer) {
         const auto box = enve_cast<BoundingBox*>(layer);
         if (!box) { return false; }
@@ -1619,58 +1618,63 @@ void NleTimelineModel::refreshFromDocument()
             return false;
         }
     };
-    int typedLane = -1;
-    bool anyTypedAdopt = false;
-    for (int i = 0; i < items.size(); ++i) {
-        if (items[i].second || !isTypedLayer(items[i].first)) { continue; }
-        if (laneById.contains(items[i].first->trackId())) { continue; }
-        anyTypedAdopt = true;
-        break;
-    }
-    if (anyTypedAdopt) {
-        // 找现有 typed 专用轨：停靠成员全 typed 的视频轨（取最后一
-        // 条 = 最新建的）
-        QHash<int, int> laneCounts;
-        QHash<int, bool> laneMixed;
-        for (int i = 0; i < items.size(); ++i) {
-            const int t = laneById.value(items[i].first->trackId(), -1);
-            if (t < 0) { continue; }
-            laneCounts[t]++;
-            if (!isTypedLayer(items[i].first)) { laneMixed[t] = true; }
+    // typed 待收编层 → 各自的新轨 lane 索引（负 = 非定向）
+    QHash<int, int> typedAdoptLane;
+    {
+        // 插入锚：主轨在 mTracks 里的索引（找不到就用视频区尾）
+        int insertAt = -1;
+        const int mainId = mainTrackId();
+        for (int t = 0; t < mTracks.size(); ++t) {
+            if (mTracks.at(t).id == mainId) { insertAt = t; break; }
         }
-        for (int t = int(mTracks.size()) - 1; t >= 0; --t) {
-            if (mTracks.at(t).audio) { continue; }
-            if (laneCounts.value(t, 0) > 0 && !laneMixed.value(t, false)) {
-                typedLane = t;
-                break;
+        if (insertAt < 0) {
+            insertAt = int(mTracks.size()) - int(std::count_if(
+                        specs.begin(), specs.end(),
+                        [](const eTrackSpec &sp) { return sp.mAudio; }));
+        }
+        bool anyTyped = false;
+        for (int i2 = 0; i2 < items.size(); ++i2) {
+            if (items[i2].second || !isTypedLayer(items[i2].first)) { continue; }
+            if (laneById.contains(items[i2].first->trackId())) { continue; }
+            anyTyped = true;
+            break;
+        }
+        if (anyTyped && scene) {
+            // specs 里主轨的位置（addTrackSpec 用 specs 索引）
+            int specMainIdx = -1;
+            for (int k = 0; k < specs.size(); ++k) {
+                if (specs.at(k).mId == mainId) { specMainIdx = k; break; }
             }
-        }
-        if (typedLane < 0) {
-            // 视频组尾建新轨（主轨上方）；mHeight 清 0 让矮高判定
-            // 接管（typed 专用轨默认 36px）
+            if (specMainIdx < 0) {
+                specMainIdx = int(specs.size()) - int(std::count_if(
+                            specs.begin(), specs.end(),
+                            [](const eTrackSpec &sp) { return sp.mAudio; }));
+            }
             mInWriteback = true;
-            int newId = -1;
-            {
-                const auto undoBlock = scene->blockUndoRedo();
-                newId = scene->addTrackSpec(
-                            false, QObject::tr("图层"),
-                            int(std::count_if(specs.begin(), specs.end(),
-                                  [](const eTrackSpec &s) { return !s.mAudio; })));
-                if (newId >= 0) { scene->setTrackSpecHeight(newId, 0); }
-            }
-            mInWriteback = false;
-            if (newId >= 0) {
-                const int at = int(mTracks.size()) -
-                        int(std::count_if(specs.begin(), specs.end(),
-                              [](const eTrackSpec &s) { return s.mAudio; }));
-                mTracks.insert(at, {newId, QObject::tr("图层"), false,
-                                     false, false, false, 0});
+            for (int i2 = 0; i2 < items.size(); ++i2) {
+                if (items[i2].second || !isTypedLayer(items[i2].first)) { continue; }
+                if (laneById.contains(items[i2].first->trackId())) { continue; }
+                int newId = -1;
+                {
+                    const auto undoBlock = scene->blockUndoRedo();
+                    newId = scene->addTrackSpec(
+                                false, items[i2].first->prp_getName(),
+                                specMainIdx);
+                    if (newId >= 0) { scene->setTrackSpecHeight(newId, 0); }
+                }
+                if (newId < 0) { continue; }
+                specs.insert(specMainIdx,
+                             eTrackSpec{}); // 占位对齐（下面立刻重建）
+                mTracks.insert(insertAt, {newId,
+                                          items[i2].first->prp_getName(),
+                                          false, false, false, false, 0});
                 laneById.clear();
                 for (int t = 0; t < mTracks.size(); ++t) {
                     laneById.insert(mTracks.at(t).id, t);
                 }
-                typedLane = at;
+                typedAdoptLane.insert(i2, insertAt);
             }
+            mInWriteback = false;
         }
     }
 
@@ -1684,13 +1688,10 @@ void NleTimelineModel::refreshFromDocument()
     QVector<QList<eBoxOrSound*>> laneMembers(trackCount);
     QList<QPair<eBoxOrSound*, int>> adoptions; // layer, laneIdx
     for (int i = 0; i < items.size(); ++i) {
-        const bool typedAdopt = typedLane >= 0 && !items[i].second &&
-                isTypedLayer(items[i].first) &&
-                !laneById.contains(items[i].first->trackId());
         int laneIdx = laneById.value(items[i].first->trackId(), -1);
         if (laneIdx < 0) {
-            if (typedAdopt) {
-                laneIdx = typedLane;
+            if (typedAdoptLane.contains(i)) {
+                laneIdx = typedAdoptLane.value(i);
             } else {
                 for (int t = 0; t < trackCount; ++t) {
                     if (mTracks.at(t).audio == items[i].second) {
