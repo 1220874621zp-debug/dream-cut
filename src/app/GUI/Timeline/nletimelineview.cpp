@@ -1000,8 +1000,14 @@ void NleTimelineView::razorCutAt(const QPoint &pos, const int clipId,
                                  const bool allTracks)
 {
     const auto c = mModel->clip(clipId);
-    if (!c) { return; }
+    if (!c) {
+        // 落空也要留痕：否则日志无法区分“点了没切”与“点了没点上”
+        qInfo("[NLE] razor miss frame=%d", xToFrame(pos.x()));
+        return;
+    }
     if (mModel->trackLocked(c->trackId)) {
+        qInfo("[NLE] razor blocked track=%d frame=%d", c->trackId,
+              xToFrame(pos.x()));
         emit logMessage(QStringLiteral("轨道已锁定，剪刀无效"));
         return;
     }
@@ -1019,6 +1025,15 @@ void NleTimelineView::razorCutAt(const QPoint &pos, const int clipId,
     // cut does not resurrect both halves by name
     mModel->clearSelection();
     mModel->requestRazorCut(ids, frame);
+    QList<int> sorted = ids.values();
+    std::sort(sorted.begin(), sorted.end());
+    QString idStr;
+    for (const int id : sorted) {
+        idStr += (idStr.isEmpty() ? QString() : QStringLiteral(","))
+                 + QString::number(id);
+    }
+    qInfo("[NLE] razor cut frame=%d all=%d ids=%s", frame, int(allTracks),
+          qUtf8Printable(idStr));
 }
 
 // PR track select: click collects the clicked clip plus every clip on
