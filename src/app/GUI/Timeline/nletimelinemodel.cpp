@@ -222,12 +222,14 @@ QVector<NleTimelineModel::Move> NleTimelineModel::compactGapsPlan() const
         }
         if (order.size() < 2) { continue; }
         std::sort(order.begin(), order.end());
-        int cursor = -1;
+        int cursor = 0; // CapCut rule: the chain head always sits at
+                        // frame 1 (time 00) - the fallback compaction
+                        // pulls a strayed head back too
         for (const auto &p : order) {
             const auto c = clip(p.second);
             if (!c) { continue; }
             int newStart = c->start;
-            if (cursor >= 0 && c->start > cursor) { newStart = cursor; }
+            if (c->start > cursor) { newStart = cursor; }
             if (newStart != c->start) {
                 moves.append({c->clipId, c->trackId, newStart, c->duration});
             }
@@ -1316,10 +1318,9 @@ QVector<NleTimelineModel::Move> NleTimelineModel::magneticRearrangePlan(
         const int trackId, const int draggedId, const int dropStart,
         const QSet<int> &movingIds) const
 {
-    // kdenlive 方案A (CapCut-adjusted): dragged clip = drop frame 1:1;
-    // the left package (end <= drop) keeps its own head position and
-    // only closes INTERNAL gaps (a pack that starts at frame 50 stays
-    // at 50 - the chain is never dragged back to 0); everything else
+    // kdenlive 方案A: dragged clip = drop frame 1:1; left package
+    // (end <= drop) compacts toward 0 - the user's CapCut rule: the
+    // chain head ALWAYS sits at frame 1 (time 00); everything else
     // chains tightly after the dragged clip's new out point. A clip
     // straddling the drop point belongs to the right package and
     // moves as a whole.
@@ -1342,15 +1343,14 @@ QVector<NleTimelineModel::Move> NleTimelineModel::magneticRearrangePlan(
     std::sort(left.begin(), left.end(), byStart);
     std::sort(right.begin(), right.end(), byStart);
 
-    int cursor = -1;
+    int cursor = 0;
     for (const Clip *c : left) {
-        int ns = c->start;
-        if (cursor >= 0 && c->start > cursor) { ns = cursor; }
-        if (ns != c->start) {
-            moves.append({c->clipId, trackId, ns, c->duration});
+        if (cursor != c->start) {
+            moves.append({c->clipId, trackId, cursor, c->duration});
         }
-        cursor = ns + c->duration; // internal gaps close; the pack's
-                                   // own head position is preserved
+        cursor = cursor + c->duration; // kdenlive compaction toward 0:
+                                       // the head clip always lands at
+                                       // frame 1 (time 00)
     }
     moves.append({draggedId, trackId, drop, dur});
     cursor = drop + dur;
@@ -1824,7 +1824,9 @@ void NleTimelineModel::refreshFromDocument()
         bool anyMember = false;
         bool allHidden = true;
         for (eBoxOrSound* l : laneMembers[t]) {
-            if (!l || mSoloSuppressed.contains(l)) { continue; }
+            if (!l) { continue; }
+            // solo 压制层计入 hidden：被独奏压制的轨在时间轴上同步
+            // 压暗+喇叭红，视觉反馈即时（不再"看似没刷新"）
             const int cid = mLayerToClipId.value(l, -1);
             if (cid >= 0 && mDisabledIds.contains(cid)) { continue; }
             anyMember = true;
