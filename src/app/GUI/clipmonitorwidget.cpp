@@ -18,6 +18,7 @@
 #include <QVBoxLayout>
 #include <QVideoFrame>
 #include <QVideoSink>
+#include <QWheelEvent>
 #include <functional>
 
 namespace {
@@ -235,32 +236,49 @@ public:
     int mCurrent = 0;
     int mZoneIn = 0;
     int mZoneOut = -1;
+    // 缩放（kdenlive timeZoomFactor/timeZoomOffset 的窗口式表述）：
+    // 可视窗口 = [mZoomFrom, mZoomFrom+mZoomFrames)，全宽=覆盖全长。
+    // Ctrl+滚轮以鼠标为锚缩放，播放头越窗自动滚动追边
+    int mZoomFrom = 0;
+    int mZoomFrames = 0; // 0 = 跟随全长（未初始化）
 
     enum class Grab { None, Seek, InEdge, OutEdge };
     Grab mGrab = Grab::None;
     // 气泡：拖 zone 边时显示（入>长 / 长<出），悬停 zone 显示时长
     int mBubbleMode = 0; // 0=off 1=dur 2=in 3=out
 
+    int zoomFrames() const {
+        return mZoomFrames > 0 ? qMin(mZoomFrames, mFrameCount)
+                               : mFrameCount;
+    }
+    bool zoomed() const { return zoomFrames() < mFrameCount; }
+    void resetZoom() {
+        mZoomFrom = 0;
+        mZoomFrames = mFrameCount;
+        update();
+    }
+
 private:
     ClipMonitorWidget * const mMon;
 
     qreal frameW() const {
-        return mFrameCount > 0 ? qreal(width()) / mFrameCount : 0.;
+        return zoomFrames() > 0 ? qreal(width()) / zoomFrames() : 0.;
     }
     int xOfFrame(const int f) const {
-        return qRound((f + 0.5) * frameW());
+        return qRound((f - mZoomFrom + 0.5) * frameW());
     }
     int frameAtX(const int x) const {
-        if (mFrameCount <= 0) { return 0; }
-        return qBound(0, int(x / frameW()), mFrameCount - 1);
+        if (zoomFrames() <= 0) { return 0; }
+        return qBound(0, mZoomFrom + int(x / frameW()), mFrameCount - 1);
     }
     int grabW() const { return 7; } // zone 把手抓取半宽
 
-    // kdenlive 刻度阶梯：按显示时长选帧距（<3s=1帧 …）
+    // kdenlive 刻度阶梯：按可视窗口的显示时长选帧距（<3s=1帧 …，
+    // 缩放后窗口变窄刻度自动变密 = 精选出入点的核心收益）
     int tickFrames() const {
-        if (mFrameCount <= 0) { return 0; }
+        if (zoomFrames() <= 0) { return 0; }
         const int fps = qMax(1, int(mMon->mFps));
-        const int secs = mFrameCount / fps;
+        const int secs = zoomFrames() / fps;
         if (secs < 3) { return 1; }
         if (secs < 30) { return fps; }
         if (secs < 150) { return 5 * fps; }
@@ -279,7 +297,8 @@ protected:
         if (mFrameCount <= 0) { return; }
         const bool hasZone = mZoneOut >= mZoneIn;
 
-        // zone：底部半高（kdenlive 高亮色暗调，opacity 视觉）
+        // zone：底部半高（kdenlive 高亮色暗调，opacity 视觉）。
+        // 窗口化坐标：越窗部分被 QRect 自动裁剪
         if (hasZone) {
             const int zx = xOfFrame(mZoneIn) - qRound(frameW() / 2);
             const int zo = xOfFrame(mZoneOut) + qRound(frameW() / 2);
@@ -298,21 +317,22 @@ protected:
                               : QColor(0xd0, 0xd0, 0xd4, 160));
         }
 
-        // 刻度：主（每 5 个 tick）半高、次 1/4 高
+        // 刻度：主（每 5 个 tick）半高、次 1/4 高。刻度号对齐全局
+        // 帧格（窗口平移不跳档），idx 从窗口起点起算保证档位稳定
         const int tf = tickFrames();
         if (tf > 0) {
             p.setPen(QColor(0x8a, 0x8a, 0x90));
-            int idx = 0;
-            for (int f = 0; f < mFrameCount; f += tf, ++idx) {
+            const int first = (mZoomFrom / tf) * tf;
+            for (int f = first; f < mFrameCount; f += tf) {
                 const int x = xOfFrame(f);
                 if (x < 0 || x >= width()) { continue; }
-                const int h = (idx % 5 == 0) ? height() / 2
-                                             : height() / 4;
+                const int h = ((f / tf) % 5 == 0) ? height() / 2
+                                                  : height() / 4;
                 p.drawLine(x, height() - h, x, height());
             }
         }
 
-        // 已播放区淡显
+        // 已播放区淡显（窗口内部分）
         if (mCurrent > 0) {
             const int cx = xOfFrame(mCurrent);
             p.fillRect(QRect(0, 0, cx, height()),
@@ -429,6 +449,31 @@ protected:
         update();
     }
 
+    void wheelEvent(QWheelEvent *e) override {
+        if (mFrameCount <= 0) { return; }
+        if (!(e->modifiers() & Qt::ControlModifier)) { return; }
+        // kdenlive zoomIn/OutRuler：1.2 步进；以鼠标位置为锚（锚帧
+        // 在窗口内的比例缩放前后不变），窗口最小 8 帧、最大全长
+        const int zf = zoomFrames();
+        if (zf <= 0) { return; }
+        const qreal factor = e->angleDelta().y() > 0 ? 1 / 1.25 : 1.25;
+        int nz = qMax(8, qMin(mFrameCount, int(qRound(zf * factor))));
+        if (nz == zf) { return; }
+        const int anchor = frameAtX(int(e->position().x()));
+        const qreal r = qBound(0., qreal(anchor - mZoomFrom) / zf, 1.);
+        int from = qRound(anchor - r * nz);
+        from = qBound(0, from, qMax(0, mFrameCount - nz));
+        mZoomFrom = from;
+        mZoomFrames = nz;
+        update();
+        e->accept();
+    }
+
+    void mouseDoubleClickEvent(QMouseEvent *) override {
+        // 双击标尺 = 回到全宽（快捷复位入口）
+        if (zoomed()) { resetZoom(); }
+    }
+
     void leaveEvent(QEvent *) override {
         if (mGrab == Grab::None && (mHoverEdge || mBubbleMode)) {
             mHoverEdge = 0;
@@ -438,6 +483,23 @@ protected:
     }
 
     int mHoverEdge = 0; // 0 none 1 in 2 out
+
+    // 播放头更新入口：越窗时自动滚动追边（kdenlive 的 seekOffset
+    // 逻辑——播放头贴边留 8% 余量再滚，避免频繁跳动）
+public:
+    void setCurrent(const int f) {
+        mCurrent = f;
+        const int zf = zoomFrames();
+        if (!zoomed() || zf <= 0 || width() <= 0) { return; }
+        const int edge = qMax(1, width() / 12);
+        const int px = (mCurrent - mZoomFrom) * width() / zf;
+        if (px < edge && mZoomFrom > 0) {
+            mZoomFrom = qMax(0, mCurrent - edge * zf / width());
+        } else if (px > width() - edge) {
+            mZoomFrom = qMin(qMax(0, mFrameCount - zf),
+                             mCurrent - (width() - edge) * zf / width());
+        }
+    }
 };
 
 // ---------------------------------------------------------------- panel
@@ -458,7 +520,7 @@ ClipMonitorWidget::ClipMonitorWidget(QWidget *parent) : QWidget(parent) {
     connect(mPlayer, &QMediaPlayer::positionChanged, this,
             [this](const qint64 ms) {
         mCurrentFrame = frameFromMs(ms);
-        mRuler->mCurrent = mCurrentFrame;
+        mRuler->setCurrent(mCurrentFrame);
         mRuler->update();
         mView->mOverlayTc = timecode(mCurrentFrame);
         mView->update();
@@ -484,6 +546,8 @@ ClipMonitorWidget::ClipMonitorWidget(QWidget *parent) : QWidget(parent) {
         // 重置只在新装载（loadFile 换了素材）：LoadedMedia 会重发
         // （播放到头再播、seek 回冲、后端重新缓冲），无条件重置会把
         // 用户设好的出入点悄悄抹回全片段（"设置了会自动改变"根因）
+        mRuler->mZoomFrom = 0;
+        mRuler->mZoomFrames = mFrameCount; // 新装载回全宽
         if (!mZoneResetPending) {
             // 尺长刷新后 zone 可能越界，夹回即可（值不动）
             mZoneIn = qBound(0, mZoneIn, mFrameCount - 1);
@@ -643,6 +707,8 @@ void ClipMonitorWidget::loadFile(const QString &path) {
     mRuler->mFrameCount = 0;
     mRuler->mZoneIn = 0;
     mRuler->mZoneOut = -1;
+    mRuler->mZoomFrom = 0;
+    mRuler->mZoomFrames = 0;
     mRuler->update();
     mFileLabel->setText(path);
     mPlayer->setSource(QUrl::fromLocalFile(path));
