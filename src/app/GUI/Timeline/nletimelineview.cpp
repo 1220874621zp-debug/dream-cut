@@ -901,6 +901,7 @@ void NleTimelineView::drawClip(QPainter &p,
         case eBoxType::vectorPath:
         case eBoxType::circle:
         case eBoxType::rectangle:
+        case eBoxType::solid:
         case eBoxType::layer:
             typeBody = QColor(0x2f, 0x6f, 0xd8); break;            // 蓝
         default:
@@ -910,23 +911,28 @@ void NleTimelineView::drawClip(QPainter &p,
     const bool typed = typeBody.isValid();
 
     if (typed) {
-        p.fillPath(path, typeBody);
+        // 矮条居中（默认最小轨高 36px）：纯色 + 名称，无缩略图/名条。
+        // 命中与拖动区域仍是整轨高的块矩形
+        const qreal barH = qMin(r.height(), 36.);
+        const QRectF bar(r.left(), r.top() + (r.height() - barH) / 2.,
+                         r.width(), barH);
+        QPainterPath barPath;
+        barPath.addRoundedRect(bar, 4, 4);
+        p.fillPath(barPath, typeBody);
         if (isAdjust) {
             // action layer: dashed border keeps it visually distinct
             // from content layers even in white
             p.setPen(QPen(QColor(0x70, 0x70, 0x70), 1, Qt::DashLine));
-            p.drawPath(path);
+            p.drawPath(barPath);
         }
-        p.fillRect(QRectF(r.left(), r.top(), r.width(), nameBarH),
-                   typeBody.darker(140));
         p.setPen(isAdjust ? QColor(0x33, 0x33, 0x33)
                           : QColor(0xff, 0xff, 0xff));
         QFont tf = font();
         tf.setPixelSize(10);
         p.setFont(tf);
-        p.drawText(r.adjusted(5, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
+        p.drawText(bar.adjusted(8, 0, -6, 0), Qt::AlignVCenter | Qt::AlignLeft,
                    p.fontMetrics().elidedText(
-                       c.name, Qt::ElideRight, int(r.width() - 8)));
+                       c.name, Qt::ElideRight, int(bar.width() - 14)));
     } else if (!c.audio) {
         // body
         p.fillPath(path, QColor(0x2a, 0x2a, 0x2c));
