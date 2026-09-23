@@ -546,25 +546,34 @@ ClipMonitorWidget::ClipMonitorWidget(QWidget *parent) : QWidget(parent) {
         // 重置只在新装载（loadFile 换了素材）：LoadedMedia 会重发
         // （播放到头再播、seek 回冲、后端重新缓冲），无条件重置会把
         // 用户设好的出入点悄悄抹回全片段（"设置了会自动改变"根因）
-        mRuler->mZoomFrom = 0;
-        mRuler->mZoomFrames = mFrameCount; // 新装载回全宽
         if (!mZoneResetPending) {
-            // 尺长刷新后 zone 可能越界，夹回即可（值不动）
+            // LoadedMedia 重发（seek 后端重新缓冲、播到头再播）：
+            // zone 只夹回越界值，缩放窗口同样只夹不重置——重置必须
+            // 只在新装载做，否则用户刚放的标尺被一次定位打回全宽
+            // （zone 同款病）
             mZoneIn = qBound(0, mZoneIn, mFrameCount - 1);
             mZoneOut = qBound(mZoneIn, qMax(mZoneIn, mZoneOut),
                               mFrameCount - 1);
             mRuler->mZoneIn = mZoneIn;
             mRuler->mZoneOut = mZoneOut;
+            if (mRuler->mZoomFrames > mFrameCount) {
+                mRuler->mZoomFrames = mFrameCount;
+            }
+            mRuler->mZoomFrom = qBound(
+                        0, mRuler->mZoomFrom,
+                        qMax(0, mFrameCount - mRuler->zoomFrames()));
             mRuler->update();
             return;
         }
         mZoneResetPending = false;
-        // kdenlive 装载即 zone=全片段（monitor.cpp setZone(0, dur)）：
-        // zone 永远可见，I/O 只是挪边，"清除"恢复全片段
+        // 新装载：zone=全片段（kdenlive monitor.cpp setZone(0,dur)），
+        // 标尺回全宽
         mZoneIn = 0;
         mZoneOut = mFrameCount - 1;
         mRuler->mZoneIn = mZoneIn;
         mRuler->mZoneOut = mZoneOut;
+        mRuler->mZoomFrom = 0;
+        mRuler->mZoomFrames = mFrameCount;
         mRuler->update();
         updateControls();
         emit zoneChanged();
