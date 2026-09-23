@@ -1599,6 +1599,81 @@ void NleTimelineModel::refreshFromDocument()
                         true, s.mHeight});
     }
 
+    // typed 新层专用轨（CapCut 新建图层动线）：文字/图形/固态/调整/
+    // 矢量容器这些新建层不再挤进现有视频轨，落进 typed 专用轨——已
+    // 有（成员全 typed 的轨）用之，没有就在视频组尾新建一条（主轨
+    // 恒最底不受影响）
+    const auto isTypedLayer = [](eBoxOrSound * const layer) {
+        const auto box = enve_cast<BoundingBox*>(layer);
+        if (!box) { return false; }
+        switch (box->getBoxType()) {
+        case eBoxType::text:
+        case eBoxType::adjustmentLayer:
+        case eBoxType::solid:
+        case eBoxType::vectorPath:
+        case eBoxType::circle:
+        case eBoxType::rectangle:
+        case eBoxType::layer:
+            return true;
+        default:
+            return false;
+        }
+    };
+    int typedLane = -1;
+    bool anyTypedAdopt = false;
+    for (int i = 0; i < items.size(); ++i) {
+        if (items[i].second || !isTypedLayer(items[i].first)) { continue; }
+        if (laneById.contains(items[i].first->trackId())) { continue; }
+        anyTypedAdopt = true;
+        break;
+    }
+    if (anyTypedAdopt) {
+        // 找现有 typed 专用轨：停靠成员全 typed 的视频轨（取最后一
+        // 条 = 最新建的）
+        QHash<int, int> laneCounts;
+        QHash<int, bool> laneMixed;
+        for (int i = 0; i < items.size(); ++i) {
+            const int t = laneById.value(items[i].first->trackId(), -1);
+            if (t < 0) { continue; }
+            laneCounts[t]++;
+            if (!isTypedLayer(items[i].first)) { laneMixed[t] = true; }
+        }
+        for (int t = int(mTracks.size()) - 1; t >= 0; --t) {
+            if (mTracks.at(t).audio) { continue; }
+            if (laneCounts.value(t, 0) > 0 && !laneMixed.value(t, false)) {
+                typedLane = t;
+                break;
+            }
+        }
+        if (typedLane < 0) {
+            // 视频组尾建新轨（主轨上方）；mHeight 清 0 让矮高判定
+            // 接管（typed 专用轨默认 36px）
+            mInWriteback = true;
+            int newId = -1;
+            {
+                const auto undoBlock = scene->blockUndoRedo();
+                newId = scene->addTrackSpec(
+                            false, QObject::tr("图层"),
+                            int(std::count_if(specs.begin(), specs.end(),
+                                  [](const eTrackSpec &s) { return !s.mAudio; })));
+                if (newId >= 0) { scene->setTrackSpecHeight(newId, 0); }
+            }
+            mInWriteback = false;
+            if (newId >= 0) {
+                const int at = int(mTracks.size()) -
+                        int(std::count_if(specs.begin(), specs.end(),
+                              [](const eTrackSpec &s) { return s.mAudio; }));
+                mTracks.insert(at, {newId, QObject::tr("图层"), false,
+                                     false, false, false, 0});
+                laneById.clear();
+                for (int t = 0; t < mTracks.size(); ++t) {
+                    laneById.insert(mTracks.at(t).id, t);
+                }
+                typedLane = at;
+            }
+        }
+    }
+
     // lane membership: the layer's trackId; unknown ids (fresh
     // imports, scene-born layers) adopt their display lane RIGHT
     // HERE - a persistent -1 would re-park on whatever lane is
@@ -1609,10 +1684,20 @@ void NleTimelineModel::refreshFromDocument()
     QVector<QList<eBoxOrSound*>> laneMembers(trackCount);
     QList<QPair<eBoxOrSound*, int>> adoptions; // layer, laneIdx
     for (int i = 0; i < items.size(); ++i) {
+        const bool typedAdopt = typedLane >= 0 && !items[i].second &&
+                isTypedLayer(items[i].first) &&
+                !laneById.contains(items[i].first->trackId());
         int laneIdx = laneById.value(items[i].first->trackId(), -1);
         if (laneIdx < 0) {
-            for (int t = 0; t < trackCount; ++t) {
-                if (mTracks.at(t).audio == items[i].second) { laneIdx = t; break; }
+            if (typedAdopt) {
+                laneIdx = typedLane;
+            } else {
+                for (int t = 0; t < trackCount; ++t) {
+                    if (mTracks.at(t).audio == items[i].second) {
+                        laneIdx = t;
+                        break;
+                    }
+                }
             }
             if (laneIdx >= 0) { adoptions.append({items[i].first, laneIdx}); }
         }
@@ -1625,22 +1710,6 @@ void NleTimelineModel::refreshFromDocument()
     // 默认压到最小行高 36（CapCut 辅助层矮轨）；用户手调过的
     // （spec.mHeight > 0）不动
     {
-        const auto isTypedLayer = [](eBoxOrSound * const layer) {
-            const auto box = enve_cast<BoundingBox*>(layer);
-            if (!box) { return false; }
-            switch (box->getBoxType()) {
-            case eBoxType::text:
-            case eBoxType::adjustmentLayer:
-            case eBoxType::solid:
-            case eBoxType::vectorPath:
-            case eBoxType::circle:
-            case eBoxType::rectangle:
-            case eBoxType::layer:
-                return true;
-            default:
-                return false;
-            }
-        };
         for (int t = 0; t < trackCount; ++t) {
             if (mTracks.at(t).audio || mTracks.at(t).height > 0) { continue; }
             const auto &members = laneMembers.at(t);
