@@ -96,6 +96,13 @@ void Canvas::addActionsToMenu(QMenu *const menu)
         addSolidLayerAction();
     });
 
+    // new AE shape layer: empty vector container that collects the
+    // shapes drawn after creating it (same entry as the classic
+    // timeline's new-layer dropdown)
+    menu->addAction(QObject::tr("新建矢量图层"), [this]() {
+        addVectorLayerAction();
+    });
+
     const auto clipboard = mDocument.getBoxesClipboard();
     if (clipboard) {
         QAction * const pasteAct = menu->addAction(tr("Paste"), this,

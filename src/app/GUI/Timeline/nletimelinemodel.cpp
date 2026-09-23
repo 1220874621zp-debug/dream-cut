@@ -1490,6 +1490,50 @@ QList<eTrackSpec> NleTimelineModel::deriveTrackSpecs(
     return specs;
 }
 
+namespace {
+// NLE content test: does this layer (recursively) carry anything the
+// timeline edits - video/image sources or sounds? Pure shape/vector
+// containers fail it and are canvas-composition helpers, not clips
+bool nleCarriesContent(BoundingBox * const box, const int depth = 0)
+{
+    if (!box || depth > 8) { return false; }
+    const auto group = enve_cast<ContainerBox*>(box);
+    if (!group) {
+        const auto t = box->getBoxType();
+        return t == eBoxType::video || t == eBoxType::image ||
+               t == eBoxType::imageSequence;
+    }
+    for (const auto &child : group->getContained()) {
+        const auto raw = child.data();
+        if (!raw) { continue; }
+        if (enve_cast<eSound*>(raw)) { return true; }
+        const auto childBox = enve_cast<BoundingBox*>(raw);
+        if (!childBox) { continue; }
+        const auto t = childBox->getBoxType();
+        if (t == eBoxType::video || t == eBoxType::image ||
+            t == eBoxType::imageSequence) { return true; }
+        if (nleCarriesContent(childBox, depth + 1)) { return true; }
+    }
+    return false;
+}
+
+// CapCut has no track for these: solid layers and pure vector shape
+// containers live on the canvas only. A mask-host layer group (which
+// carries a video/image child) stays a real clip; adjustment layers
+// stay too (their block renders as a translucent action bar)
+bool nleIsAuxLayer(eBoxOrSound * const layer)
+{
+    const auto box = enve_cast<BoundingBox*>(layer);
+    if (!box) { return false; } // sounds always show
+    const auto t = box->getBoxType();
+    if (t == eBoxType::solid) { return true; }
+    if (t == eBoxType::layer) {
+        return !nleCarriesContent(box);
+    }
+    return false;
+}
+} // namespace
+
 void NleTimelineModel::refreshFromDocument()
 {
     if (mInWriteback) { return; }
@@ -1509,6 +1553,9 @@ void NleTimelineModel::refreshFromDocument()
         for (const auto &child : s->getContained()) {
             const auto layer = child.data();
             if (!layer) { continue; }
+            // solid layers / pure vector containers stay off the NLE
+            // (canvas-composition helpers, no CapCut counterpart)
+            if (nleIsAuxLayer(layer)) { continue; }
             const bool audio = enve_cast<eSound*>(layer) != nullptr;
             items.append({layer, audio});
         }
