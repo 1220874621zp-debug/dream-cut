@@ -1003,7 +1003,7 @@ void NleTimelineView::drawClip(QPainter &p,
     QFont f = font();
     f.setPixelSize(10);
     p.setFont(f);
-    if (!isAdjust) {
+    if (!typed) { // typed 块的名称已画在矮条里，别再画一遍
         p.drawText(r.adjusted(5, 0, -4, -(r.height() - nameBarH)),
                    Qt::AlignVCenter | Qt::AlignLeft,
                    p.fontMetrics().elidedText(c.name, Qt::ElideRight, int(r.width() - 8)));

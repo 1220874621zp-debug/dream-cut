@@ -1620,6 +1620,38 @@ void NleTimelineModel::refreshFromDocument()
         lane[i] = laneIdx;
         laneMembers[laneIdx].append(items[i].first);
     }
+
+    // typed-only 轨道（文字/图形/固态/调整/矢量容器这些无媒体层）
+    // 默认压到最小行高 36（CapCut 辅助层矮轨）；用户手调过的
+    // （spec.mHeight > 0）不动
+    {
+        const auto isTypedLayer = [](eBoxOrSound * const layer) {
+            const auto box = enve_cast<BoundingBox*>(layer);
+            if (!box) { return false; }
+            switch (box->getBoxType()) {
+            case eBoxType::text:
+            case eBoxType::adjustmentLayer:
+            case eBoxType::solid:
+            case eBoxType::vectorPath:
+            case eBoxType::circle:
+            case eBoxType::rectangle:
+            case eBoxType::layer:
+                return true;
+            default:
+                return false;
+            }
+        };
+        for (int t = 0; t < trackCount; ++t) {
+            if (mTracks.at(t).audio || mTracks.at(t).height > 0) { continue; }
+            const auto &members = laneMembers.at(t);
+            if (members.isEmpty()) { continue; }
+            bool allTyped = true;
+            for (const auto l : members) {
+                if (!isTypedLayer(l)) { allTyped = false; break; }
+            }
+            if (allTyped) { mTracks[t].height = 36; }
+        }
+    }
     if (!adoptions.isEmpty() && scene) {
         mInWriteback = true;
         {
