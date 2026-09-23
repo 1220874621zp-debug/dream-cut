@@ -883,22 +883,47 @@ void NleTimelineView::drawClip(QPainter &p,
     const bool hasEmbeddedWave = !c.audio &&
             waveIt != mWaves.constEnd() && !waveIt.value().isEmpty();
 
-    // adjustment layer: an action layer, not content - translucent
-    // accent body with a dashed border instead of any thumbnail
+    // friction-style typed layer blocks (no media source): text =
+    // yellow, shapes & vector containers = blue, adjustment = white
+    // with a dashed border (action layer). The type bar doubles as
+    // the name bar; no thumbnail strip
     const auto clipBox = enve_cast<BoundingBox*>(c.layer.data());
-    const bool isAdjust = clipBox &&
-            clipBox->getBoxType() == eBoxType::adjustmentLayer;
+    QColor typeBody;
+    bool isAdjust = false;
+    if (clipBox) {
+        switch (clipBox->getBoxType()) {
+        case eBoxType::text:
+            typeBody = QColor(0xf5, 0xa6, 0x23); break;            // 黄
+        case eBoxType::adjustmentLayer:
+            typeBody = QColor(0xd8, 0xd8, 0xd8);                   // 白
+            isAdjust = true;
+            break;
+        case eBoxType::vectorPath:
+        case eBoxType::circle:
+        case eBoxType::rectangle:
+        case eBoxType::layer:
+            typeBody = QColor(0x2f, 0x6f, 0xd8); break;            // 蓝
+        default:
+            break;
+        }
+    }
+    const bool typed = typeBody.isValid();
 
-    if (isAdjust) {
-        p.fillPath(path, QColor(cAccent.red(), cAccent.green(),
-                                cAccent.blue(), 36));
-        p.setPen(QPen(QColor(cAccent.red(), cAccent.green(),
-                             cAccent.blue(), 170), 1, Qt::DashLine));
-        p.drawPath(path);
-        p.setPen(QColor(0xec, 0xec, 0xec));
-        QFont af = font();
-        af.setPixelSize(10);
-        p.setFont(af);
+    if (typed) {
+        p.fillPath(path, typeBody);
+        if (isAdjust) {
+            // action layer: dashed border keeps it visually distinct
+            // from content layers even in white
+            p.setPen(QPen(QColor(0x70, 0x70, 0x70), 1, Qt::DashLine));
+            p.drawPath(path);
+        }
+        p.fillRect(QRectF(r.left(), r.top(), r.width(), nameBarH),
+                   typeBody.darker(140));
+        p.setPen(isAdjust ? QColor(0x33, 0x33, 0x33)
+                          : QColor(0xff, 0xff, 0xff));
+        QFont tf = font();
+        tf.setPixelSize(10);
+        p.setFont(tf);
         p.drawText(r.adjusted(5, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
                    p.fontMetrics().elidedText(
                        c.name, Qt::ElideRight, int(r.width() - 8)));
