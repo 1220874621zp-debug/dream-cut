@@ -169,6 +169,18 @@ ContainerBox *Canvas::ensureMaskHost(BoundingBox * const target) {
     // makeNameUniqueForDescendants which overwrites the box name
     const QString targetName = target->prp_getName();
     parentGroup->insertContained(tId, group);
+    // NLE continuity (CapCut), BEFORE the target moves in: addContained
+    // emits the structure signal that rebuilds the NLE table, so the
+    // group must already carry the lane and the window by then - it
+    // inherits the lane (the clip never jumps tracks) and adopts the
+    // target's duration rect OBJECT itself, so the group window equals
+    // the video window (trims through either stay in lockstep, and a
+    // null group rect can never fall back to the scene range =
+    // phantom 200-frame clip)
+    group->setTrackId(target->trackId());
+    if (const auto td = target->getDurationRectangle()) {
+        group->setDurationRectangle(td->ref<DurationRectangle>(), true);
+    }
     group->addContained(target->ref<eBoxOrSound>());
     group->prp_setName(targetName);
     return group.get();

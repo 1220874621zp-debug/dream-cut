@@ -184,13 +184,42 @@ void NleTimelineController::requestMedia()
         const auto box = enve_cast<BoundingBox*>(layer);
         if (!box) { continue; }
 
+        // mask-host rewrap (a layer group wrapping one video-family
+        // child): route the filmstrip/wave requests through the inner
+        // child - the group itself owns no decoder, and the requests
+        // stay keyed by the GROUP's clipId so the tiles land on the
+        // rewrapped clip. Groups with several video children keep the
+        // synthetic midframe path
+        BoundingBox *mediaBox = box;
+        if (!dynamic_cast<AnimationBox*>(box)) {
+            if (const auto group = enve_cast<ContainerBox*>(box)) {
+                BoundingBox *single = nullptr;
+                int videos = 0;
+                for (const auto &child : group->getContained()) {
+                    const auto cb = enve_cast<BoundingBox*>(child.data());
+                    if (!cb) { continue; }
+                    const auto t = cb->getBoxType();
+                    if (t == eBoxType::video || t == eBoxType::image ||
+                        t == eBoxType::imageSequence) {
+                        single = cb;
+                        ++videos;
+                    }
+                }
+                if (videos == 1) {
+                    mediaBox = single;
+                    qInfo("[NLE] media route rewrap-passthrough clip=%d",
+                          c.clipId);
+                }
+            }
+        }
+
         // video family (VideoBox / image sequences): decoded filmstrip
-        const auto animBox = dynamic_cast<AnimationBox*>(box);
+        const auto animBox = dynamic_cast<AnimationBox*>(mediaBox);
         if (animBox) {
             // kdenlive A/V clip parity: a VideoBox with an embedded
             // sound also gets its waveform peaks fed (the view draws
             // them as a bottom strip under the thumbnails)
-            const auto vidBox = enve_cast<VideoBox*>(box);
+            const auto vidBox = enve_cast<VideoBox*>(mediaBox);
             const auto vSound = vidBox ? vidBox->sound() : nullptr;
             if (vSound) {
                 const int sec0 = qMax(0, int(viewA / fps));
