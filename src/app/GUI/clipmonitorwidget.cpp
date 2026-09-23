@@ -480,12 +480,25 @@ ClipMonitorWidget::ClipMonitorWidget(QWidget *parent) : QWidget(parent) {
                     QMediaMetaData::VideoFrameRate);
         mFps = rate.isValid() && rate.toReal() > 1. ? rate.toReal() : 30.;
         mFrameCount = qMax(1, int(qRound(mDurationMs * mFps / 1000.)));
+        mRuler->mFrameCount = mFrameCount;
+        // 重置只在新装载（loadFile 换了素材）：LoadedMedia 会重发
+        // （播放到头再播、seek 回冲、后端重新缓冲），无条件重置会把
+        // 用户设好的出入点悄悄抹回全片段（"设置了会自动改变"根因）
+        if (!mZoneResetPending) {
+            // 尺长刷新后 zone 可能越界，夹回即可（值不动）
+            mZoneIn = qBound(0, mZoneIn, mFrameCount - 1);
+            mZoneOut = qBound(mZoneIn, qMax(mZoneIn, mZoneOut),
+                              mFrameCount - 1);
+            mRuler->mZoneIn = mZoneIn;
+            mRuler->mZoneOut = mZoneOut;
+            mRuler->update();
+            return;
+        }
+        mZoneResetPending = false;
         // kdenlive 装载即 zone=全片段（monitor.cpp setZone(0, dur)）：
-        // zone 永远可见，I/O 只是挪边，"清除"恢复全片段。之前未设态
-        // (-1) 只按 I 无任何视觉反馈 = 用户"设不了出入点"的感知源
+        // zone 永远可见，I/O 只是挪边，"清除"恢复全片段
         mZoneIn = 0;
         mZoneOut = mFrameCount - 1;
-        mRuler->mFrameCount = mFrameCount;
         mRuler->mZoneIn = mZoneIn;
         mRuler->mZoneOut = mZoneOut;
         mRuler->update();
@@ -615,7 +628,11 @@ void ClipMonitorWidget::keyPressEvent(QKeyEvent *event) {
 
 void ClipMonitorWidget::loadFile(const QString &path) {
     if (path.isEmpty()) { return; }
+    // 同素材重装（双击再导入/再点项目面板条目）：保住用户出入点，
+    // kdenlive 的 zone 也是 per-clip 持久不随装载清
+    if (path == mPath && mFrameCount > 0) { return; }
     mPath = path;
+    mZoneResetPending = true;
     mZoneIn = 0;
     mZoneOut = -1; // 加载完成（LoadedMedia）后置全片段
     mFrameCount = 0;

@@ -70,6 +70,9 @@ private:
     int mCurrentFrame = 0;
     int mZoneIn = 0;
     int mZoneOut = -1;
+    // 新装载哨兵：只在真正换了素材时重置 zone（LoadedMedia 会重发，
+    // 播放到头再播/seek 回冲都要保住用户设的出入点）
+    bool mZoneResetPending = false;
 
     QLabel *mTimeLabel = nullptr;
     QLabel *mFileLabel = nullptr;
