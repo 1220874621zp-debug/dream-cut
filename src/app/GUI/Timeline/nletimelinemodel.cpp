@@ -1316,12 +1316,13 @@ QVector<NleTimelineModel::Move> NleTimelineModel::magneticRearrangePlan(
         const int trackId, const int draggedId, const int dropStart,
         const QSet<int> &movingIds) const
 {
-    // kdenlive 方案A: dragged clip = drop frame 1:1; left package (end
-    // <= drop) compacts toward 0; everything else chains tightly after
-    // the dragged clip's new out point. Existing overlaps inside a
-    // package keep their relative layout (compaction closes gaps
-    // only, the right chain serializes). A clip straddling the drop
-    // point belongs to the right package and moves as a whole.
+    // kdenlive 方案A (CapCut-adjusted): dragged clip = drop frame 1:1;
+    // the left package (end <= drop) keeps its own head position and
+    // only closes INTERNAL gaps (a pack that starts at frame 50 stays
+    // at 50 - the chain is never dragged back to 0); everything else
+    // chains tightly after the dragged clip's new out point. A clip
+    // straddling the drop point belongs to the right package and
+    // moves as a whole.
     QVector<Move> moves;
     const auto dragged = clip(draggedId);
     if (!dragged) { return moves; }
@@ -1341,14 +1342,15 @@ QVector<NleTimelineModel::Move> NleTimelineModel::magneticRearrangePlan(
     std::sort(left.begin(), left.end(), byStart);
     std::sort(right.begin(), right.end(), byStart);
 
-    int cursor = 0;
+    int cursor = -1;
     for (const Clip *c : left) {
-        if (cursor != c->start) {
-            moves.append({c->clipId, trackId, cursor, c->duration});
+        int ns = c->start;
+        if (cursor >= 0 && c->start > cursor) { ns = cursor; }
+        if (ns != c->start) {
+            moves.append({c->clipId, trackId, ns, c->duration});
         }
-        cursor = cursor + c->duration; // kdenlive compaction: cursor
-                                       // advances by playtime, old
-                                       // gaps never re-enter the pack
+        cursor = ns + c->duration; // internal gaps close; the pack's
+                                   // own head position is preserved
     }
     moves.append({draggedId, trackId, drop, dur});
     cursor = drop + dur;
@@ -1790,12 +1792,15 @@ void NleTimelineModel::refreshFromDocument()
 
         mInWriteback = true;
         const auto undoBlock = scene->blockUndoRedo();
+        // CapCut 语义：独奏=全场景只留独奏轨（跨类型）——solo 任一
+        // 轨后，其他所有轨（含另一类型）的成员层一律隐藏/静音；
+        // 同类型各自的 anySolo 判定改为全局判定
+        bool anySoloAny = false;
+        for (const auto &o : mTracks) {
+            if (o.solo) { anySoloAny = true; break; }
+        }
         for (int t = 0; t < trackCount; ++t) {
-            const bool type = mTracks.at(t).audio;
-            bool anySolo = false;
-            for (const auto &o : mTracks) {
-                if (o.audio == type && o.solo) { anySolo = true; break; }
-            }
+            const bool anySolo = anySoloAny;
             for (eBoxOrSound* l : laneMembers[t]) {
                 if (!l) { continue; }
                 if (anySolo && !mTracks.at(t).solo) {
