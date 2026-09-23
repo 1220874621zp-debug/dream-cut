@@ -47,6 +47,8 @@ NleTimelineView::NleTimelineView(NleTimelineModel * const model,
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setMinimumHeight(320);
+    // 片段监视器拖入：接收自定义 mime 的拖放落块
+    setAcceptDrops(true);
 
     // repaint on any model change (tracks/clips/selection); the media
     // caches survive because clip ids are stable per layer - dead ids
@@ -2378,6 +2380,58 @@ void NleTimelineView::hideEvent(QHideEvent *)
     mGhostLaneTop = false;
     mRubber = false;
     mModel->setGestureActive(false);
+}
+
+// ---- 片段监视器拖入（kdenlive 片段监视器 → 时间轴）：mime 携带
+// path + [in,out] 源帧区间，落点解析轨道与起始帧，目标轨让位插入
+void NleTimelineView::dragEnterEvent(QDragEnterEvent *e)
+{
+    if (e->mimeData()->hasFormat(
+                QStringLiteral("application/x-dreamcut-clip-path"))) {
+        e->acceptProposedAction();
+    }
+}
+
+void NleTimelineView::dragMoveEvent(QDragMoveEvent *e)
+{
+    if (e->mimeData()->hasFormat(
+                QStringLiteral("application/x-dreamcut-clip-path"))) {
+        e->acceptProposedAction();
+    }
+}
+
+void NleTimelineView::dropEvent(QDropEvent *e)
+{
+    const auto mime = e->mimeData();
+    if (!mime->hasFormat(QStringLiteral(
+                "application/x-dreamcut-clip-path"))) { return; }
+    const QString path = QString::fromUtf8(mime->data(
+                QStringLiteral("application/x-dreamcut-clip-path")));
+    const auto io = QString::fromUtf8(mime->data(
+                QStringLiteral("application/x-dreamcut-clip-inout")))
+            .split(',');
+    if (path.isEmpty() || io.size() != 2) { return; }
+    bool inOk = false, outOk = false;
+    const int inF = io.at(0).toInt(&inOk);
+    const int outF = io.at(1).toInt(&outOk);
+    if (!inOk || !outOk || inF < 0 || outF < inF) { return; }
+
+    const QPointF p = e->position();
+    // 轨道解析：落在轨道区外/标尺区 = 最近视频轨；锁定轨拒绝
+    int trIdx = p.y() > rulerHeight() ? trackAtY(int(p.y())) : -1;
+    if (trIdx < 0 || mModel->tracks().value(trIdx).audio) {
+        trIdx = nearestTrackOfType(int(p.y()), false);
+    }
+    if (trIdx < 0) { emit logMessage(QStringLiteral("没有视频轨可放置")); return; }
+    const auto &tr = mModel->tracks().at(trIdx);
+    if (tr.locked) {
+        emit logMessage(QStringLiteral("目标轨道已锁定"));
+        return;
+    }
+    const int frame = qMax(0, xToFrame(int(p.x())));
+    if (mModel->requestInsertMedia(path, inF, outF, tr.id, frame)) {
+        e->acceptProposedAction();
+    }
 }
 
 void NleTimelineView::resizeEvent(QResizeEvent *)

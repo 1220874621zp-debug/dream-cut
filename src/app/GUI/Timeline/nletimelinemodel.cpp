@@ -840,6 +840,73 @@ bool NleTimelineModel::requestMoveClipToTrack(const int clipId,
     return true;
 }
 
+// 片段监视器拖入（CapCut 拖入媒体语义 = 让位不拒绝）：目标轨落点处
+// 现有块整体右移，新块携带出入点落位。出入点映射：可见窗口
+// [S..S+len-1]（len=out-in+1），源偏移 animMin=-in——块首显示源帧
+// in（pixId = relFrame - animMinRel，见 AnimationBox），异步解码加载
+// 的 updateAnimationRange 只改 anim 时长保留 animMin
+bool NleTimelineModel::requestInsertMedia(const QString &path,
+                                          const int inFrame,
+                                          const int outFrame,
+                                          const int trackId,
+                                          const int startFrame)
+{
+    if (mInWriteback || mGestureActive) { return false; }
+    const auto scene = mPanelScene.data();
+    if (!scene || path.isEmpty() || outFrame < inFrame || inFrame < 0) {
+        return false;
+    }
+    const auto tr = track(trackId);
+    if (!tr) {
+        emit logMessage(QStringLiteral("目标轨道不存在"));
+        return false;
+    }
+    if (tr->audio) {
+        emit logMessage(QStringLiteral("视频片段请拖到视频轨"));
+        return false;
+    }
+    if (tr->locked) {
+        emit logMessage(QStringLiteral("目标轨道已锁定"));
+        return false;
+    }
+    const int S = qMax(0, startFrame);
+    const int len = outFrame - inFrame + 1;
+
+    // 让位 + 落块 = 一个事务：让位若先经 commitMoves，中途 refresh
+    // 的磁吸兜底看到的是"没有新块"的让位中间态，归零压实会把让
+    // 位块拉回帧 0，新块随后叠上（让位被吃）。全程 mInWriteback
+    // 直写（refresh 短路），最后一次 finishAction 让磁吸兜底对
+    // 插入终态压实 = CapCut 拖入即压实语义
+    const auto pushes = insertShiftPlan(trackId, S, len, {});
+    mInWriteback = true;
+    {
+        // 与导入同款：不进撤销栈（素材插入 + 异步解码混合态）
+        const auto undoBlock = scene->blockUndoRedo();
+        for (const auto &m : pushes) {
+            const auto oc = clip(m.clipId);
+            if (oc && oc->layer) {
+                shiftLayer(oc->layer.data(), m.start - oc->start);
+            }
+        }
+        const auto box = enve::make_shared<VideoBox>();
+        box->setFilePath(path);
+        scene->addContained(box);
+        const auto dur = box->getDurationRectangle();
+        if (dur) {
+            const auto flar = dur->ref<FixedLenAnimationRect>();
+            if (flar) { flar->setFirstAnimationFrame(-inFrame); }
+            dur->setMinAbsFrame(S);
+            dur->setMaxAbsFrame(S + len - 1);
+        }
+        box->setTrackId(trackId);
+    }
+    mInWriteback = false;
+    finishAction();
+    emit logMessage(QStringLiteral("已插入片段 入 %1 出 %2（%3 帧）")
+                            .arg(inFrame).arg(outFrame).arg(len));
+    return true;
+}
+
 // kdenlive-style detach: the embedded eVideoSound stays with the
 // video (muted - visibility drives the sound composition) while a
 // fresh eIndependentSound on the SAME file takes over the audio on

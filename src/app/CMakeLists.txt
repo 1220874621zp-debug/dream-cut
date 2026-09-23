@@ -232,6 +232,7 @@ set(
     GUI/ewidgetsimpl.cpp
     GUI/layouthandler.cpp
     GUI/projectpanel.cpp
+    GUI/clipmonitorwidget.cpp
     GUI/Timeline/nletimelinemodel.cpp
     GUI/Timeline/nletimelineview.cpp
     GUI/Timeline/nletimelinecontroller.cpp
@@ -308,6 +309,7 @@ set(
     GUI/textanimpresetpanel.h
     GUI/timelinebasewrappernode.h
     GUI/timelinedockwidget.h
+    GUI/clipmonitorwidget.h
     GUI/Timeline/nletimelinemodel.h
     GUI/Timeline/nletimelineview.h
     GUI/Timeline/nletimelinecontroller.h

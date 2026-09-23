@@ -71,6 +71,7 @@
 #include "effectspresetspanel.h"
 #include "quickeffectsearchdialog.h"
 #include "projectpanel.h"
+#include "clipmonitorwidget.h"
 #include <QShortcut>
 #include "textanimpresetpanel.h"
 #include "scriptmanager.h"
@@ -1541,6 +1542,9 @@ void MainWindow::rebuildWorkspaceMenu()
     if (mTextAnimDock) {
         panelsMenu->addAction(mTextAnimDock->toggleViewAction());
     }
+    if (mClipMonitorDock) {
+        panelsMenu->addAction(mClipMonitorDock->toggleViewAction());
+    }
     // the script console toggle lives in the Scripts menu only;
     // listing it here too showed the same entry twice
 
@@ -1739,6 +1743,39 @@ void MainWindow::setupLayout()
     mProjectDock = makeDock(tr("Project"), QStringLiteral("dockProject"),
                             mProjectPanel);
 
+    // 片段监视器（kdenlive clip monitor 对齐）：预览素材、I/O 设
+    // zone 出入点、拖入时间轴落块
+    mClipMonitor = new ClipMonitorWidget(this);
+    connect(mClipMonitor, &ClipMonitorWidget::openRequested, this, [this]() {
+        const auto defPath = AppSupport::getSettings(
+                    "files", "recentImportDir",
+                    QDir::homePath()).toString();
+        const QString types = QStringLiteral("(*.mp4 *.mov *.mkv *.avi ")
+                + QStringLiteral("*.webm *.mpg *.mpeg *.wmv *.flv)");
+        const auto paths = AppSupport::getOpenFiles(
+                    this, tr("打开素材"), defPath,
+                    tr("视频 %1").arg(types));
+        if (!paths.isEmpty() && !paths.first().isEmpty()) {
+            mClipMonitor->loadFile(paths.first());
+        }
+    });
+    connect(mClipMonitor, &ClipMonitorWidget::logMessage, this,
+            [this](const QString &msg) {
+        statusBar()->showMessage(msg, 4000);
+    });
+    connect(mProjectPanel, &ProjectPanel::monitorRequested, this,
+            [this](const QString &path) {
+        mClipMonitor->loadFile(path);
+    });
+    // 双击导入同时把素材送进监视器（预览跟随素材）
+    connect(mProjectPanel, &ProjectPanel::importRequested, this,
+            [this](const QString &path) {
+        mClipMonitor->loadFile(path);
+    });
+    mClipMonitorDock = makeDock(tr("Clip Monitor"),
+                                QStringLiteral("dockClipMonitor"),
+                                mClipMonitor);
+
     // text animation preset panel (AE "text animator" presets):
     // animated thumbnails + big preview baked from the real engine
     mTextAnimPanel = new TextAnimPresetPanel(mDocument, this);
@@ -1786,6 +1823,7 @@ void MainWindow::setupLayout()
     addDockWidget(Qt::RightDockWidgetArea, mEasingDock);
     addDockWidget(Qt::BottomDockWidgetArea, mTimelineDock);
     addDockWidget(Qt::RightDockWidgetArea, mTextAnimDock);
+    addDockWidget(Qt::RightDockWidgetArea, mClipMonitorDock);
 
     // hidden by default, can be opened from the Panels menu
     mEasingDock->hide();

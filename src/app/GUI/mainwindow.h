@@ -82,6 +82,7 @@ class BoxScrollWidget;
 class ScrollArea;
 class ScriptManager;
 class ProjectPanel;
+class ClipMonitorWidget;
 class EffectsPresetsPanel;
 class QuickEffectSearchDialog;
 class DockDropTuner;
@@ -283,8 +284,10 @@ private:
     QDockWidget *mEffectsDock = nullptr;
     QDockWidget *mEasingDock = nullptr;
     QDockWidget *mProjectDock = nullptr;
+    QDockWidget *mClipMonitorDock = nullptr;
     ProjectPanel *mProjectPanel = nullptr;
     QDockWidget *mTextAnimDock = nullptr;
+    ClipMonitorWidget *mClipMonitor = nullptr;
     class TextAnimPresetPanel *mTextAnimPanel = nullptr;
     EffectsPresetsPanel *mEffectsPresetsPanel = nullptr;
     QuickEffectSearchDialog *mQuickEffectSearch = nullptr;

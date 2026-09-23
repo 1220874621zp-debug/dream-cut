@@ -164,6 +164,11 @@ public:
     // context-menu lane hop to an explicit track (validated: type,
     // lock, overlap), one undo step
     bool requestMoveClipToTrack(const int clipId, const int dstTrackId);
+    // 片段监视器拖入：path 带 [inFrame..outFrame] 源出入点，落在
+    // trackId 的 startFrame（目标轨让位插入）
+    bool requestInsertMedia(const QString &path, const int inFrame,
+                            const int outFrame, const int trackId,
+                            const int startFrame);
     // kdenlive "detach audio": pull the VideoBox's embedded sound out
     // as an independent audio clip (same file, same range, same
     // speed) parked on the first audio track; the embedded copy goes

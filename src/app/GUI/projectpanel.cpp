@@ -295,6 +295,13 @@ ProjectPanel::ProjectPanel(Document& doc, QWidget* const parent) :
             emit importRequested(handler->path());
         }
     });
+    connect(mTree, &QTreeWidget::itemClicked,
+            this, [this](QTreeWidgetItem* item, int) {
+        if (const auto handler = fileAt(item)) {
+            // 单击 = 装载片段监视器（kdenlive bin→monitor）
+            emit monitorRequested(handler->path());
+        }
+    });
     // folders expand/collapse on a single click (frequent organizing
     // should not need a double click); the default double-click
     // expansion is off so the two never fight
