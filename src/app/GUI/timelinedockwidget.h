@@ -194,6 +194,7 @@ private:
     QAction *mNleUndoAct = nullptr;
     QAction *mNleRedoAct = nullptr;
     QAction *mMagneticAct = nullptr;
+    QAction *mFollowAct = nullptr;
     QAction *mNleDeleteAct = nullptr;
     QAction *mNleRippleAct = nullptr;
     QAction *mNleInsertAct = nullptr;

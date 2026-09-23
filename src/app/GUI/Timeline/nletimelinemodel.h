@@ -208,6 +208,10 @@ public:
 
     // ---- magnetic mode ----
     bool magnetic() const { return mMagnetic; }
+    // 轨道联动（CapCut 覆盖跟随）：覆盖轨的块跟随主轨块移动/删除
+    // 位移（锚定其头部所落的主轨块）——工具栏可开关
+    bool followLinked() const { return mFollowLinked; }
+    void setFollowLinked(const bool on) { mFollowLinked = on; }
     // enabling compacts every track right away (undoable); compact =
     // false only restores the flag (session start: a loaded project
     // must not be rewritten just because magnetic defaults on)
@@ -300,6 +304,7 @@ private:
     void pruneClipState();
     qreal mFps = 25.;
     bool mMagnetic = false;
+    bool mFollowLinked = true;
     bool mInWriteback = false;
     bool mGestureActive = false;
     bool mRebuildQueued = false;

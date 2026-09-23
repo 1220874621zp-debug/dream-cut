@@ -410,9 +410,10 @@ bool NleTimelineModel::commitMoves(const QVector<Move> &moves,
     // CapCut overlay following: clips on non-main video tracks ride
     // the main-track block their head sits on (anchor resolved in the
     // OLD layout, delta from this move set). Computed BEFORE any
-    // write so the table is still pristine
+    // write so the table is still pristine. The 轨道联动 toggle
+    // switches the whole behaviour off (overlays stay put)
     {
-        const int mainId = mainTrackId();
+        const int mainId = mFollowLinked ? mainTrackId() : -1;
         if (mainId >= 0) {
             QHash<int, int> deltas; // main clipId -> delta
             QSet<int> movingIds;
@@ -768,8 +769,9 @@ bool NleTimelineModel::requestDelete(const QSet<int> &clipIds,
         }
         // CapCut overlay following: clips on NON-main video tracks
         // slide by the MAIN-track victims removed before them (their
-        // anchors are gone; everything after closes up)
-        const int mainId = mainTrackId();
+        // anchors are gone; everything after closes up); off with the
+        // 轨道联动 toggle
+        const int mainId = mFollowLinked ? mainTrackId() : -1;
         if (mainId >= 0) {
             for (const auto &o : mClips) {
                 if (o.audio || o.trackId == mainId) { continue; }
@@ -1970,20 +1972,23 @@ void NleTimelineModel::refreshFromDocument()
                     const auto oc = clip(m.clipId);
                     if (oc && oc->layer) { shiftLayer(oc->layer.data(), m.start - oc->start); }
                 }
-                for (const auto &o : mClips) {
-                    if (o.audio || o.trackId == mainId || !o.layer) { continue; }
-                    const Clip *anchor = nullptr;
-                    for (const auto &mc : mClips) {
-                        if (mc.audio || mc.trackId != mainId) { continue; }
-                        if (mc.start <= o.start &&
-                                o.start < mc.start + mc.duration) {
-                            anchor = &mc;
-                            break;
+                // 覆盖块随动尊重轨道联动开关（关=覆盖块原地不动）
+                if (mFollowLinked) {
+                    for (const auto &o : mClips) {
+                        if (o.audio || o.trackId == mainId || !o.layer) { continue; }
+                        const Clip *anchor = nullptr;
+                        for (const auto &mc : mClips) {
+                            if (mc.audio || mc.trackId != mainId) { continue; }
+                            if (mc.start <= o.start &&
+                                    o.start < mc.start + mc.duration) {
+                                anchor = &mc;
+                                break;
+                            }
                         }
+                        if (!anchor) { continue; }
+                        const int delta = deltas.value(anchor->clipId, 0);
+                        if (delta != 0) { shiftLayer(o.layer.data(), delta); }
                     }
-                    if (!anchor) { continue; }
-                    const int delta = deltas.value(anchor->clipId, 0);
-                    if (delta != 0) { shiftLayer(o.layer.data(), delta); }
                 }
                 mInWriteback = false;
             }

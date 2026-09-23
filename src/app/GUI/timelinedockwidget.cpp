@@ -127,6 +127,32 @@ const char* kNleMagneticSvg =
         "l-99.2 121.024 119.232 97.792c2.816 2.24 6.912 1.92 9.216-0.896l96.32-117.504"
         "L569.6 675.84z\"/></svg>";
 
+// 轨道联动：两环相扣的链条（Material link 图标轮廓）
+const char* kNleLinkSvg =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
+        "<path fill=\"none\" stroke=\"%1\" stroke-width=\"1.9\""
+        " stroke-linecap=\"round\""
+        " d=\"M9.5 14.5 L14.5 9.5 M8 12 L5.6 14.4 a3.1 3.1 0 0 0 4.4 4.4"
+        " L12.4 16.4 M16 12 L18.4 9.6 a3.1 3.1 0 0 0 -4.4 -4.4"
+        " L11.6 7.6\"/></svg>";
+
+QPixmap nleLinkPixmap(const QColor &color, const int base = 24)
+{
+    const qreal dpr = qApp ? qApp->devicePixelRatio() : 1.;
+    QPixmap pm(QSize(base, base) * dpr);
+    pm.fill(Qt::transparent);
+    const QString svg = QString(kNleLinkSvg).arg(color.name());
+    QSvgRenderer renderer(svg.toUtf8());
+    if (renderer.isValid()) {
+        QPainter p(&pm);
+        p.setRenderHint(QPainter::Antialiasing);
+        renderer.render(&p, QRectF(0, 0, base * dpr, base * dpr));
+        p.end();
+    }
+    pm.setDevicePixelRatio(dpr);
+    return pm;
+}
+
 QPixmap nleMagneticPixmap(const QColor &color, const int base = 24)
 {
     const qreal dpr = qApp ? qApp->devicePixelRatio() : 1.;
@@ -875,6 +901,46 @@ void TimelineDockWidget::setupNleActions()
     });
     insertAct(mMagneticAct);
     mMainWindow->cmdAddAction(mMagneticAct);
+
+    // 轨道联动开关（CapCut 覆盖跟随）：覆盖轨的块跟随主轨块的
+    // 移动/删除位移；关闭后覆盖块原地不动（默认开=既有行为）
+    mFollowAct = new QAction(
+                QIcon(nleLinkPixmap(QColor(0xc8, 0xc8, 0xc8))), QString(), this);
+    mFollowAct->setCheckable(true);
+    if (mNleModel) {
+        mNleModel->setFollowLinked(AppSupport::getSettings(
+                    QStringLiteral("ui"),
+                    QStringLiteral("timelineFollowLinked"), true).toBool());
+    }
+    mFollowAct->blockSignals(true);
+    mFollowAct->setChecked(mNleModel ? mNleModel->followLinked() : true);
+    mFollowAct->blockSignals(false);
+    {
+        const QColor accent = ThemeSupport::getThemeHighlightColor();
+        QColor onGlyph(0xff, 0xff, 0xff);
+        if (accent.lightness() > 150) {
+            onGlyph = ThemeSupport::getThemeHighlightDarkerColor().darker(160);
+        }
+        mFollowAct->setIcon(QIcon(nleLinkPixmap(
+                    (mNleModel && mNleModel->followLinked())
+                        ? onGlyph : QColor(0xc8, 0xc8, 0xc8))));
+    }
+    mFollowAct->setToolTip(tr("轨道联动：覆盖轨的块跟随主轨块移动、删除和压实位移（锚定其所在的主轨块）；关闭后覆盖块原地不动"));
+    connect(mFollowAct, &QAction::toggled, this, [this](const bool on) {
+        if (!mFollowAct) { return; }
+        const QColor accent = ThemeSupport::getThemeHighlightColor();
+        QColor onGlyph(0xff, 0xff, 0xff);
+        if (accent.lightness() > 150) {
+            onGlyph = ThemeSupport::getThemeHighlightDarkerColor().darker(160);
+        }
+        mFollowAct->setIcon(QIcon(nleLinkPixmap(
+                        on ? onGlyph : QColor(0xc8, 0xc8, 0xc8))));
+        AppSupport::setSettings(QStringLiteral("ui"),
+                                QStringLiteral("timelineFollowLinked"), on);
+        if (mNleModel) { mNleModel->setFollowLinked(on); }
+    });
+    insertAct(mFollowAct);
+    mMainWindow->cmdAddAction(mFollowAct);
 
     // kdenlive insert/overwrite toggle: when on, a drop pushes the
     // touched run right instead of requiring free space; Ctrl flips
