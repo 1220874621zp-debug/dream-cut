@@ -271,6 +271,8 @@ set(
     GUI/graphboxeslist.cpp
     GUI/keysview.cpp
     GUI/mainwindow.cpp
+    AI/mcpserver.cpp
+    AI/mcpdispatcher.cpp
     GUI/aepropertiesinspector.cpp
     GUI/hangwatchdog.cpp
     GUI/extraactions.cpp
@@ -338,6 +340,8 @@ set(
     GUI/canvaswindow.h
     GUI/keysview.h
     GUI/mainwindow.h
+    AI/mcpserver.h
+    AI/mcpdispatcher.h
     GUI/hangwatchdog.h
     GUI/window.h
     Qsci/qsciscintilla.h
@@ -370,7 +374,7 @@ add_executable(
     ${WINDOWS_RESOURCE_FILE}
 )
 
-add_executable(dreamcut_effects_test effects_unittest.cpp ${RESOURCES})
+add_executable(dreamcut_effects_test effects_unittest.cpp AI/mcpserver.cpp AI/mcpdispatcher.cpp ${RESOURCES})
 target_link_directories(
     dreamcut_effects_test
     PRIVATE

@@ -65,6 +65,7 @@
 #endif
 
 class VideoEncoder;
+namespace Friction { namespace AI { class McpServer; } }
 class RenderWidget;
 class ActionButton;
 class BoxesList;
@@ -117,6 +118,7 @@ public:
     void loadEVFile(const QString &path);
     void loadXevFile(const QString &path);
     void clearAll();
+    void setupAiServer();
     void updateTitle();
     void setFileChangedSinceSaving(const bool changed);
     void disableEventFilter();
@@ -230,6 +232,7 @@ protected:
     void showEvent(QShowEvent *e);
 
 private:
+    Friction::AI::McpServer *mMcpServer = nullptr;
     bool mShutdown;
     QWidget *mWelcomeDialog;
     QStackedWidget *mStackWidget;

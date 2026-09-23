@@ -24,6 +24,7 @@
 // Fork of enve - Copyright (C) 2016-2020 Maurycy Liebner
 
 #include "mainwindow.h"
+#include "AI/mcpserver.h"
 #include "GUI/Expressions/expressiondialog.h"
 #include "canvas.h"
 #include <QKeyEvent>
@@ -1804,6 +1805,7 @@ void MainWindow::setupLayout()
 
     // JS plugin system: Scripts menu + script console dock
     setupScripting();
+    setupAiServer();
 
     // keep view menu actions in sync when docks are closed directly
     connect(mTimelineDock, &QDockWidget::visibilityChanged,
@@ -1831,6 +1833,33 @@ void MainWindow::setupScripting()
     mMenuBar->addMenu(mScriptManager->menu());
     addDockWidget(Qt::BottomDockWidgetArea, mScriptManager->console());
     mScriptManager->console()->hide();
+}
+
+void MainWindow::setupAiServer()
+{
+    mMcpServer = new Friction::AI::McpServer(this);
+
+    const bool enabled = AppSupport::getSettings(
+                QStringLiteral("ai"), QStringLiteral("enabled"),
+                true).toBool();
+    const bool autoStart = AppSupport::getSettings(
+                QStringLiteral("ai"), QStringLiteral("autoStart"),
+                true).toBool();
+    const quint16 port = AppSupport::getSettings(
+                QStringLiteral("ai"), QStringLiteral("port"),
+                9527).toInt();
+#ifdef Q_OS_WIN
+    const QString defSock = QStringLiteral("dreamcut_mcp");
+#else
+    const QString defSock = QStringLiteral("/tmp/dreamcut_mcp.sock");
+#endif
+    const QString socketName = AppSupport::getSettings(
+                QStringLiteral("ai"), QStringLiteral("socketName"),
+                defSock).toString();
+
+    if (enabled && autoStart) {
+        mMcpServer->start(port, socketName);
+    }
 }
 
 void MainWindow::clearAll()
