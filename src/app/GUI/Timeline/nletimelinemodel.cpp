@@ -11,11 +11,27 @@
 #include "Sound/evideosound.h"
 #include "Timeline/durationrectangle.h"
 #include "Boxes/animationbox.h"
+#include "clipboardcontainer.h"
 #include "smartPointers/ememory.h"
 
 #include <QDebug>
 #include <algorithm>
 #include <climits>
+
+namespace {
+// CapCut-style clip timecode hh:mm:ss:ff (freeze-frame clip names,
+// paste feedback)
+QString frameToTimecode(const int frame, const qreal fps)
+{
+    const int fpc = fps > 0. ? qMax(1, qRound(fps)) : 25;
+    const int f = qMax(0, frame);
+    return QStringLiteral("%1:%2:%3:%4")
+            .arg(f / (3600 * fpc), 2, 10, QLatin1Char('0'))
+            .arg((f / (60 * fpc)) % 60, 2, 10, QLatin1Char('0'))
+            .arg((f / fpc) % 60, 2, 10, QLatin1Char('0'))
+            .arg(f % fpc, 2, 10, QLatin1Char('0'));
+}
+}
 
 NleTimelineModel::NleTimelineModel(Document &document,
                                    QObject * const parent)
@@ -305,12 +321,21 @@ void NleTimelineModel::shiftLayer(eBoxOrSound * const layer,
     if (!layer || frameDelta == 0) { return; }
     const auto dur = layer->getDurationRectangle();
     if (!dur) { return; }
-    dur->startMinFramePosTransform();
-    dur->moveMinFrame(frameDelta);
-    dur->finishMinFramePosTransform();
-    dur->startMaxFramePosTransform();
-    dur->moveMaxFrame(frameDelta);
-    dur->finishMaxFramePosTransform();
+    // 右移先动 max 左移先动 min：min/max 恒先离后跟，中途绝不出现
+    // min>max 非法态（非法态会把 min 钳回 max 造成 1 帧漂移，右移
+    // 粘贴实测案）；波纹删除的左移路径行为不变
+    const auto moveMin = [&dur, frameDelta]() {
+        dur->startMinFramePosTransform();
+        dur->moveMinFrame(frameDelta);
+        dur->finishMinFramePosTransform();
+    };
+    const auto moveMax = [&dur, frameDelta]() {
+        dur->startMaxFramePosTransform();
+        dur->moveMaxFrame(frameDelta);
+        dur->finishMaxFramePosTransform();
+    };
+    if (frameDelta > 0) { moveMax(); moveMin(); }
+    else { moveMin(); moveMax(); }
 }
 
 bool NleTimelineModel::commitMoves(const QVector<Move> &moves,
@@ -659,7 +684,12 @@ bool NleTimelineModel::requestFreeze(const QSet<int> &clipIds,
     for (auto *b : animBoxes) { scene->addBoxToSelection(b); }
     // split: the ORIGINAL boxes become the right halves [frame..max]
     scene->splitBoxesAtFrame(frame);
-    for (auto *b : animBoxes) { b->freezeFrameAction(); }
+    const qreal fps = mFps;
+    for (auto *b : animBoxes) {
+        b->freezeFrameAction();
+        // CapCut 视觉：定格段块名 = “定格 时码”
+        b->prp_setName(QStringLiteral("定格 ") + frameToTimecode(frame, fps));
+    }
     scene->anim_setAbsFrame(savedFrame);
     finishAction();
     return true;
@@ -848,6 +878,266 @@ bool NleTimelineModel::requestDetachAudio(const int clipId)
     finishAction();
     emit logMessage(QStringLiteral("已分离“%1”的音频到音频轨").arg(clipName));
     return true;
+}
+
+// ------------------------------------------------- decorations (CapCut)
+
+int NleTimelineModel::colorMark(const int clipId) const
+{
+    return mColorMarks.value(clipId, -1);
+}
+
+void NleTimelineModel::requestColorMark(const QSet<int> &clipIds,
+                                        const int color)
+{
+    for (const int id : clipIds) {
+        if (!clip(id)) { continue; }
+        if (color < 0) { mColorMarks.remove(id); }
+        else { mColorMarks.insert(id, qBound(0, color, 6)); }
+    }
+    emit clipDecorationsChanged();
+}
+
+bool NleTimelineModel::requestSelectSameColor(const int clipId)
+{
+    const int mark = colorMark(clipId);
+    if (mark < 0) {
+        emit logMessage(QStringLiteral("该块没有颜色标记"));
+        return false;
+    }
+    QSet<int> picked;
+    for (const auto &c : mClips) {
+        if (mColorMarks.value(c.clipId, -1) == mark) { picked.insert(c.clipId); }
+    }
+    setSelection(picked);
+    emit logMessage(QStringLiteral("已选中 %1 个同色块").arg(picked.size()));
+    return true;
+}
+
+bool NleTimelineModel::isDisabled(const int clipId) const
+{
+    return mDisabledIds.contains(clipId);
+}
+
+void NleTimelineModel::requestSetDisabled(const QSet<int> &clipIds,
+                                          const bool disabled)
+{
+    const auto scene = mPanelScene.data();
+    if (!scene) { return; }
+    const auto undoBlock = scene->blockUndoRedo();
+    int changed = 0;
+    for (const int id : clipIds) {
+        const auto c = clip(id);
+        if (!c || !c->layer) { continue; }
+        auto * const layer = c->layer.data();
+        if (disabled) {
+            if (mDisabledIds.contains(id)) { continue; }
+            mDisabledIds.insert(id);
+            mDisabledSaved.insert(id, layer->isVisible());
+            layer->setVisible(false);
+            ++changed;
+        } else {
+            if (!mDisabledIds.contains(id)) { continue; }
+            mDisabledIds.remove(id);
+            bool vis = mDisabledSaved.value(id, true);
+            mDisabledSaved.remove(id);
+            // solo 压制中的层保持隐藏（压制机制优先，refresh 会续压）
+            if (mSoloSuppressed.contains(layer)) { vis = false; }
+            layer->setVisible(vis);
+            ++changed;
+        }
+    }
+    if (changed == 0) { return; }
+    const QString what = disabled ? QStringLiteral("停用片段")
+                                  : QStringLiteral("启用片段");
+    emit logMessage(QStringLiteral("%1：%2 个块").arg(what).arg(changed));
+    emit clipDecorationsChanged();
+}
+
+// --------------------------------------------- timeline clipboard (CapCut)
+
+bool NleTimelineModel::hasClipClipboard() const
+{
+    return mBoxClipBoard || !mSoundClipBoard.isEmpty();
+}
+
+bool NleTimelineModel::requestCopy(const QSet<int> &clipIds)
+{
+    const auto scene = mPanelScene.data();
+    if (!scene || clipIds.isEmpty()) { return false; }
+    QList<BoundingBox*> boxes;
+    QList<eIndependentSound*> sounds;
+    for (const int id : clipIds) {
+        const auto c = clip(id);
+        if (!c || !c->layer) { continue; }
+        const auto snd = enve_cast<eIndependentSound*>(c->layer.data());
+        if (snd) { sounds << snd; continue; }
+        const auto box = enve_cast<BoundingBox*>(c->layer.data());
+        if (box) { boxes << box; }
+    }
+    if (boxes.isEmpty() && sounds.isEmpty()) { return false; }
+
+    mBoxClipBoard.reset();
+    mBoxClipSpecs.clear();
+    mSoundClipBoard.clear();
+    mSoundClipSpecs.clear();
+    if (!boxes.isEmpty()) {
+        mBoxClipBoard = enve::make_shared<BoxesClipboard>(boxes);
+        for (const auto *box : boxes) {
+            PasteSpec spec;
+            spec.trackId = box->trackId();
+            const auto dur = box->getDurationRectangle();
+            spec.duration = dur ? dur->getAbsFrameRange().span() : 1;
+            spec.name = box->prp_getName();
+            mBoxClipSpecs << spec;
+        }
+    }
+    // sounds cannot travel through BoxesClipboard: full-property
+    // serialization clone (same channel as splitSoundsAtFrame), kept
+    // OFF the scene until paste
+    for (auto *snd : sounds) {
+        const auto temp = enve::make_shared<Clipboard>(ClipboardType::misc);
+        temp->write([snd](eWriteStream &dst) {
+            const bool isBox = false;
+            dst << isBox;
+            snd->prp_writeProperty_impl(dst);
+            dst.writeCheckpoint();
+        });
+        qsptr<eIndependentSound> clone;
+        temp->read([&clone](eReadStream &src) {
+            bool isBox;
+            src >> isBox;
+            clone = enve::make_shared<eIndependentSound>();
+            clone->prp_readProperty_impl(src);
+            src.readCheckpoint("Error reading sound clone");
+        });
+        if (!clone) { continue; }
+        PasteSpec spec;
+        spec.trackId = clone->trackId();
+        const auto dur = clone->getDurationRectangle();
+        spec.duration = dur ? dur->getAbsFrameRange().span() : 1;
+        spec.name = clone->prp_getName();
+        mSoundClipBoard << clone;
+        mSoundClipSpecs << spec;
+    }
+    const int total = mBoxClipSpecs.size() + mSoundClipSpecs.size();
+    emit logMessage(QStringLiteral("已复制 %1 个块").arg(total));
+    return true;
+}
+
+bool NleTimelineModel::requestPaste(const int frame)
+{
+    const auto scene = mPanelScene.data();
+    if (!scene || !hasClipClipboard()) { return false; }
+    scene->pushUndoRedoName(tr("粘贴"));
+    int pasted = 0;
+    int cursor = qMax(0, frame);
+
+    // ---- boxes: pasteTo brings the clones in (selected) at their
+    // source windows; ONE flush lets them enter the clip table with
+    // stable ids, then relocation rides commitMoves - the same
+    // validated channel as drag/magnetic moves. Hand-writing durRects
+    // on freshly cloned boxes fights the FixedLen binding callback
+    // (1-frame drift), so we never touch it directly here
+    if (mBoxClipBoard) {
+        scene->clearBoxesSelection();
+        mBoxClipBoard->pasteTo(scene);
+        const auto pastedBoxes = scene->getSelectedBoxesList();
+        scene->clearBoxesSelection();
+        finishAction(); // clones enter mClips (paste lands in history)
+        for (const auto &box : pastedBoxes) {
+            const auto d = box->getDurationRectangle();
+            qInfo("[NLE] paste mid: box %s dur {%d..%d}",
+                  box->prp_getName().toUtf8().constData(),
+                  d ? d->getMinAbsFrame() : -99,
+                  d ? d->getMaxAbsFrame() : -99);
+        }
+
+        // 重定位：相对平移（shiftLayer，波纹删除/分割同款通道），
+        // 不重设长度——克隆块的 FixedLen durRect 与 fileHandler 绑定，
+        // 手写绝对窗口会被回调拉回 1 帧（实测漂移案）
+        mInWriteback = true;
+        int specIdx = 0;
+        for (const auto &box : pastedBoxes) {
+            if (!box || specIdx >= mBoxClipSpecs.size()) { continue; }
+            const auto &spec = mBoxClipSpecs.at(specIdx++);
+            // 反查新块的 clipId（finishAction 后按层稳定）
+            const NleTimelineModel::Clip *row = nullptr;
+            for (const auto &c : mClips) {
+                if (c.layer.data() == box) { row = &c; break; }
+            }
+            if (!row || !row->layer) { continue; }
+            // 目标轨：源轨仍在用源轨，否则第一条视频轨
+            int trackId = spec.trackId >= 0 &&
+                    track(spec.trackId) ? spec.trackId : -1;
+            if (trackId < 0) {
+                for (const auto &t : mTracks) {
+                    if (!t.audio) { trackId = t.id; break; }
+                }
+            }
+            if (trackId < 0) { continue; }
+            // 从 cursor 起第一个空位（长度用表里的真实窗口长度；
+            // 新块自身占着的源窗口不算——它就是要被挪走的那个）
+            const int len = row->duration;
+            int start = cursor;
+            bool moved = true;
+            while (moved) {
+                moved = false;
+                for (const auto &c : mClips) {
+                    if (c.clipId == row->clipId || c.trackId != trackId) {
+                        continue;
+                    }
+                    if (rangesOverlap(start, len, c.start, c.duration)) {
+                        start = c.start + c.duration;
+                        moved = true;
+                    }
+                }
+            }
+            if (box->trackId() != trackId) { box->setTrackId(trackId); }
+            qInfo("[NLE] paste shift: row{st %d dur %d} -> start %d",
+                  row->start, row->duration, start);
+            shiftLayer(row->layer.data(), start - row->start);
+            {
+                const auto d2 = box->getDurationRectangle();
+                qInfo("[NLE] paste after shift: dur {%d..%d}",
+                      d2 ? d2->getMinAbsFrame() : -99,
+                      d2 ? d2->getMaxAbsFrame() : -99);
+            }
+            cursor = start + len;
+            ++pasted;
+        }
+        mInWriteback = false;
+    }
+
+    // ---- sounds: add the kept clones and window them the same way
+    for (int i = 0; i < mSoundClipBoard.size(); ++i) {
+        const auto &clone = mSoundClipBoard.at(i);
+        const auto &spec = mSoundClipSpecs.at(i);
+        if (!clone) { continue; }
+        int trackId = spec.trackId >= 0 &&
+                track(spec.trackId) ? spec.trackId : -1;
+        if (trackId < 0) {
+            for (const auto &t : mTracks) {
+                if (t.audio) { trackId = t.id; break; }
+            }
+        }
+        const QString name = spec.name;
+        scene->addContained(clone);
+        clone->prp_setName(name);
+        const auto dur = clone->getDurationRectangle();
+        if (dur) {
+            dur->setMinAbsFrame(cursor);
+            dur->setMaxAbsFrame(cursor + spec.duration - 1);
+        }
+        if (trackId >= 0) { clone->setTrackId(trackId); }
+        cursor += spec.duration;
+        ++pasted;
+    }
+
+    finishAction();
+    emit logMessage(QStringLiteral("已粘贴 %1 个块到 %2")
+                    .arg(pasted).arg(frameToTimecode(qMax(0, frame), mFps)));
+    return pasted > 0;
 }
 
 // ---------------------------------------------------------------- tracks
@@ -1371,11 +1661,14 @@ void NleTimelineModel::refreshFromDocument()
 
     // mute mirror + default numbering for unnamed specs
     for (int t = 0; t < trackCount; ++t) {
-        // 独奏压制的层不算用户隐藏，避免独奏期间整排轨误显静音
+        // 独奏压制的层不算用户隐藏，避免独奏期间整排轨误显静音；
+        // 停用片段同样不算（停用=块级临时禁用，与轨道静音无关）
         bool anyMember = false;
         bool allHidden = true;
         for (eBoxOrSound* l : laneMembers[t]) {
             if (!l || mSoloSuppressed.contains(l)) { continue; }
+            const int cid = mLayerToClipId.value(l, -1);
+            if (cid >= 0 && mDisabledIds.contains(cid)) { continue; }
             anyMember = true;
             if (l->isVisible()) { allHidden = false; break; }
         }
@@ -1439,6 +1732,18 @@ void NleTimelineModel::refreshFromDocument()
         }
         for (auto it = mLayerToClipId.begin(); it != mLayerToClipId.end();) {
             if (!liveLayers.contains(it.key())) { it = mLayerToClipId.erase(it); }
+            else { ++it; }
+        }
+        // 块装饰台账同剪（clipId 永不复用，层没了就是死键）
+        QSet<int> liveIds;
+        for (const auto &c : mClips) { liveIds.insert(c.clipId); }
+        mDisabledIds.intersect(liveIds);
+        for (auto it = mColorMarks.begin(); it != mColorMarks.end();) {
+            if (!liveIds.contains(it.key())) { it = mColorMarks.erase(it); }
+            else { ++it; }
+        }
+        for (auto it = mDisabledSaved.begin(); it != mDisabledSaved.end();) {
+            if (!liveIds.contains(it.key())) { it = mDisabledSaved.erase(it); }
             else { ++it; }
         }
     }

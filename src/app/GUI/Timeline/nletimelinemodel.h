@@ -4,15 +4,20 @@
 #include <QObject>
 #include <QVector>
 #include <QSet>
+#include <QHash>
 #include <QPointer>
 #include <QList>
 #include <QPair>
 #include <QString>
 
+#include "smartPointers/ememory.h"
+
 class Canvas;
 class Document;
 class eBoxOrSound;
 class BoundingBox;
+class eIndependentSound;
+class BoxesClipboard;
 struct eTrackSpec;
 
 // kdenlive-style timeline model: the single source of truth for the
@@ -165,6 +170,24 @@ public:
     // silent (visibility = audibility in the sound composition)
     bool requestDetachAudio(const int clipId);
 
+    // ---- clip decorations (CapCut 右键菜单语义，会话内存态) ----
+    // 颜色标记 0..6（-1 = 无）：块名条右端圆点 + 选中同色片段
+    int colorMark(const int clipId) const;
+    // color < 0 清除标记；作用于整个选中集
+    void requestColorMark(const QSet<int> &clipIds, const int color);
+    // 选中与该块同色的全部块；无标记返回 false
+    bool requestSelectSameColor(const int clipId);
+    // 停用片段（Shift+E）：层隐藏 = 渲染跳过 + 声音静音，恢复走台账
+    bool isDisabled(const int clipId) const;
+    void requestSetDisabled(const QSet<int> &clipIds, const bool disabled);
+
+    // ---- timeline clipboard（时间轴独立块剪贴板，不与画布互通）----
+    bool hasClipClipboard() const;
+    bool requestCopy(const QSet<int> &clipIds);
+    // 粘贴到 frame：视频类块走 BoxesClipboard 完整克隆，声音类走
+    // 序列化克隆；落位 = 同轨从 frame 起第一个无重叠槽位
+    bool requestPaste(const int frame);
+
     // ---- tracks (explicit entities, spec ops on the scene) ----
     // returns the new track id (-1 on failure); the panel renders
     // video specs first, then audio specs, so an appended track lands
@@ -204,6 +227,8 @@ signals:
     void modelChanged();
     void selectionChanged();
     void magneticChanged(const bool on);
+    // 颜色标记/停用态等块装饰变化（轻量重绘，不重建表）
+    void clipDecorationsChanged();
     // markers / in-out band / fps display state changed
     void guidesChanged();
     // playhead moved on the document side (scene frame signal or a
@@ -252,6 +277,27 @@ private:
     // 剪映语义：取消独奏该回来的都会回来）；仅内存态不进工程文件
     QSet<eBoxOrSound*> mSoloSaved;
     QSet<eBoxOrSound*> mSoloSuppressed;
+    // 停用片段台账（会话内存）：停用前的可见性，恢复时回写；
+    // solo 压制中的层取消停用不点亮（压制机制优先）。
+    // 键 = clipId（永不复用），层指针经活表反查
+    QSet<int> mDisabledIds;
+    QHash<int, bool> mDisabledSaved;
+    // 颜色标记（会话内存）：clipId -> 0..6
+    QHash<int, int> mColorMarks;
+    // 时间轴块剪贴板：视频/图像类走 BoxesClipboard 完整序列化，
+    // 声音类走 prp_writeProperty_impl 克隆体（BoxesClipboard 不收声音）
+    stdsptr<BoxesClipboard> mBoxClipBoard;
+    QList<qsptr<eIndependentSound>> mSoundClipBoard;
+    struct PasteSpec {
+        int trackId = -1;
+        int duration = 0;
+        QString name;
+    };
+    QVector<PasteSpec> mBoxClipSpecs;
+    QVector<PasteSpec> mSoundClipSpecs;
+    // 块删除/换场景后剪掉失效 id 的装饰台账（clipId 按层恒定，
+    // 层没了 id 永不复用，不剪就是纯泄漏）
+    void pruneClipState();
     qreal mFps = 25.;
     bool mMagnetic = false;
     bool mInWriteback = false;

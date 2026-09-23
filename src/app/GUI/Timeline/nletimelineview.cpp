@@ -17,6 +17,9 @@
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QDateTime>
+#include <QWidgetAction>
+#include <QPointer>
+#include <functional>
 #include <algorithm>
 #include <climits>
 
@@ -47,6 +50,9 @@ NleTimelineView::NleTimelineView(NleTimelineModel * const model,
     connect(mModel, &NleTimelineModel::modelChanged,
             this, [this]() { pruneMediaCaches(); updateScrollBar(); update(); });
     connect(mModel, &NleTimelineModel::selectionChanged,
+            this, [this]() { update(); });
+    // 颜色标记/停用态变化：轻量重绘
+    connect(mModel, &NleTimelineModel::clipDecorationsChanged,
             this, [this]() { update(); });
 
     // procedural blade cursor for the razor tool (PR-style): a red
@@ -645,7 +651,9 @@ void NleTimelineView::drawClip(QPainter &p,
     if (ghost) { p.setOpacity(0.35); }
     else {
         const auto t = mModel->track(m.trackId);
-        if (t && t->muted) { p.setOpacity(0.45); }
+        // 停用片段（CapCut）：块压暗，恢复后原样
+        if (mModel->isDisabled(c.clipId)) { p.setOpacity(0.40); }
+        else if (t && t->muted) { p.setOpacity(0.45); }
     }
     // keep everything of the clip inside the content area
     p.setClipRect(QRectF(headerWidth(), 0, width() - headerWidth(), height()));
@@ -743,6 +751,25 @@ void NleTimelineView::drawClip(QPainter &p,
         p.fillRect(tagRect, QColor(0, 0, 0, 110));
         p.setPen(QColor(0xff, 0xd1, 0x54));
         p.drawText(tagRect, Qt::AlignCenter, tag);
+    }
+
+    // CapCut 颜色标记：名条右端小圆点（速度徽章左侧）
+    if (!ghost) {
+        const int mark = mModel->colorMark(c.clipId);
+        if (mark >= 0) {
+            static const QColor kMarkColors[7] = {
+                QColor(0xe5, 0x48, 0x4d), QColor(0xf5, 0xa6, 0x23),
+                QColor(0x46, 0xa7, 0x58), QColor(0x00, 0xb8, 0xa9),
+                QColor(0x00, 0x90, 0xff), QColor(0xe9, 0x3d, 0x82),
+                QColor(0x8e, 0x4e, 0xc6)};
+            p.setRenderHint(QPainter::Antialiasing);
+            const QPointF cc(r.right() - (qAbs(c.speed - 1.) > 0.001
+                                              ? 50 : 9),
+                             r.top() + nameBarH / 2.);
+            p.setPen(QPen(QColor(0, 0, 0, 90), 1));
+            p.setBrush(kMarkColors[qBound(0, mark, 6)]);
+            p.drawEllipse(cc, 3.4, 3.4);
+        }
     }
 
     // border: selected = white (CapCut), hovered = lighter
@@ -1845,6 +1872,43 @@ bool NleTimelineView::KFT_keyPressEvent(QKeyEvent *e)
         mModel->selectAll();
         return true;
     }
+    // 时间轴块剪贴板（视图持有 KFT 焦点时接管，画布路由不参与）
+    if (key == Qt::Key_C && mods == Qt::ControlModifier) {
+        if (mModel->selection().isEmpty()) {
+            emit logMessage(tr("无选中的块"));
+        } else {
+            mModel->requestCopy(mModel->selection());
+        }
+        return true;
+    }
+    if (key == Qt::Key_X && mods == Qt::ControlModifier) {
+        if (mModel->selection().isEmpty()) {
+            emit logMessage(tr("无选中的块"));
+        } else {
+            mModel->requestCopy(mModel->selection());
+            requestDelete(false);
+        }
+        return true;
+    }
+    if (key == Qt::Key_V && mods == Qt::ControlModifier) {
+        if (!mModel->hasClipClipboard()) {
+            emit logMessage(tr("剪贴板没有块，先复制或剪切"));
+        } else {
+            mModel->requestPaste(mPlayheadFrame);
+        }
+        return true;
+    }
+    // CapCut 停用片段：播放时跳过（层隐藏 = 不渲染 + 静音）
+    if (key == Qt::Key_E && mods == Qt::ShiftModifier) {
+        if (mModel->selection().isEmpty()) {
+            emit logMessage(tr("无选中的块"));
+        } else {
+            const bool disable =
+                    !mModel->isDisabled(*mModel->selection().constBegin());
+            mModel->requestSetDisabled(mModel->selection(), disable);
+        }
+        return true;
+    }
     if (key == Qt::Key_Escape) {
         mModel->clearSelection();
         return true;
@@ -2104,6 +2168,95 @@ void NleTimelineView::renameTrackDialog(const int trackIdx)
 
 // ---------------------------------------------------------------- menus
 
+// CapCut 右键菜单的标记颜色行：7 个色点 + 重置圈，点选即回收。
+// 不用 Q_OBJECT（免 moc），点击通过回传出、菜单经 QPointer 关闭
+class NleColorDotsRow : public QWidget
+{
+public:
+    NleColorDotsRow(const int current, QWidget * const parent)
+        : QWidget(parent)
+    {
+        setFixedSize(7 * 22 + 40, 26);
+        setCursor(Qt::PointingHandCursor);
+        if (current >= 0 && current < 7) { mCurrent = current; }
+    }
+
+    std::function<void(int)> picked;   // -1 = 清除
+    QPointer<QMenu> menu;
+
+private:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        static const QColor kColors[7] = {
+            QColor(0xe5, 0x48, 0x4d), QColor(0xf5, 0xa6, 0x23),
+            QColor(0x46, 0xa7, 0x58), QColor(0x00, 0xb8, 0xa9),
+            QColor(0x00, 0x90, 0xff), QColor(0xe9, 0x3d, 0x82),
+            QColor(0x8e, 0x4e, 0xc6)};
+        const QColor dim = palette().color(QPalette::Disabled,
+                                           QPalette::Text);
+        for (int i = 0; i < 7; ++i) {
+            const QPointF c(16 + i * 22, height() / 2.);
+            if (mHover == i) {
+                p.setPen(Qt::NoPen);
+                p.setBrush(QColor(255, 255, 255, 28));
+                p.drawEllipse(c, 9.5, 9.5);
+            }
+            p.setPen(QPen(QColor(0, 0, 0, 90), 1));
+            p.setBrush(kColors[i]);
+            p.drawEllipse(c, 6, 6);
+        }
+        // 重置圈（斜杠圆）：清除标记
+        const QPointF c(16 + 7 * 22 + 6, height() / 2.);
+        if (mHover == 7) {
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(255, 255, 255, 28));
+            p.drawEllipse(c, 9.5, 9.5);
+        }
+        QPen pen(dim);
+        pen.setWidthF(1.4);
+        p.setPen(pen);
+        p.setBrush(Qt::NoBrush);
+        p.drawEllipse(c, 5.5, 5.5);
+        p.drawLine(QPointF(c.x() - 3.9, c.y() + 3.9),
+                   QPointF(c.x() + 3.9, c.y() - 3.9));
+    }
+
+    void mouseMoveEvent(QMouseEvent *e) override
+    {
+        const int h = hit(e->pos());
+        if (h != mHover) { mHover = h; update(); }
+    }
+
+    void mousePressEvent(QMouseEvent *e) override
+    {
+        const int h = hit(e->pos());
+        if (h < 0) { return; }
+        if (picked) { picked(h == 7 ? -1 : h); }
+        if (menu) { menu->close(); }
+    }
+
+    void leaveEvent(QEvent *) override { mHover = -1; update(); }
+
+    int hit(const QPoint &pos) const
+    {
+        const QPointF c(16 + 7 * 22 + 6, height() / 2.);
+        const QPointF p(pos);
+        if (std::hypot(p.x() - c.x(), p.y() - c.y()) <= 10) { return 7; }
+        for (int i = 0; i < 7; ++i) {
+            const QPointF cc(16 + i * 22, height() / 2.);
+            if (std::hypot(p.x() - cc.x(), p.y() - cc.y()) <= 10) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    int mHover = -1;
+    int mCurrent = -1;
+};
+
 void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
 {
     // ruler: marker management at the clicked frame
@@ -2156,7 +2309,19 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
             mModel->tracks().at(srcIdx + 1).audio == c->audio;
 
     QMenu menu(this);
-    // 删除/波纹删除/向左向右选择都有工具栏快捷按钮，不再进菜单
+    // CapCut 分组：基础编辑（复制/剪切/删除）
+    const bool anySel = !mModel->selection().isEmpty();
+    QAction *copyAct = menu.addAction(tr("复制"));
+    copyAct->setEnabled(anySel);
+    copyAct->setShortcut(QKeySequence::Copy);
+    QAction *cutAct = menu.addAction(tr("剪切"));
+    cutAct->setEnabled(anySel);
+    cutAct->setShortcut(QKeySequence::Cut);
+    QAction *delAct = menu.addAction(tr("删除"));
+    delAct->setEnabled(anySel);
+    delAct->setShortcut(QKeySequence(Qt::Key_Backspace));
+    menu.addSeparator();
+
     QAction *splitHere = menu.addAction(tr("在此处分割"));
     QAction *freeze = menu.addAction(tr("从此处定格到块尾"));
     QAction *speed = menu.addAction(tr("变速…"));
@@ -2166,10 +2331,29 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
     const auto embeddedSound = vidBox ? vidBox->sound() : nullptr;
     QAction *detach = menu.addAction(tr("分离音频"));
     detach->setEnabled(embeddedSound && embeddedSound->isVisible());
+    menu.addSeparator();
+
+    // CapCut 标记颜色行：7 色点 + 重置；作用于整个选中集
+    auto *dots = new NleColorDotsRow(mModel->colorMark(clipId), &menu);
+    dots->menu = &menu;
+    dots->picked = [this](const int color) {
+        const auto sel = mModel->selection();
+        if (!sel.isEmpty()) { mModel->requestColorMark(sel, color); }
+    };
+    auto *dotsAct = new QWidgetAction(&menu);
+    dotsAct->setDefaultWidget(dots);
+    menu.addAction(dotsAct);
+    QAction *sameColor = menu.addAction(tr("选中同色片段"));
+    sameColor->setEnabled(mModel->colorMark(clipId) >= 0);
+    QAction *disableAct = menu.addAction(tr("停用片段"));
+    disableAct->setCheckable(true);
+    disableAct->setChecked(mModel->isDisabled(clipId));
+    disableAct->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_E));
+    menu.addSeparator();
+
     QAction *up = nullptr;
     QAction *down = nullptr;
     if (upOk || downOk) {
-        menu.addSeparator();
         up = menu.addAction(tr("移动到上一轨"));
         up->setEnabled(upOk);
         down = menu.addAction(tr("移动到下一轨"));
@@ -2177,7 +2361,14 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
     }
 
     QAction *act = menu.exec(e->globalPos());
-    if (act == splitHere) {
+    if (act == copyAct) {
+        mModel->requestCopy(mModel->selection());
+    } else if (act == cutAct) {
+        mModel->requestCopy(mModel->selection());
+        requestDelete(false);
+    } else if (act == delAct) {
+        requestDelete(false);
+    } else if (act == splitHere) {
         mModel->clearSelection();
         mModel->requestRazorCut({clipId}, xToFrame(e->pos().x()));
     } else if (act == freeze) {
@@ -2186,6 +2377,11 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
         mModel->requestFreeze({clipId}, xToFrame(e->pos().x()));
     } else if (act == detach) {
         mModel->requestDetachAudio(clipId);
+    } else if (act == sameColor) {
+        mModel->requestSelectSameColor(clipId);
+    } else if (act == disableAct) {
+        mModel->requestSetDisabled(mModel->selection(),
+                                   disableAct->isChecked());
     } else if (act == speed) {
         bool ok = false;
         const double rate = QInputDialog::getDouble(
