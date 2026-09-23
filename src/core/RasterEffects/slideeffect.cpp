@@ -112,8 +112,9 @@ void SlideEffectCaller::processCpu(CpuRenderTools& renderTools,
     const int yMin = std::max(0, data.fTexTile.top());
     const int yMax = std::min((int)data.fTexTile.bottom(), h - 1);
 
-    if (qAbs(mDx) < 0.0001 && qAbs(mDy) < 0.0001) { return; }
-
+    // zero offset must still copy src into dst: the pipeline hands the
+    // caller an uninitialized dst bitmap and replaces the rendered
+    // image with it, so an early return here draws garbage/black
     const int dx = qRound(mDx * w);
     const int dy = qRound(mDy * h);
 

@@ -93,8 +93,9 @@ stdsptr<RasterEffectCaller> FlashFadeEffect::getEffectCaller(
 void FlashFadeEffectCaller::processCpu(CpuRenderTools& renderTools,
                                        const CpuRenderData& data)
 {
-    if (mOpenness >= 0.999) { return; } // fully open: passthrough
-
+    // fully open must still copy src into dst: the pipeline hands the
+    // caller an uninitialized dst bitmap and replaces the rendered
+    // image with it, so an early return here draws garbage/black
     const auto& srcBtmp = renderTools.fSrcBtmp;
     const auto& dstBtmp = renderTools.fDstBtmp;
 
