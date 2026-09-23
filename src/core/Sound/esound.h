@@ -38,6 +38,9 @@ protected:
 public:
     virtual qreal durationSeconds() const = 0;
     virtual QrealSnapshot getVolumeSnap() const = 0;
+    // NLE volume envelope hook: the timeline view edits the volume
+    // keys through this (null unless the sound owns one)
+    virtual QrealAnimator * volumeAnimator() { return nullptr; }
     virtual stdsptr<Samples> getSamplesForSecond(const int relSecondId) = 0;
     virtual SoundReaderForMerger * getSecondReader(const int relSecondId) = 0;
     virtual qreal getStretch() const = 0;

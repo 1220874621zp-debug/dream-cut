@@ -187,7 +187,7 @@ private:
     // PR/CapCut-style editing tools (checkable, exclusive): order
     // matches NleTimelineView::EditTool (5 tools incl. spacer)
     class QActionGroup *mToolGroup = nullptr;
-    QAction *mToolActs[5] = { nullptr, nullptr, nullptr, nullptr, nullptr };
+    QAction *mToolActs[6] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
     QAction *mNleToolSeps[3] = { nullptr, nullptr, nullptr };
     QAction *mNleSplitAtAct = nullptr;
     QAction *mNleFreezeAct = nullptr;

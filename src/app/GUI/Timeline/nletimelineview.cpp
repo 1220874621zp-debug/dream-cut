@@ -28,6 +28,9 @@
 #include <QHash>
 #include "Boxes/videobox.h"
 #include "Sound/evideosound.h"
+#include "Sound/eindependentsound.h"
+#include "Animators/qrealkey.h"
+#include <QFileInfo>
 
 static const int SNAP_PX = 8;
 static const int TRIM_PX = 6;
@@ -207,6 +210,8 @@ void NleTimelineView::paintEvent(QPaintEvent *)
     for (const auto &c : mModel->clips()) {
         drawClip(p, c);
     }
+
+    drawSeamDots(p);
 
     // ghost of the primary dragged clip at its original position
     if (mDrag == DragMode::MoveClip && mDragClipId >= 0) {
@@ -420,6 +425,25 @@ static QByteArray nleGlyphBody(const QString &key, const bool off,
 void NleTimelineView::drawTrackHeaders(QPainter &p)
 {
     const auto &tracks = mModel->tracks();
+    // CapCut lane numbers: video lanes count up from the main track
+    // (1 sits right above it, the header column reads n..1 top-down),
+    // audio lanes count up from the bottom; the main track carries
+    // the badge instead of a number
+    const int mainId = mModel->mainTrackId();
+    QHash<int, int> laneNo;
+    {
+        int above = 0;
+        for (int i = tracks.size() - 1; i >= 0; --i) {
+            const auto &t = tracks[i];
+            if (t.audio || t.id == mainId) { continue; }
+            laneNo.insert(t.id, ++above);
+        }
+        int aNo = 0;
+        for (int i = tracks.size() - 1; i >= 0; --i) {
+            if (!tracks[i].audio) { continue; }
+            laneNo.insert(tracks[i].id, ++aNo);
+        }
+    }
     for (int i = 0; i < tracks.size(); ++i) {
         const int top = trackY(i);
         const int h = trackHeight(i);
@@ -438,7 +462,7 @@ void NleTimelineView::drawTrackHeaders(QPainter &p)
                                     cText, 18));
         // CapCut main track: the bottom video lane carries the badge
         // and drives the magnetic layout + overlay following
-        if (!audio && tracks[i].id == mModel->mainTrackId()) {
+        if (!audio && tracks[i].id == mainId) {
             QFont mf = font();
             mf.setPixelSize(9);
             p.setFont(mf);
@@ -448,10 +472,25 @@ void NleTimelineView::drawTrackHeaders(QPainter &p)
             p.drawRoundedRect(mb, 3, 3);
             p.setPen(QColor(0x33, 0x28, 0x08));
             p.drawText(mb, Qt::AlignCenter, QStringLiteral("主"));
+        } else {
+            // CapCut lane number next to the type glyph (V-n / A-n,
+            // stored per-type so both stacks count from the main row)
+            const int no = laneNo.value(tracks[i].id, -1);
+            if (no > 0) {
+                QFont nf = font();
+                nf.setPixelSize(9);
+                p.setFont(nf);
+                p.setPen(cTextDim);
+                p.drawText(QRect(30, top, 18, h), Qt::AlignVCenter,
+                           QStringLiteral("%1%2")
+                               .arg(audio ? QStringLiteral("A")
+                                          : QStringLiteral("V"))
+                               .arg(no));
+            }
         }
 
         p.setPen(tracks[i].muted ? cTextDim : cText);
-        p.drawText(QRect(38, top, headerWidth() - 130, h),
+        p.drawText(QRect(52, top, headerWidth() - 144, h),
                    Qt::AlignVCenter, tracks[i].name);
 
         // 剪映顺序：锁在左，眼(视频)/喇叭(音频)在右
@@ -497,6 +536,181 @@ void NleTimelineView::drawTrackBodies(QPainter &p)
         p.setPen(QColor(0x26, 0x26, 0x26));
         p.drawLine(headerWidth(), top + h - 1, width(), top + h - 1);
     }
+}
+
+void NleTimelineView::drawSeamDots(QPainter &p)
+{
+    // CapCut seam marks: a red dot wherever two neighbouring main
+    // clips butt together. Placements go through effectiveMove so the
+    // dots ride a running drag (the magnetic plan shifts the seams)
+    const int mainId = mModel->mainTrackId();
+    const int idx = mModel->trackIndex(mainId);
+    if (idx < 0) { return; }
+    QVector<QPair<int, int>> spans; // {start, end}
+    for (const auto &c : mModel->clips()) {
+        if (c.trackId != mainId) { continue; }
+        const auto m = effectiveMove(c.clipId);
+        spans.append({m.start, m.start + m.duration});
+    }
+    if (spans.size() < 2) { return; }
+    std::sort(spans.begin(), spans.end());
+    const qreal cy = trackY(idx) + trackHeight(idx) / 2.;
+    p.setPen(QPen(QColor(0x10, 0x18, 0x20), 1));
+    p.setBrush(QColor(0xe8, 0x4c, 0x4c));
+    for (int i = 1; i < spans.size(); ++i) {
+        if (spans[i - 1].second != spans[i].first) { continue; }
+        const qreal x = frameToX(spans[i].first);
+        if (x < headerWidth() || x > width()) { continue; }
+        p.drawEllipse(QPointF(x, cy), 3., 3.);
+    }
+}
+
+// volume 0..200 (percent) -> wave-body y: 100 = 0dB midline, the
+// full range maps bottom..top (CapCut volume envelope geometry)
+namespace {
+qreal nleVolY(const QRectF &body, const qreal vol)
+{
+    return body.top() + body.height() *
+            (1. - qBound(0., vol, 200.) / 200.);
+}
+} // namespace
+
+void NleTimelineView::drawVolumeEnvelope(QPainter &p,
+                                         const NleTimelineModel::Clip &c,
+                                         const QRectF &body)
+{
+    const auto sound = enve_cast<eSound*>(c.layer.data());
+    if (!sound) { return; }
+    auto * const anim = sound->volumeAnimator();
+    if (!anim || body.height() < 12 || body.width() < 8) { return; }
+    // candidate-aware so the envelope rides a running drag
+    const auto m = effectiveMove(c.clipId);
+    const double x0 = frameToX(m.start);
+
+    p.save();
+    p.setClipRect(body.adjusted(0, -2, 0, 2), Qt::IntersectClip);
+    // 0dB reference midline
+    p.setPen(QPen(QColor(0xff, 0xff, 0xff, 56), 1, Qt::DotLine));
+    p.drawLine(QPointF(body.left(), nleVolY(body, 100)),
+               QPointF(body.right(), nleVolY(body, 100)));
+    // envelope polyline sampled from the animator
+    p.setPen(QPen(QColor(0xff, 0xff, 0xff, 220), 1.5));
+    QPainterPath line;
+    bool started = false;
+    for (int x = qRound(body.left()); x <= qRound(body.right()); x += 2) {
+        const qreal rel = (x - x0) / mPxPerFrame;
+        const QPointF pt(x, nleVolY(body, anim->getBaseValue(rel)));
+        if (!started) { line.moveTo(pt); started = true; }
+        else { line.lineTo(pt); }
+    }
+    p.drawPath(line);
+    // key dots
+    p.setPen(QPen(QColor(0x18, 0x2a, 0x40), 1));
+    p.setBrush(QColor(0xff, 0xff, 0xff));
+    for (const auto &k : anim->anim_getKeys()) {
+        const auto qk = static_cast<QrealKey*>(k);
+        const qreal kx = x0 + qk->getRelFrame() * mPxPerFrame;
+        if (kx < body.left() - 4 || kx > body.right() + 4) { continue; }
+        p.drawEllipse(QPointF(kx, nleVolY(body, qk->getValue())), 2.6, 2.6);
+    }
+    p.restore();
+}
+
+QString NleTimelineView::audioTagFor(const NleTimelineModel::Clip &c)
+{
+    const auto it = mAudioTags.constFind(c.clipId);
+    if (it != mAudioTags.constEnd()) { return it.value(); }
+    QString tag;
+    // bitrate only for independent sounds: an embedded/separated
+    // video sound would report the whole container's size
+    const auto indep = enve_cast<eIndependentSound*>(c.layer.data());
+    if (indep) {
+        const QFileInfo fi(indep->getFilePath());
+        if (fi.exists() && c.duration > 0) {
+            const qreal secs = qMax(0.5, c.duration /
+                                    qMax(1., mModel->fps()) / qMax(0.01, c.speed));
+            const int kbps = qRound(fi.size() * 8 / secs / 1000);
+            if (kbps > 0) { tag = QStringLiteral("%1kbps").arg(kbps); }
+        }
+    }
+    mAudioTags.insert(c.clipId, tag);
+    return tag;
+}
+
+NleTimelineView::VolHit NleTimelineView::volumeHitTest(
+        const QPoint &pos, int *const clipIdOut,
+        QrealKey **const keyOut) const
+{
+    if (clipIdOut) { *clipIdOut = -1; }
+    if (keyOut) { *keyOut = nullptr; }
+    const int clipId = clipAt(pos);
+    if (clipId < 0) { return VolHit::None; }
+    const auto c = mModel->clip(clipId);
+    if (!c || !c->audio) { return VolHit::None; }
+    const auto sound = enve_cast<eSound*>(c->layer.data());
+    auto * const anim = sound ? sound->volumeAnimator() : nullptr;
+    if (!anim) { return VolHit::None; }
+    const auto m = effectiveMove(clipId);
+    // same body geometry the envelope is painted into (nameBarH = 16)
+    const QRectF body = moveRect(m).adjusted(2, 18, -2, -3);
+    if (!body.contains(pos)) { return VolHit::None; }
+    const double x0 = frameToX(m.start);
+    QrealKey *best = nullptr;
+    qreal bestDx = 8;
+    for (const auto &k : anim->anim_getKeys()) {
+        const auto qk = static_cast<QrealKey*>(k);
+        const qreal dx = qAbs(x0 + qk->getRelFrame() * mPxPerFrame
+                              - pos.x());
+        if (dx < bestDx) { bestDx = dx; best = qk; }
+    }
+    if (clipIdOut) { *clipIdOut = clipId; }
+    if (best && qAbs(nleVolY(body, best->getValue()) - pos.y()) <= 7) {
+        if (keyOut) { *keyOut = best; }
+        return VolHit::Key;
+    }
+    const qreal rel = (pos.x() - x0) / mPxPerFrame;
+    const qreal y = nleVolY(body, anim->getBaseValue(rel));
+    return qAbs(y - pos.y()) <= 6 ? VolHit::Line : VolHit::None;
+}
+
+// arm (or complete, for Alt+key delete) a volume-point gesture;
+// returns true when the press was consumed by the envelope
+bool NleTimelineView::armVolumeGesture(const QPoint &pos, const bool alt)
+{
+    int clipId = -1;
+    QrealKey *key = nullptr;
+    const VolHit hit = volumeHitTest(pos, &clipId, &key);
+    if (hit == VolHit::None) { return false; }
+    const auto c = mModel->clip(clipId);
+    const auto sound = enve_cast<eSound*>(c ? c->layer.data() : nullptr);
+    auto * const anim = sound ? sound->volumeAnimator() : nullptr;
+    if (!anim) { return false; }
+    if (hit == VolHit::Key) {
+        if (alt) {
+            anim->anim_removeKeyAction(key->ref<Key>());
+            emit logMessage(tr("已删除音量关键点"));
+            update();
+            return true;
+        }
+        mVolAnim = anim;
+        mVolKey = key;
+        mVolClipId = clipId;
+        mDrag = DragMode::VolumePoint;
+        return true;
+    }
+    // line hit: drop a key at the cursor frame holding the current
+    // interpolated value (undoable), then drag it
+    const auto m = effectiveMove(clipId);
+    const int relF = qRound((pos.x() - frameToX(m.start)) / mPxPerFrame);
+    const qreal val = anim->getBaseValue(relF);
+    const auto newKey = enve::make_shared<QrealKey>(val, m.start + relF,
+                                                    anim);
+    anim->anim_appendKeyAction(newKey);
+    mVolAnim = anim;
+    mVolKey = newKey.get();
+    mVolClipId = clipId;
+    mDrag = DragMode::VolumePoint;
+    return true;
 }
 
 QString NleTimelineView::timecode(const int frame) const
@@ -727,6 +941,7 @@ void NleTimelineView::drawClip(QPainter &p,
         p.fillPath(path, cAudioBody);
         QRectF body = r.adjusted(2, nameBarH + 2, -2, -3);
         drawWave(p, body, c);
+        drawVolumeEnvelope(p, c, body);
         p.save();
         p.setClipRect(r, Qt::IntersectClip);
         p.fillRect(QRectF(r.left(), r.top(), r.width(), nameBarH), cAudioBody.lighter(135));
@@ -751,6 +966,20 @@ void NleTimelineView::drawClip(QPainter &p,
         p.fillRect(tagRect, QColor(0, 0, 0, 110));
         p.setPen(QColor(0xff, 0xd1, 0x54));
         p.drawText(tagRect, Qt::AlignCenter, tag);
+    }
+
+    // CapCut audio info tag: source-media bitrate at the name-bar
+    // right end (left of the speed badge when both show)
+    if (c.audio && !ghost) {
+        const QString tag = audioTagFor(c);
+        if (!tag.isEmpty()) {
+            const qreal off = qAbs(c.speed - 1.) > 0.001 ? 46. : 4.;
+            const QRectF tagRect(r.right() - off - 52, r.top() + 1,
+                                 50, nameBarH - 2);
+            p.fillRect(tagRect, QColor(0, 0, 0, 110));
+            p.setPen(QColor(0xb8, 0xd4, 0xf0));
+            p.drawText(tagRect, Qt::AlignCenter, tag);
+        }
     }
 
     // CapCut 颜色标记：名条右端小圆点（速度徽章左侧）
@@ -841,6 +1070,7 @@ void NleTimelineView::pruneMediaCaches()
     pruneIntKey(mRealScaled);
     pruneIntKey(mFilm);
     pruneIntKey(mWaves);
+    pruneIntKey(mAudioTags);
 
     // 占位贴图键 = "clipId x 高度"
     for (auto it = mThumbCache.begin(); it != mThumbCache.end();) {
@@ -983,6 +1213,11 @@ void NleTimelineView::applyToolCursor(const QPoint &pos)
         setCursor(mRazorCursor);
         return;
     }
+    if (mTool == EditTool::Hand) {
+        setCursor(pos.y() > rulerHeight() ? Qt::OpenHandCursor
+                                          : Qt::ArrowCursor);
+        return;
+    }
     if (mTool == EditTool::Spacer) {
         setCursor(pos.x() >= headerWidth() && pos.y() > rulerHeight()
                       ? Qt::SizeAllCursor : Qt::ArrowCursor);
@@ -994,10 +1229,14 @@ void NleTimelineView::applyToolCursor(const QPoint &pos)
                                    : Qt::ArrowCursor);
         return;
     }
-    // select tool: trim edges / ruler hand / default
+    // select tool: volume envelope / trim edges / ruler hand / default
     QRectF r;
     const int clipId = clipAt(pos, &r);
-    if (clipId >= 0 &&
+    if (clipId >= 0 && volumeHitTest(pos, nullptr, nullptr) != VolHit::None) {
+        // the envelope beats the trim edges (its hit zone is centered
+        // in the body, the edges hug the clip sides)
+        setCursor(Qt::SizeVerCursor);
+    } else if (clipId >= 0 &&
         (qAbs(pos.x() - r.left()) <= TRIM_PX || qAbs(pos.x() - r.right()) <= TRIM_PX)) {
         setCursor(Qt::SizeHorCursor);
     } else if (pos.y() <= rulerHeight()) {
@@ -1129,13 +1368,27 @@ void NleTimelineView::mousePressEvent(QMouseEvent *e)
         mDropIllegal = false;
         mGhostLane = false;
         mGhostLaneTop = false;
+        mVolKey = nullptr;
+        mVolAnim = nullptr;
+        mVolClipId = -1;
         mModel->setGestureActive(false);
     }
 
-    if (e->button() == Qt::MiddleButton) {
-        return; // reserved: pan view
+    // hand pan: middle button anywhere, the Hand tool on the content
+    // area (header badges keep their own interactions)
+    if (e->button() == Qt::MiddleButton ||
+            (mTool == EditTool::Hand && e->pos().x() >= headerWidth()
+             && e->pos().y() > rulerHeight())) {
+        mDrag = DragMode::Pan;
+        mPanScroll = mScrollFrame;
+        if (mTool == EditTool::Hand && e->button() == Qt::LeftButton) {
+            setCursor(Qt::ClosedHandCursor);
+        }
+        return;
     }
     if (e->button() != Qt::LeftButton) { return; }
+    // the hand tool in the header/ruler corners: nothing to pan
+    if (mTool == EditTool::Hand) { return; }
 
     // clips win over the playhead: a press on a block must never start
     // a playhead drag, even when the block sits under the playhead line
@@ -1232,6 +1485,13 @@ void NleTimelineView::mousePressEvent(QMouseEvent *e)
             }
         }
         update();
+        return;
+    }
+
+    // volume envelope beats the clip gestures (CapCut: pressing the
+    // line/key never moves the clip)
+    if (clipId >= 0 && mTool == EditTool::Select &&
+            armVolumeGesture(e->pos(), e->modifiers() & Qt::AltModifier)) {
         return;
     }
 
@@ -1363,6 +1623,32 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
         setPlayheadFrame(curFrame);
         emit playheadDragged(mPlayheadFrame);
         break;
+    }
+    case DragMode::Pan: {
+        // hand pan: dragging left moves the content with the cursor
+        const int df = qRound((mPressPos.x() - e->pos().x())
+                              / mPxPerFrame);
+        mScrollFrame = mPanScroll + df;
+        clampView();
+        updateScrollBar();
+        break;
+    }
+    case DragMode::VolumePoint: {
+        // vertical only (CapCut): the volume follows the cursor
+        if (mVolKey && mVolClipId >= 0) {
+            const auto c = mModel->clip(mVolClipId);
+            if (c) {
+                const QRectF body = clipRect(*c).adjusted(2, 18, -2, -3);
+                const qreal t = 1. - qBound(
+                            0., (e->pos().y() - body.top()) / body.height(),
+                            1.);
+                mVolKey->setValue(qRound(t * 200.));
+                feedback(QStringLiteral("音量 %1%")
+                             .arg(QString::number(t * 200., 'f', 0)));
+            }
+        }
+        update();
+        return; // envelope drags never auto-scroll the content
     }
     case DragMode::TrackHeight: {
         if (mDragTrackIdx >= 0 && mDragTrackIdx < mModel->tracks().size()) {
@@ -1722,6 +2008,16 @@ void NleTimelineView::finishGestureCommit(const bool insertMode)
 
 void NleTimelineView::mouseReleaseEvent(QMouseEvent *e)
 {
+    // pan may run on the middle button: finish it before the
+    // left-button filter drops the release
+    if (mDrag == DragMode::Pan &&
+            (e->button() == Qt::MiddleButton ||
+             e->button() == Qt::LeftButton)) {
+        mDrag = DragMode::None;
+        applyToolCursor(e->pos());
+        update();
+        return;
+    }
     if (e->button() != Qt::LeftButton) { return; }
 
     // a press that never crossed the drag threshold: plain click, the
@@ -1765,6 +2061,15 @@ void NleTimelineView::mouseReleaseEvent(QMouseEvent *e)
     }
 
     if (mDrag == DragMode::Playhead) {
+        mDrag = DragMode::None;
+        update();
+        return;
+    }
+
+    if (mDrag == DragMode::VolumePoint) {
+        mVolKey = nullptr;
+        mVolAnim = nullptr;
+        mVolClipId = -1;
         mDrag = DragMode::None;
         update();
         return;
@@ -1944,6 +2249,10 @@ bool NleTimelineView::KFT_keyPressEvent(QKeyEvent *e)
     }
     if (key == Qt::Key_D && mods == Qt::NoModifier) {
         setTool(EditTool::Spacer);
+        return true;
+    }
+    if (key == Qt::Key_H && mods == Qt::NoModifier) {
+        setTool(EditTool::Hand);
         return true;
     }
     return false;

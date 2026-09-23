@@ -51,6 +51,15 @@ public:
     qreal getStretch() const final { return mStretch; }
     QrealSnapshot getVolumeSnap() const final;
 
+    // NLE volume envelope: the view edits the volume keys directly
+    // (CapCut-style line on the audio clip); null from plain eSound
+    QrealAnimator * volumeAnimator() final
+    { return mVolumeAnimator.data(); }
+    // source media path for info tags (bitrate), empty for sounds
+    // with no file behind them
+    QString getFilePath() const
+    { return mCacheHandler ? mCacheHandler->getFilePath() : QString(); }
+
     void setStretch(const qreal stretch);
     void setSoundDataHandler(SoundDataHandler * const newDataHandler);
 protected:

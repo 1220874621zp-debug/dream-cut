@@ -178,6 +178,17 @@ const char* kNleToolSpacerSvg =
         " stroke-linecap=\"round\" stroke-linejoin=\"round\""
         " d=\"M10.6 12 H13.4 M12.8 10.4 L10.6 12 L12.8 13.6"
         " M11.2 10.4 L13.4 12 L11.2 13.6\"/></svg>";
+// hand tool: pan palm (simplified Material pan_tool, stroke style
+// matching the other glyphs)
+const char* kNleToolHandSvg =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
+        "<path fill=\"none\" stroke=\"%1\" stroke-width=\"1.8\""
+        " stroke-linejoin=\"round\""
+        " d=\"M8.5 12.5 V5.5 a1.3 1.3 0 0 1 2.6 0 V11 M11.1 11 V3.8"
+        " a1.3 1.3 0 0 1 2.6 0 V11 M13.7 11 V4.8 a1.3 1.3 0 0 1 2.6 0"
+        " V12 M16.3 12 V6.5 a1.3 1.3 0 0 1 2.6 0 V14.5 c0 4.1-2.4 6.5"
+        " -6.5 6.5 c-2.7 0-4.2-.9-5.6-2.6 l-3.3-4.2 a1.35 1.35 0 0 1"
+        " 2-1.8 l2.5 2.1 Z\"/></svg>";
 // freeze: snowflake-ish asterisk
 const char* kNleFreezeSvg =
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
@@ -733,7 +744,7 @@ void TimelineDockWidget::setupNleActions()
                         svg, on ? onGlyph : QColor(0xc8, 0xc8, 0xc8))));
             if (on && mNleView) { mNleView->setTool(tool); }
         });
-        if (slot >= 0 && slot < 5) { mToolActs[slot] = a; }
+        if (slot >= 0 && slot < 6) { mToolActs[slot] = a; }
         return a;
     };
     addToolAct(tr("选择工具 (V)"), kNleToolSelectSvg, ET::Select,
@@ -746,11 +757,13 @@ void TimelineDockWidget::setupNleActions()
                static_cast<int>(ET::TrackForward));
     addToolAct(tr("间隔工具 (D)"), kNleToolSpacerSvg, ET::Spacer,
                static_cast<int>(ET::Spacer));
+    addToolAct(tr("手型工具 (H)"), kNleToolHandSvg, ET::Hand,
+               static_cast<int>(ET::Hand));
     // keyboard tool switches stay in sync with the buttons (setTool
     // no-ops on the same tool, so the re-check cannot loop)
     connect(mNleView, &NleTimelineView::toolChanged, this,
             [this](const int tool) {
-        if (tool < 0 || tool > 4) { return; }
+        if (tool < 0 || tool >= int(ET::Hand) + 1) { return; }
         auto * const a = mToolActs[tool];
         if (a && !a->isChecked()) { a->setChecked(true); }
     });

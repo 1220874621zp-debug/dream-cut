@@ -13,6 +13,8 @@
 #include "misc/keyfocustarget.h"
 
 class QScrollBar;
+class QrealAnimator;
+class QrealKey;
 
 // kdenlive-style timeline view: pure rendering + gestures over
 // NleTimelineModel. The view holds NO document state - tracks, clips
@@ -40,7 +42,7 @@ public:
     // left click on a clip does; Select keeps the classic
     // move/trim/rubber-band interactions
     enum class EditTool { Select, Razor, TrackBackward, TrackForward,
-                          Spacer };
+                          Spacer, Hand };
     void setTool(const EditTool tool);
     EditTool tool() const { return mTool; }
 
@@ -140,12 +142,28 @@ private:
     void drawWave(QPainter &p, const QRectF &body,
                   const NleTimelineModel::Clip &c);
     void drawPlayhead(QPainter &p);
+    // CapCut main-track seam dots: red marks where neighbouring main
+    // clips butt together (candidate-aware so they ride a drag)
+    void drawSeamDots(QPainter &p);
+    // CapCut audio volume envelope: white key line over the waveform
+    void drawVolumeEnvelope(QPainter &p,
+                            const NleTimelineModel::Clip &c,
+                            const QRectF &body);
+    // read-only envelope hit test (cursor + gesture arming)
+    enum class VolHit { None, Line, Key };
+    VolHit volumeHitTest(const QPoint &pos, int *clipIdOut,
+                         QrealKey **keyOut) const;
+    // consume a press on the envelope: drag a key, Alt-delete one, or
+    // create+drag a new key at the cursor frame
+    bool armVolumeGesture(const QPoint &pos, const bool alt);
     QPixmap thumbnailTile(const int clipId, const int hueSeed, const int h);
     QString timecode(const int frame) const;
+    // audio info tag (bitrate for independent sounds), cached per id
+    QString audioTagFor(const NleTimelineModel::Clip &c);
 
     // ---- interaction ----
     enum class DragMode { None, MoveClip, TrimLeft, TrimRight, Playhead,
-                          TrackHeight, SpacerMove };
+                          TrackHeight, SpacerMove, Pan, VolumePoint };
     // candidate track id for the CapCut lane lifecycle: dragging a
     // clip below every track targets a NEW track of its type, which
     // materializes on release
@@ -234,6 +252,12 @@ private:
     QPoint mPressPos;
     int mDragTrackIdx = -1;    // TrackHeight gesture lane
     int mPressTrackHeight = 0;
+    int mPanScroll = 0;        // Pan gesture press-time scroll frame
+    // VolumePoint gesture: the animator + key under the press (the
+    // animator owns the key, both stay alive for the gesture)
+    QrealAnimator *mVolAnim = nullptr;
+    QrealKey *mVolKey = nullptr;
+    int mVolClipId = -1;
 
     int mHoverId = -1;
     QPoint mHoverPos;          // live cursor pos for the razor guide
@@ -255,6 +279,7 @@ private:
     QHash<int, QPixmap> mRealScaled;       // clipId -> height-matched pm
     QHash<int, QMap<int, QImage>> mFilm;   // clipId -> abs frame -> tile
     QHash<int, QHash<int, QVector<qreal>>> mWaves; // clipId -> sec -> peaks
+    QHash<int, QString> mAudioTags;        // clipId -> bitrate tag
 
     // theme
     QColor cBg       {0x1b,0x1b,0x1b};
