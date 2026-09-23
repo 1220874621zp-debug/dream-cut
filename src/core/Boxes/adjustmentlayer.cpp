@@ -48,22 +48,9 @@ static QPointF backdropWorldAnchor(const BoxRenderData& data) {
     const auto box = data.fParentBox.data();
     const auto scene = box ? box->getParentScene() : nullptr;
     if (scene) {
-        const auto anchor = QPointF(
+        return QPointF(
                     scene->getCanvasWidth() * 0.5 * data.fResolution,
                     scene->getCanvasHeight() * 0.5 * data.fResolution);
-        static QElapsedTimer sProbeT;
-        static bool sProbeIni = false;
-        if (!sProbeIni) { sProbeT.start(); sProbeIni = true; }
-        if (sProbeT.elapsed() > 500) {
-            sProbeT.restart();
-            qWarning() << "[PTCL anchor] box" << (box ? box->prp_getName() : QString("?"))
-                       << "scene" << (scene ? scene->prp_getName() : QString("?"))
-                       << "WxH" << scene->getCanvasWidth() << scene->getCanvasHeight()
-                       << "res" << data.fResolution
-                       << "anchor" << anchor
-                       << "scaledOrigin" << data.fScaledTransform.map(QPointF(0, 0));
-        }
-        return anchor;
     }
     return data.fScaledTransform.map(QPointF(0, 0));
 }

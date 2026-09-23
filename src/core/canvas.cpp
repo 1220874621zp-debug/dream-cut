@@ -2750,8 +2750,10 @@ void Canvas::removeNullObject(NullObject* const obj)
 
 void Canvas::addAdjustmentLayerAction() {
     const auto adj = enve::make_shared<AdjustmentLayer>();
-    mCurrentContainer ? mCurrentContainer->addContained(adj) :
-                        addContained(adj);
+    // CapCut 语义：新建图层恒为场景顶层（NLE 一轨一层的前提），
+    // 不进当前容器——新建矢量图层会自动进入其内部，随后在此新建
+    // 的层全被吞进容器（用户感知=右键新建无法添加）
+    addContained(adj);
     adj->planUpdate(UpdateReason::userChange);
     if(Document::sInstance) Document::sInstance->actionFinished();
 }
@@ -2761,8 +2763,7 @@ void Canvas::addSolidLayerAction() {
     const auto solid = enve::make_shared<SolidLayer>();
     solid->setTopLeftPos(QPointF(0, 0));
     solid->setBottomRightPos(QPointF(getCanvasWidth(), getCanvasHeight()));
-    mCurrentContainer ? mCurrentContainer->addContained(solid) :
-                        addContained(solid);
+    addContained(solid);
     solid->planUpdate(UpdateReason::userChange);
     if(Document::sInstance) Document::sInstance->actionFinished();
 }
@@ -2781,9 +2782,9 @@ void Canvas::addTextLayerAction() {
                                 SkFontStyle());
 #endif
     text->setCurrentValue(QObject::tr("文字"));
-    ContainerBox* const parent = mCurrentContainer ? mCurrentContainer.data()
-                                                   : this;
-    parent->addContained(text);
+    // 恒为场景顶层：否则新建矢量图层自动进入其内部后，文字层全部
+    // 落进容器，NLE 看不到新轨新块（=右键新建文字层无法添加）
+    addContained(text);
     text->planCenterPivotPosition();
     text->planUpdate(UpdateReason::userChange);
     if(Document::sInstance) Document::sInstance->actionFinished();
@@ -2792,9 +2793,8 @@ void Canvas::addTextLayerAction() {
 void Canvas::addVectorLayerAction() {
     const auto layer = enve::make_shared<ContainerBox>(
                 QObject::tr("矢量图层"), eBoxType::layer);
-    ContainerBox* const parent = mCurrentContainer ? mCurrentContainer.data()
-                                                   : this;
-    parent->addContained(layer);
+    // 同上：矢量图层本体恒为场景顶层（进入其内部画形状的动线不变）
+    addContained(layer);
     setCurrentBoxesGroup(layer.get());
     layer->planUpdate(UpdateReason::userChange);
     if(Document::sInstance) Document::sInstance->actionFinished();

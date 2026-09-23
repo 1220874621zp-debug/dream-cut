@@ -765,7 +765,10 @@ qsptr<eIndependentSound> createSoundForPath(const QString &path) {
 
 eBoxOrSound *Actions::importFile(const QString &path) {
     if(!mActiveScene) return nullptr;
-    return importFile(path, mActiveScene->getCurrentGroup());
+    // NLE 语义：素材恒进场景根。getCurrentGroup 在画布处于图层内
+    // 部时（新建矢量图层会自动进入）把导入吞进容器，时间轴上永远
+    // 看不到新块（用户感知=导入/新建没效果）
+    return importFile(path, mActiveScene);
 }
 
 eBoxOrSound *Actions::importFile(const QString &path,

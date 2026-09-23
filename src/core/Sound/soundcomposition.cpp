@@ -26,6 +26,7 @@
 #include "soundcomposition.h"
 #include "esound.h"
 #include "canvas.h"
+#include "Boxes/boundingbox.h"
 #include "CacheHandlers/soundcachecontainer.h"
 #include "soundmerger.h"
 #include "FileCacheHandlers/soundreaderformerger.h"
@@ -116,6 +117,12 @@ SoundMerger *SoundComposition::scheduleSecond(const int secondId) {
     }
     for(const auto &sound : mSounds) {
         if(!sound->isVisible()) continue;
+        // 内嵌音频跟随宿主盒可见性：NLE 的轨道 solo/静音/停用都是
+        // 藏层（VideoBox），内嵌 eVideoSound 是独立对象、自身旗标
+        // 恒 true——不查宿主的话画面藏了声音照响，solo 等于没效果
+        if(const auto hostBox = sound->getFirstAncestor<BoundingBox>()) {
+            if(!hostBox->isVisible()) continue;
+        }
         if(anySoundSolo && !sound->isSolo()) continue;
         const auto enabledFrameRange = sound->prp_absInfluenceRange();
         const iValueRange enabledSecRange{qFloor(enabledFrameRange.fMin/fps),
