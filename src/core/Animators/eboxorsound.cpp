@@ -28,6 +28,7 @@
 #include "canvas.h"
 #include "Boxes/containerbox.h"
 #include "Timeline/durationrectangle.h"
+#include "Timeline/fixedlenanimationrect.h"
 #include "Properties/emimedata.h"
 #include "Sound/esound.h"
 #include "Sound/soundcomposition.h"
@@ -182,7 +183,15 @@ void eBoxOrSound::prp_writeProperty_impl(eWriteStream& dst) const {
 
     const bool hasDurRect = mDurationRectangle;
     dst << hasDurRect;
-    if(hasDurRect) mDurationRectangle->writeDurationRectangle(dst);
+    if(hasDurRect) {
+        // durRect 子类必须随文件往返：NLE 会给普通层挂
+        // FixedLenAnimationRect（22 字节），而装载期兜底
+        // createDurationRectangle 只造基类（12 字节），不写标签
+        // 流必错位——工程打开即卡死/崩溃的根因
+        const auto fla = mDurationRectangle->ref<FixedLenAnimationRect>();
+        dst << int(fla ? 1 : 0);
+        mDurationRectangle->writeDurationRectangle(dst);
+    }
 
     dst << prp_getName();
 
@@ -220,8 +229,44 @@ void eBoxOrSound::prp_readProperty_impl(eReadStream& src) {
     bool hasDurRect;
     src >> hasDurRect;
     if(hasDurRect) {
-        if(!mDurationRectangle) createDurationRectangle();
-        mDurationRectangle->readDurationRectangle(src);
+        bool readDone = false;
+        if(src.evFileVersion() >= EvFormat::nleDurRectType) {
+            int durTag; src >> durTag;
+            if(durTag == 1) {
+                if(!mDurationRectangle ||
+                   !mDurationRectangle->ref<FixedLenAnimationRect>()) {
+                    setDurationRectangle(
+                                enve::make_shared<FixedLenAnimationRect>(*this));
+                }
+            } else {
+                if(!mDurationRectangle ||
+                   mDurationRectangle->ref<FixedLenAnimationRect>()) {
+                    createDurationRectangle();
+                }
+            }
+        } else if(!mDurationRectangle) {
+            // v54 遗留自愈：无标签时普通层的矩形可能是 NLE 挂的
+            // FixedLenAnimationRect（22 字节）也可能是基类（12 字节）。
+            // 构造器自带矩形的类（视频/声音）类型确定不嗅探；其余先按
+            // FixedLen 试读，再用后随 name 的字符数字段校验，不合法则
+            // 退回基类重读（name 长度按 ≤512 判合法）
+            const qint64 durStart = src.pos();
+            const auto fla = enve::make_shared<FixedLenAnimationRect>(*this);
+            setDurationRectangle(fla);
+            fla->readDurationRectangle(src);
+            readDone = true;
+            uint nameProbe = 0;
+            src.read(&nameProbe, sizeof(uint));
+            src.seekRaw(src.pos() - qint64(sizeof(uint)));
+            if(nameProbe > 512) {
+                qWarning() << "[DURRECT-HEAL] fixedlen 试读失败于" << durStart
+                           << "退回基类矩形重读";
+                src.seekRaw(durStart);
+                createDurationRectangle();
+                mDurationRectangle->readDurationRectangle(src);
+            }
+        }
+        if(!readDone) mDurationRectangle->readDurationRectangle(src);
     }
     if(src.evFileVersion() >= 10) {
         QString name; src >> name;

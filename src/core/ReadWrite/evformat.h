@@ -124,6 +124,15 @@ namespace EvFormat {
         // layer visibility, only the flag persists
         nleTrackSolo = 54,
 
+        // duration-rectangle subclass tag (one qint32 before the rect
+        // payload in the eBoxOrSound tail); the NLE attaches
+        // FixedLenAnimationRect to arbitrary layers whose wire form
+        // is 22 bytes while the plain rect is 12 - the reader must
+        // reconstruct the exact subclass or the stream misaligns and
+        // the project dies on open. Files up to 54 carry no tag and
+        // are healed by a try-fixedlen-first name-length sniff
+        nleDurRectType = 55,
+
         nextVersion
     };
 

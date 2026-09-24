@@ -62,6 +62,13 @@ public:
         return mSrc->read(reinterpret_cast<char*>(data), len);
     }
 
+    inline qint64 pos() const { return mSrc->pos(); }
+
+    // raw byte rewind/seek inside the underlying device; used by the
+    // legacy (pre-nleDurRectType) duration-rect sniff that must retry
+    // a read with the other subclass layout
+    inline bool seekRaw(const qint64 pos) { return mSrc->seek(pos); }
+
     QByteArray readCompressed();
 
     eReadStream& operator>>(bool &val);
