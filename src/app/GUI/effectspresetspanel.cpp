@@ -851,7 +851,14 @@ void EffectsPresetsPanel::buildTiles()
         connect(tile, &EffectPreviewTile::applyRequested,
                 this, &EffectsPresetsPanel::onTileApplyRequested);
         connect(tile, &EffectPreviewTile::tileClicked,
-                this, &EffectsPresetsPanel::onTileClicked);
+                this, [this](EffectPreviewTile *t) {
+            if (t && isTransitionTileType(t->effectType())) {
+                // CapCut 行为：点击转场样式=直接应用到播放头附近
+                // 交界（±2 秒吸附），点选高亮同时发生
+                emit transitionApplyRequested(int(t->effectType()));
+            }
+            onTileClicked(t);
+        });
         // 转场卡片：应用语义改投时间轴交界，信号对信号转发
         connect(tile, &EffectPreviewTile::transitionApplyRequested,
                 this, &EffectsPresetsPanel::transitionApplyRequested);

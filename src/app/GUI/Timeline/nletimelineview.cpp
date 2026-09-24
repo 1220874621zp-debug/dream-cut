@@ -1588,6 +1588,9 @@ void NleTimelineView::mousePressEvent(QMouseEvent *e)
         const int trId = transitionAt(e->pos());
         if (trId >= 0) {
             mSelTransition = trId;
+            // 选中桥到右块：属性面板随之显示转场特效参数
+            // （淡入时长/方向/背景色等），模型选择信号驱动
+            mModel->setSelection({trId});
             mPending = DragMode::None;
             mTransPreviewN = -1;
             for (const auto &t : mModel->transitions()) {

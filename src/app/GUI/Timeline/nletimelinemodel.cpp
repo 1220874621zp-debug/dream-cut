@@ -1632,8 +1632,9 @@ bool NleTimelineModel::requestApplyTransition(
             return requestApplyTransitionOnPair(*L, *R, transitionType);
         }
     }
-    emit logMessage(QStringLiteral("请把播放头移到主轨两个相邻片段之间"));
-    return false;
+    // 放宽（CapCut 点击即加）：播放头不在任何交界上时，吸附 ±2 秒
+    // 内最近的贴邻交界——用户不必把播放头停得分毫不差
+    return requestApplyTransitionAtDrop(junctionFrame, transitionType);
 }
 
 bool NleTimelineModel::requestApplyTransitionAtDrop(
@@ -1649,7 +1650,7 @@ bool NleTimelineModel::requestApplyTransitionAtDrop(
     }
     std::sort(order.begin(), order.end(),
               [](const auto &a, const auto &b) { return a.first < b.first; });
-    const int snap = qMax(2, qRound(mFps)); // ±1 秒吸附窗
+    const int snap = qMax(2, qRound(2 * mFps)); // ±2 秒吸附窗
     int bestDist = snap + 1;
     const Clip *bestL = nullptr;
     const Clip *bestR = nullptr;
@@ -1665,7 +1666,8 @@ bool NleTimelineModel::requestApplyTransitionAtDrop(
         if (d < bestDist) { bestDist = d; bestL = L; bestR = R; }
     }
     if (!bestL) {
-        emit logMessage(QStringLiteral("请拖到主轨两个相邻片段的交界处"));
+        emit logMessage(QStringLiteral(
+                    "主轨上 ±2 秒内没有相邻片段交界，无法添加转场"));
         return false;
     }
     return requestApplyTransitionOnPair(*bestL, *bestR, transitionType);
