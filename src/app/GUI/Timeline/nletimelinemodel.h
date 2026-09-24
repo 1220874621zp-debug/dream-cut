@@ -127,6 +127,35 @@ public:
                                         const int dropStart,
                                         const QSet<int> &movingIds) const;
 
+    // ---- CapCut 转场（两块之间的实体）----
+    // 真重叠模型：右块 durRect 左移 N 帧与左块重叠，右块挂对应
+    // 转场 RasterEffect（入窗口 = N、出窗口 = 0）淡入盖住左块尾巴；
+    // 渲染复用特效管线的转场 caller，持久化随层特效天然保存
+    struct Transition {
+        int leftId = -1;
+        int rightId = -1;
+        int start = 0;   // = right.start（重叠区首帧）
+        int end = 0;     // = left.end（重叠区末帧）
+        int frames = 0;  // 转场窗口（特效入窗口值，<= 重叠宽）
+        int type = 0;    // RasterEffectType
+        QString typeName;
+    };
+    // 主轨上即时派生的转场表（不缓存：特效参数变化自动反映）
+    QVector<Transition> transitions() const;
+    // 播放头规则应用转场：播放头落在主轨块 L 上且 L 与右邻 R 贴邻
+    // （或播放头正落在贴邻对的右块首帧）→ 应用到 L|R 交界；
+    // 已有转场的交界 = 替换类型（布局不动）
+    bool requestApplyTransition(const int junctionFrame,
+                                const int transitionType);
+    // 拖拽落点规则：吸附 dropFrame 附近（±1 秒）最近的贴邻交界
+    bool requestApplyTransitionAtDrop(const int dropFrame,
+                                      const int transitionType);
+    // 删除转场：剥右块的转场特效并把右块右移回贴左块
+    bool requestRemoveTransition(const int rightClipId);
+    // 调整转场窗口时长：右块随新窗口位移保持贴邻关系
+    bool requestTransitionDuration(const int rightClipId,
+                                   const int frames);
+
     // ---- selection ----
     QSet<int> selection() const { return mSelected; }
     bool isSelected(const int clipId) const;
@@ -271,6 +300,14 @@ private:
                        const int start, const int duration);
     void shiftLayer(eBoxOrSound * const layer, const int frameDelta);
     void finishAction(); // actionFinished + refresh + flush queue
+    // 层挂转场特效时的窗口帧数（入窗口参数值）；无转场特效 = 0。
+    // 磁吸压实游标的转场重叠预留量
+    int transitionWindowOf(const Clip &c) const;
+    // 剥掉层的转场特效（转场删除/删除左块/分割右半的公共尾部）
+    bool stripTransitionEffect(eBoxOrSound * const layer);
+    // 已解析贴邻对上的应用/替换（requestApply* 的公共尾部）
+    bool requestApplyTransitionOnPair(const Clip &L, const Clip &R,
+                                      const int transitionType);
 
     Document &mDocument;
     QPointer<Canvas> mPanelScene;

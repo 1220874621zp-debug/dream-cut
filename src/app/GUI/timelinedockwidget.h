@@ -111,6 +111,11 @@ public:
     // preview-cache render pass (no flash, one press per toggle)
     void spaceToggle();
 
+    // NLE 面板模型访问（特效面板转场卡片应用入口经 MainWindow 转发）
+    NleTimelineModel *nleModel() const { return mNleModel; }
+    // NLE 视图播放头（转场卡片"应用"的目标交界判定帧）
+    int nlePlayheadFrame() const;
+
 private:
     void setLoop(const bool loop);
     // quick PNG export of the current canvas frame

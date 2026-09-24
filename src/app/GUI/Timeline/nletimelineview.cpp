@@ -10,6 +10,7 @@
 #include <QMenu>
 #include <QContextMenuEvent>
 #include <QtMath>
+#include <QtEndian>
 #include <QRandomGenerator>
 #include <QDebug>
 #include <QCursor>
@@ -28,6 +29,7 @@
 #include <QHash>
 #include "Boxes/videobox.h"
 #include "Boxes/pathbox.h"
+#include "RasterEffects/rastereffect.h"
 #include "Sound/evideosound.h"
 #include "Sound/eindependentsound.h"
 #include "Animators/qrealkey.h"
@@ -215,6 +217,7 @@ void NleTimelineView::paintEvent(QPaintEvent *)
     }
 
     drawSeamDots(p);
+    drawTransitions(p);
 
     // ghost of the primary dragged clip at its original position
     if (mDrag == DragMode::MoveClip && mDragClipId >= 0) {
@@ -565,6 +568,86 @@ void NleTimelineView::drawSeamDots(QPainter &p)
         const qreal x = frameToX(spans[i].first);
         if (x < headerWidth() || x > width()) { continue; }
         p.drawEllipse(QPointF(x, cy), 3., 3.);
+    }
+}
+
+// 转场块几何：主轨重叠区 [t.start, t.end] 上的居中圆角条；
+// 太窄时保持最小可视宽（居中在交界上）
+QRectF NleTimelineView::transitionRect(
+        const NleTimelineModel::Transition &t) const
+{
+    const int idx = mModel->trackIndex(mModel->mainTrackId());
+    if (idx < 0) { return QRectF(); }
+    const qreal x0 = frameToX(t.start);
+    const qreal x1 = frameToX(t.end + 1);
+    qreal w = qMax(14., x1 - x0);
+    qreal x = x0;
+    if (x1 - x0 < 14.) { x = x0 - (14. - (x1 - x0)) / 2.; }
+    const int laneH = trackHeight(idx);
+    const qreal h = qMin(24., laneH - 12.);
+    return QRectF(x, trackY(idx) + (laneH - h) / 2., w, h);
+}
+
+int NleTimelineView::transitionAt(const QPoint &pos) const
+{
+    for (const auto &t : mModel->transitions()) {
+        if (transitionRect(t).adjusted(-3, -3, 3, 3).contains(pos)) {
+            return t.rightId;
+        }
+    }
+    return -1;
+}
+
+void NleTimelineView::drawTransitions(QPainter &p)
+{
+    const auto trans = mModel->transitions();
+    if (trans.isEmpty()) { return; }
+    QFont f = font();
+    f.setPixelSize(10);
+    f.setBold(true);
+    for (const auto &t : trans) {
+        QRectF r = transitionRect(t);
+        if (r.width() < 1) { continue; }
+        // 拖拽预览：窗口按新帧数从右块出点往左重算
+        if (mDrag == DragMode::TransitionSize &&
+                mSelTransition == t.rightId && mTransPreviewN > 0) {
+            const qreal xEnd = frameToX(t.end + 1);
+            const qreal xStart = frameToX(t.end + 1 - mTransPreviewN);
+            r.setLeft(qMin(xStart, xEnd - 1));
+            r.setRight(xEnd);
+        }
+        const bool sel = mSelTransition == t.rightId;
+        p.setRenderHint(QPainter::Antialiasing);
+        QRadialGradient grad(r.center(), r.width() / 2. + 1);
+        grad.setColorAt(0., QColor(0x18, 0x8a, 0x74, sel ? 235 : 185));
+        grad.setColorAt(1., QColor(0x0c, 0x60, 0x52, sel ? 225 : 165));
+        p.setBrush(grad);
+        p.setPen(QPen(sel ? QColor(0xd8, 0xff, 0xf2)
+                         : QColor(0x2a, 0xb0, 0x98, 200), sel ? 2 : 1));
+        p.drawRoundedRect(r, 4, 4);
+        // 选中态两侧把手
+        if (sel) {
+            p.setBrush(QColor(0xd8, 0xff, 0xf2));
+            p.setPen(Qt::NoPen);
+            p.drawRoundedRect(r.adjusted(1, 4, -r.width() + 4, -4), 1.5, 1.5);
+            p.drawRoundedRect(r.adjusted(r.width() - 4, 4, -1, -4), 1.5, 1.5);
+        }
+        p.setFont(f);
+        p.setPen(QColor(0xea, 0xff, 0xf8));
+        const QString label = t.typeName.isEmpty()
+                ? QStringLiteral("转场") : t.typeName;
+        if (r.width() >= 54) {
+            p.drawText(r, Qt::AlignCenter, label);
+        } else if (r.width() >= 12) {
+            // 窄块只画一枚菱形点
+            p.setBrush(QColor(0xea, 0xff, 0xf8));
+            p.setPen(Qt::NoPen);
+            const QPointF c = r.center();
+            QPolygonF dia;
+            dia << c + QPointF(0, -4) << c + QPointF(4, 0)
+                << c + QPointF(0, 4) << c + QPointF(-4, 0);
+            p.drawPolygon(dia);
+        }
     }
 }
 
@@ -1499,6 +1582,28 @@ void NleTimelineView::mousePressEvent(QMouseEvent *e)
         return; // plain header click: nothing (double-click renames)
     }
 
+    // ---- 转场块优先：重叠区上的点击属于转场，不属于块体；
+    // 点击选中（右侧把手语义水平拖 = 调整窗口时长），Escape/空白清除
+    if (mTool == EditTool::Select) {
+        const int trId = transitionAt(e->pos());
+        if (trId >= 0) {
+            mSelTransition = trId;
+            mPending = DragMode::None;
+            mTransPreviewN = -1;
+            for (const auto &t : mModel->transitions()) {
+                if (t.rightId != trId) { continue; }
+                mPending = DragMode::TransitionSize;
+                mDragClipId = trId;
+                mTransDragFrames = t.frames;
+                mTransDragX = e->pos().x();
+                break;
+            }
+            update();
+            return;
+        }
+        if (mSelTransition >= 0) { mSelTransition = -1; update(); }
+    }
+
     // playhead: ruler area or near playhead line (when no clip is there)
     const int phx = frameToX(mPlayheadFrame);
     if (clipId < 0 && e->pos().x() >= headerWidth() &&
@@ -1686,6 +1791,22 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
         setPlayheadFrame(curFrame);
         emit playheadDragged(mPlayheadFrame);
         break;
+    }
+    case DragMode::TransitionSize: {
+        // 水平拖 = 窗口帧数（左拖加长右拖缩短）；预览走绘制覆盖
+        const auto t = mModel->transitions();
+        for (const auto &tr : t) {
+            if (tr.rightId != mDragClipId) { continue; }
+            const int df = qRound((e->pos().x() - mTransDragX)
+                                  / mPxPerFrame);
+            const int maxN = qMin(tr.end - tr.start + 1, 600);
+            mTransPreviewN = qBound(2, mTransDragFrames + df, maxN);
+            feedback(QStringLiteral("转场窗口 %1 帧（%2）")
+                     .arg(mTransPreviewN)
+                     .arg(timecode(mTransPreviewN)));
+        }
+        update();
+        return; // 转场窗口拖不滚动内容
     }
     case DragMode::Pan: {
         // hand pan: dragging left moves the content with the cursor
@@ -2177,6 +2298,20 @@ void NleTimelineView::mouseReleaseEvent(QMouseEvent *e)
         return;
     }
 
+    // 转场窗口拖拽提交：预览帧数落模型（夹制在模型侧）
+    if (mDrag == DragMode::TransitionSize) {
+        mDrag = DragMode::None;
+        const int id = mDragClipId;
+        mDragClipId = -1;
+        const int n = mTransPreviewN;
+        mTransPreviewN = -1;
+        if (id >= 0 && n > 0) {
+            mModel->requestTransitionDuration(id, n);
+        }
+        update();
+        return;
+    }
+
     if (mDrag == DragMode::TrackHeight) {
         if (mDragTrackIdx >= 0 && mDragTrackIdx < mModel->tracks().size()) {
             const int trackId = mModel->tracks().at(mDragTrackIdx).id;
@@ -2288,6 +2423,13 @@ bool NleTimelineView::KFT_keyPressEvent(QKeyEvent *e)
     const int key = e->key();
     const auto mods = e->modifiers();
     if (key == Qt::Key_Delete || key == Qt::Key_Backspace) {
+        // 转场选中优先：Del 删转场（不删块）
+        if (mSelTransition >= 0) {
+            mModel->requestRemoveTransition(mSelTransition);
+            mSelTransition = -1;
+            update();
+            return true;
+        }
         if (mModel->selection().isEmpty()) {
             emit logMessage(tr("无选中的块"));
         } else {
@@ -2449,11 +2591,15 @@ void NleTimelineView::hideEvent(QHideEvent *)
 }
 
 // ---- 片段监视器拖入（kdenlive 片段监视器 → 时间轴）：mime 携带
-// path + [in,out] 源帧区间，落点解析轨道与起始帧，目标轨让位插入
+// path + [in,out] 源帧区间，落点解析轨道与起始帧，目标轨让位插入；
+// 转场卡片拖入（application/x-dreamcut-transition）走交界吸附
 void NleTimelineView::dragEnterEvent(QDragEnterEvent *e)
 {
     if (e->mimeData()->hasFormat(
                 QStringLiteral("application/x-dreamcut-clip-path"))) {
+        e->acceptProposedAction();
+    } else if (e->mimeData()->hasFormat(
+                   QStringLiteral("application/x-dreamcut-transition"))) {
         e->acceptProposedAction();
     }
 }
@@ -2461,7 +2607,9 @@ void NleTimelineView::dragEnterEvent(QDragEnterEvent *e)
 void NleTimelineView::dragMoveEvent(QDragMoveEvent *e)
 {
     if (e->mimeData()->hasFormat(
-                QStringLiteral("application/x-dreamcut-clip-path"))) {
+                QStringLiteral("application/x-dreamcut-clip-path")) ||
+            e->mimeData()->hasFormat(
+                QStringLiteral("application/x-dreamcut-transition"))) {
         e->acceptProposedAction();
     }
 }
@@ -2469,6 +2617,20 @@ void NleTimelineView::dragMoveEvent(QDragMoveEvent *e)
 void NleTimelineView::dropEvent(QDropEvent *e)
 {
     const auto mime = e->mimeData();
+    // 转场卡片：吸附 drop 帧最近的贴邻交界（±1 秒）
+    if (mime->hasFormat(QStringLiteral(
+                "application/x-dreamcut-transition"))) {
+        const int type = qFromLittleEndian<qint32>(
+                    reinterpret_cast<const uchar*>(mime->data(
+                        QStringLiteral(
+                            "application/x-dreamcut-transition"))
+                        .constData()));
+        const int frame = qMax(0, xToFrame(int(e->position().x())));
+        if (mModel->requestApplyTransitionAtDrop(frame, type)) {
+            e->acceptProposedAction();
+        }
+        return;
+    }
     if (!mime->hasFormat(QStringLiteral(
                 "application/x-dreamcut-clip-path"))) { return; }
     const QString path = QString::fromUtf8(mime->data(
@@ -2749,6 +2911,47 @@ private:
 
 void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
 {
+    // 转场块右键：替换类型 / 删除
+    const int trHit = transitionAt(e->pos());
+    if (trHit >= 0) {
+        mSelTransition = trHit;
+        update();
+        QMenu menu(this);
+        menu.addSection(tr("转场"));
+        QAction *typeAct[4];
+        typeAct[0] = menu.addAction(QStringLiteral("叠化"));
+        typeAct[1] = menu.addAction(QStringLiteral("闪黑闪白"));
+        typeAct[2] = menu.addAction(QStringLiteral("滑动"));
+        typeAct[3] = menu.addAction(QStringLiteral("圆形划像"));
+        menu.addSeparator();
+        QAction *del = menu.addAction(tr("删除转场"));
+        QAction *act = menu.exec(e->globalPos());
+        if (act == del) {
+            mModel->requestRemoveTransition(trHit);
+            mSelTransition = -1;
+        } else {
+            const int types[4] = {
+                int(RasterEffectType::TRANSITION_DISSOLVE),
+                int(RasterEffectType::TRANSITION_FLASH),
+                int(RasterEffectType::TRANSITION_SLIDE),
+                int(RasterEffectType::TRANSITION_WIPE_CIRCLE)};
+            for (int i = 0; i < 4; i++) {
+                if (act == typeAct[i]) {
+                    // 右键处的交界帧 = 转场左块出点+1，落点吸附
+                    // 规则按 ±1 秒窗口找回该交界
+                    for (const auto &t : mModel->transitions()) {
+                        if (t.rightId != trHit) { continue; }
+                        mModel->requestApplyTransitionAtDrop(
+                                    t.end + 1, types[i]);
+                    }
+                    break;
+                }
+            }
+        }
+        update();
+        return;
+    }
+
     // ruler: marker management at the clicked frame
     if (e->pos().y() <= rulerHeight() && e->pos().x() >= headerWidth()) {
         const int frame = xToFrame(e->pos().x());

@@ -103,7 +103,7 @@ public:
     RasterEffectType effectType() const { return mType; }
     void setChecked(const bool checked);
     void advance() { if (mPreviewArea) { mPreviewArea->advance(); } }
-    void applyNow() { if (mApply) { mApply(nullptr); } }
+    void applyNow();
     void setLoading();
     void setPreviewSize(const int size);
     void setLightPreview()
@@ -123,6 +123,8 @@ public:
 signals:
     void applyRequested(EffectPreviewTile* tile);
     void tileClicked(EffectPreviewTile* tile);
+    // 转场类卡片的应用：不走"加到选中层"，改投时间轴交界
+    void transitionApplyRequested(const int transitionType);
 
 protected:
     void mousePressEvent(QMouseEvent* const e) override;
@@ -186,6 +188,10 @@ private slots:
     void onViewModeToggled(const bool checked);
     void onTileApplyRequested(EffectPreviewTile *tile);
     void onTileClicked(EffectPreviewTile *tile);
+
+signals:
+    // 转场类卡片的应用转发（tile 信号对信号直连到此）
+    void transitionApplyRequested(const int transitionType);
 
 protected:
     void showEvent(QShowEvent* const e) override;

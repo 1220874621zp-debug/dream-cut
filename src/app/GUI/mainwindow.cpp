@@ -67,6 +67,7 @@
 #include "dialogs/applyexpressiondialog.h"
 #include "dialogs/markereditordialog.h"
 #include "timelinedockwidget.h"
+#include "GUI/Timeline/nletimelinemodel.h"
 #include "easingpresetspanel.h"
 #include "effectspresetspanel.h"
 #include "quickeffectsearchdialog.h"
@@ -1652,6 +1653,16 @@ void MainWindow::setupPropertiesWidgets()
     // the effects presets panel lives in its own dock (see setupLayout),
     // it is no longer a tab inside the properties dock
     mEffectsPresetsPanel = new EffectsPresetsPanel(this, this);
+    // 转场类卡片应用：转发到 NLE 模型按播放头落主轨交界
+    // （CapCut 语义：转场是两块之间的实体，不是图层特效）
+    connect(mEffectsPresetsPanel,
+            &EffectsPresetsPanel::transitionApplyRequested,
+            this, [this](const int type) {
+        const auto dock = getTimeLineWidget();
+        const auto model = dock ? dock->nleModel() : nullptr;
+        if (!model) { return; }
+        model->requestApplyTransition(dock->nlePlayheadFrame(), type);
+    });
     mTabQueueIndex = mTabProperties->addTab(mRenderWidget,
                                             ThemeSupport::themedToolIcon("render_animation",
                                                                          ThemeSupport::getThemeColorRed(), 64),

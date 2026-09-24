@@ -722,7 +722,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
 
     setupPropertyShortcuts();
 
-
 }
 
 void TimelineDockWidget::setupNleActions()
@@ -1124,6 +1123,11 @@ void TimelineDockWidget::snapshotCurrentFrame()
     });
     timer->start(100);
     status(tr("Rendering snapshot at 100% resolution..."));
+}
+
+int TimelineDockWidget::nlePlayheadFrame() const
+{
+    return mNleView ? mNleView->playheadFrame() : 0;
 }
 
 void TimelineDockWidget::spaceToggle()

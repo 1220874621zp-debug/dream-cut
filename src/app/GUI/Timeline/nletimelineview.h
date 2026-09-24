@@ -149,6 +149,11 @@ private:
     // CapCut main-track seam dots: red marks where neighbouring main
     // clips butt together (candidate-aware so they ride a drag)
     void drawSeamDots(QPainter &p);
+    // 转场块：主轨交界重叠区上的圆角块（图标+名，选中高亮）
+    void drawTransitions(QPainter &p);
+    // 转场块 hit-test（返回 rightClipId，无则 -1）
+    int transitionAt(const QPoint &pos) const;
+    QRectF transitionRect(const NleTimelineModel::Transition &t) const;
     // CapCut audio volume envelope: white key line over the waveform
     void drawVolumeEnvelope(QPainter &p,
                             const NleTimelineModel::Clip &c,
@@ -167,7 +172,8 @@ private:
 
     // ---- interaction ----
     enum class DragMode { None, MoveClip, TrimLeft, TrimRight, Playhead,
-                          TrackHeight, SpacerMove, Pan, VolumePoint };
+                          TrackHeight, SpacerMove, Pan, VolumePoint,
+                          TransitionSize };
     // candidate track id for the CapCut lane lifecycle: dragging a
     // clip below every track targets a NEW track of its type, which
     // materializes on release
@@ -265,6 +271,12 @@ private:
 
     int mHoverId = -1;
     QPoint mHoverPos;          // live cursor pos for the razor guide
+    // 转场选中（= 右块 clipId）+ 窗口拖拽态：按下窗口帧数/起始 x、
+    // 拖拽中的预览窗口（-1 = 无预览）
+    int mSelTransition = -1;
+    int mTransDragFrames = 0;
+    int mTransDragX = 0;
+    int mTransPreviewN = -1;
     bool mRubber = false;      // rubber band selection in progress
     QPoint mRubberStart;
     bool mInsertMode = false;  // kdenlive insert/overwrite default

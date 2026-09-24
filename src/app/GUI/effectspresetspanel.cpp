@@ -39,6 +39,7 @@
 #include <QShortcut>
 #include <QDrag>
 #include <QMimeData>
+#include <QtEndian>
 #include <QMenu>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -340,12 +341,42 @@ QSize EffectPreviewTile::sizeHint() const
     return QSize(w, h);
 }
 
+namespace {
+// 转场类特效：应用语义是"投到两块之间的交界"而非加到层上
+bool isTransitionTileType(const RasterEffectType t)
+{
+    return t == RasterEffectType::TRANSITION_DISSOLVE ||
+           t == RasterEffectType::TRANSITION_FLASH ||
+           t == RasterEffectType::TRANSITION_SLIDE ||
+           t == RasterEffectType::TRANSITION_WIPE_CIRCLE;
+}
+}
+
+void EffectPreviewTile::applyNow()
+{
+    if (!isTransitionTileType(mType)) {
+        if (mApply) { mApply(nullptr); }
+        return;
+    }
+    // 转场类：应用到主轨播放头所在的交界（CapCut 语义）
+    emit transitionApplyRequested(int(mType));
+}
+
 void EffectPreviewTile::startEffectDrag()
 {
-    if (!mApply) { return; }
+    if (!mApply && !isTransitionTileType(mType)) { return; }
     auto mimeData = new QMimeData;
-    mimeData->setData(EffectsPresetsPanel::sMimeFormat(),
-                      EffectsPresetsPanel::beginEffectDrag(mApply));
+    if (isTransitionTileType(mType)) {
+        // 转场卡片：专用 mime（类型枚举小端 qint32），时间轴交界吸附
+        QByteArray payload(sizeof(qint32), Qt::Uninitialized);
+        qToLittleEndian<qint32>(int(mType), payload.data());
+        mimeData->setData(QStringLiteral(
+                              "application/x-dreamcut-transition"),
+                          payload);
+    } else {
+        mimeData->setData(EffectsPresetsPanel::sMimeFormat(),
+                          EffectsPresetsPanel::beginEffectDrag(mApply));
+    }
     QDrag drag(this);
     drag.setMimeData(mimeData);
     const auto pm = grab().scaled(64, 64,
@@ -821,6 +852,9 @@ void EffectsPresetsPanel::buildTiles()
                 this, &EffectsPresetsPanel::onTileApplyRequested);
         connect(tile, &EffectPreviewTile::tileClicked,
                 this, &EffectsPresetsPanel::onTileClicked);
+        // 转场卡片：应用语义改投时间轴交界，信号对信号转发
+        connect(tile, &EffectPreviewTile::transitionApplyRequested,
+                this, &EffectsPresetsPanel::transitionApplyRequested);
         mFlow->addWidget(tile);
         mTiles << tile;
         if (mTileSize != 130) { tile->setPreviewSize(mTileSize); }

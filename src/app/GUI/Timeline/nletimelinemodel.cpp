@@ -13,6 +13,9 @@
 #include "Timeline/fixedlenanimationrect.h"
 #include "Boxes/animationbox.h"
 #include "clipboardcontainer.h"
+#include "RasterEffects/rastereffect.h"
+#include "RasterEffects/rastereffectcollection.h"
+#include "Animators/qrealanimator.h"
 #include "smartPointers/ememory.h"
 
 #include <QDebug>
@@ -31,6 +34,48 @@ QString frameToTimecode(const int frame, const qreal fps)
             .arg((f / (60 * fpc)) % 60, 2, 10, QLatin1Char('0'))
             .arg((f / fpc) % 60, 2, 10, QLatin1Char('0'))
             .arg(f % fpc, 2, 10, QLatin1Char('0'));
+}
+
+bool isTransitionType(const RasterEffectType t)
+{
+    return t == RasterEffectType::TRANSITION_DISSOLVE ||
+           t == RasterEffectType::TRANSITION_FLASH ||
+           t == RasterEffectType::TRANSITION_SLIDE ||
+           t == RasterEffectType::TRANSITION_WIPE_CIRCLE;
+}
+
+// 层上的转场特效（一个层最多一个：转场右块标识）
+RasterEffect* transitionEffectOn(BoundingBox * const box)
+{
+    if (!box) { return nullptr; }
+    const auto coll = box->rasterEffectsCollection();
+    if (!coll) { return nullptr; }
+    const int n = coll->ca_getNumberOfChildren();
+    for (int i = 0; i < n; i++) {
+        const auto re = enve_cast<RasterEffect*>(coll->ca_getChildAt(i));
+        if (re && isTransitionType(re->getEffectType())) { return re; }
+    }
+    return nullptr;
+}
+
+// 转场特效的入窗口动画师：四个转场特效的第一个子属性恒为入窗口
+// QrealAnimator（淡入时长/滑入时长），出窗口/颜色/方向随后
+QrealAnimator* transitionInAnimator(RasterEffect * const re)
+{
+    if (!re) { return nullptr; }
+    const int n = re->ca_getNumberOfChildren();
+    for (int i = 0; i < n; i++) {
+        const auto qa = enve_cast<QrealAnimator*>(re->ca_getChildAt(i));
+        if (qa) { return qa; }
+    }
+    return nullptr;
+}
+
+int transitionInValue(RasterEffect * const re)
+{
+    const auto qa = transitionInAnimator(re);
+    if (!qa) { return 0; }
+    return qMax(1, qRound(qa->getEffectiveValue(0)));
 }
 }
 
@@ -233,8 +278,11 @@ QVector<NleTimelineModel::Move> NleTimelineModel::compactGapsPlan() const
         for (const auto &p : order) {
             const auto c = clip(p.second);
             if (!c) { continue; }
+            // 转场右块允许沉入游标左侧的转场重叠窗口
+            const int res = transitionWindowOf(*c);
             int newStart = c->start;
-            if (c->start > cursor) { newStart = cursor; }
+            const int lim = qMax(0, cursor - res);
+            if (c->start > lim) { newStart = lim; }
             if (newStart != c->start) {
                 moves.append({c->clipId, c->trackId, newStart, c->duration});
             }
@@ -402,8 +450,12 @@ bool NleTimelineModel::commitMoves(const QVector<Move> &moves,
             int cursor = -1;
             for (const auto &p : order) {
                 const Clip *c = p.second;
+                // 转场右块允许沉入游标左侧的转场重叠窗口
+                const int res = transitionWindowOf(*c);
                 int newStart = c->start;
-                if (cursor >= 0 && c->start > cursor) { newStart = cursor; }
+                const int lim = cursor >= 0 ? qMax(0, cursor - res)
+                                            : c->start;
+                if (cursor >= 0 && c->start > lim) { newStart = lim; }
                 if (newStart != c->start) {
                     const Move m{c->clipId, c->trackId, newStart, c->duration};
                     all.append(m);
@@ -625,8 +677,25 @@ bool NleTimelineModel::requestSplitAtFrame(const int frame)
         }
     }
     if (boxes.isEmpty() && sounds.isEmpty()) { return false; }
+    // 转场窗口内禁分割：窗口帧同时是左块尾与右块头（CapCut 同款禁区）
+    for (const auto &t : transitions()) {
+        if (frame >= t.start && frame <= t.end) {
+            emit logMessage(QStringLiteral("转场区域内不能分割，先删除或移开转场"));
+            return false;
+        }
+    }
+    // 分割转场右块：特效留左半（拷贝），右半（原件）剥掉
+    QList<eBoxOrSound*> stripAfter;
+    for (auto *box : boxes) {
+        for (const auto &t : transitions()) {
+            if (t.rightId == mLayerToClipId.value(box, -1)) {
+                stripAfter << box;
+            }
+        }
+    }
     bool did = false;
     if (!boxes.isEmpty()) { did = splitBoxes(boxes, frame) || did; }
+    for (const auto l : stripAfter) { stripTransitionEffect(l); }
     if (!sounds.isEmpty()) {
         scene->splitSoundsAtFrame(sounds, frame);
         did = true;
@@ -664,8 +733,27 @@ bool NleTimelineModel::requestRazorCut(const QSet<int> &clipIds,
         emit logMessage(QStringLiteral("%1 块在切点边缘，无需分割").arg(skippedEdges));
     }
     if (boxes.isEmpty() && sounds.isEmpty()) { return false; }
+    // 转场窗口内禁分割：窗口帧同时是左块尾与右块头（CapCut 同款
+    // 禁区），切开会在转场重叠区里产生无主半块
+    for (const auto &t : transitions()) {
+        if (frame >= t.start && frame <= t.end) {
+            emit logMessage(QStringLiteral("转场区域内不能分割，先删除或移开转场"));
+            return false;
+        }
+    }
+    // 分割转场右块：特效留在左半（拷贝）继续贴左块，右半（原件）
+    // 剥掉——半块头窗口对着普通帧淡入是错误视觉
+    QList<eBoxOrSound*> stripAfter;
+    for (auto *box : boxes) {
+        for (const auto &t : transitions()) {
+            if (t.rightId == mLayerToClipId.value(box, -1)) {
+                stripAfter << box;
+            }
+        }
+    }
     bool did = false;
     if (!boxes.isEmpty()) { did = splitBoxes(boxes, frame) || did; }
+    for (const auto l : stripAfter) { stripTransitionEffect(l); }
     if (!sounds.isEmpty()) {
         scene->splitSoundsAtFrame(sounds, frame);
         did = true;
@@ -752,6 +840,20 @@ bool NleTimelineModel::requestDelete(const QSet<int> &clipIds,
         victimIds << id;
     }
     if (victims.isEmpty()) { return false; }
+
+    // 转场清理：删除转场左块时同步剥掉右块的转场特效——否则右块
+    // 头窗口对着新左邻（或黑场）淡入，视觉错误（CapCut：删块转场
+    // 随之消失）。特效剥掉后 transitionWindowOf 归 0，下方闭链自然
+    // 把右块拉回贴邻，无需位移补偿
+    {
+        const auto trans = transitions();
+        for (const auto &t : trans) {
+            if (!victimIds.contains(t.leftId)) { continue; }
+            if (victimIds.contains(t.rightId)) { continue; }
+            const auto rc = clip(t.rightId);
+            if (rc && rc->layer) { stripTransitionEffect(rc->layer.data()); }
+        }
+    }
 
     if (ripple) {
         // per track: every later clip slides left by the total length
@@ -843,8 +945,11 @@ bool NleTimelineModel::requestDelete(const QSet<int> &clipIds,
                 for (const auto &p : order) {
                     const auto c = clip(p.second);
                     if (!c) { continue; }
+                    // 转场右块允许沉入游标左侧的转场重叠窗口
+                    const int res = transitionWindowOf(*c);
                     int newStart = c->start;
-                    if (c->start > cursor) { newStart = cursor; }
+                    const int lim = qMax(0, cursor - res);
+                    if (c->start > lim) { newStart = lim; }
                     if (newStart != c->start) {
                         closure.append({c->clipId, c->trackId,
                                         newStart, c->duration});
@@ -1367,6 +1472,270 @@ bool NleTimelineModel::requestPaste(const int frame)
     return pasted > 0;
 }
 
+// ---------------------------------------------------------------- 转场
+
+int NleTimelineModel::transitionWindowOf(const Clip &c) const
+{
+    const auto box = enve_cast<BoundingBox*>(c.layer.data());
+    if (!box) { return 0; }
+    return transitionInValue(transitionEffectOn(box));
+}
+
+bool NleTimelineModel::stripTransitionEffect(eBoxOrSound * const layer)
+{
+    const auto box = enve_cast<BoundingBox*>(layer);
+    if (!box) { return false; }
+    const auto re = transitionEffectOn(box);
+    if (!re) { return false; }
+    box->removeRasterEffect(re->ref<RasterEffect>());
+    return true;
+}
+
+QVector<NleTimelineModel::Transition> NleTimelineModel::transitions() const
+{
+    QVector<Transition> out;
+    const int mainId = mainTrackId();
+    if (mainId < 0) { return out; }
+    QList<QPair<int, const Clip*>> order;
+    for (const auto &c : mClips) {
+        if (c.trackId != mainId || c.audio) { continue; }
+        order.append({c.start, &c});
+    }
+    std::sort(order.begin(), order.end(),
+              [](const auto &a, const auto &b) {
+                  if (a.first != b.first) { return a.first < b.first; }
+                  return a.second->clipId < b.second->clipId;
+              });
+    for (int i = 0; i + 1 < order.size(); i++) {
+        const auto L = order.at(i).second;
+        const auto R = order.at(i + 1).second;
+        if (R->start > L->start + L->duration - 1) { continue; } // 不重叠
+        const auto box = enve_cast<BoundingBox*>(R->layer.data());
+        if (!box) { continue; }
+        const auto re = transitionEffectOn(box);
+        if (!re) { continue; }
+        Transition t;
+        t.leftId = L->clipId;
+        t.rightId = R->clipId;
+        t.start = R->start;
+        t.end = L->start + L->duration - 1;
+        t.frames = qMin(transitionInValue(re), t.end - t.start + 1);
+        t.type = int(re->getEffectType());
+        t.typeName = re->prp_getName();
+        out.append(t);
+    }
+    return out;
+}
+
+// 内部公共：对已解析的贴邻对应用/替换转场。替换 = 只换类型保窗口
+bool NleTimelineModel::requestApplyTransitionOnPair(
+        const Clip &L, const Clip &R, const int transitionType)
+{
+    const auto rBox = enve_cast<BoundingBox*>(R.layer.data());
+    if (!rBox) { return false; }
+    const auto existing = transitionEffectOn(rBox);
+    if (existing) {
+        // 替换类型：布局与窗口不动
+        const auto fresh = createRasterEffectForNonCustomType(
+                    RasterEffectType(transitionType));
+        if (!fresh) { return false; }
+        const int n = qMin(transitionInValue(existing),
+                           L.start + L.duration - R.start);
+        const int overlap = L.start + L.duration - R.start;
+        mInWriteback = true;
+        rBox->removeRasterEffect(existing->ref<RasterEffect>());
+        rBox->addRasterEffect(fresh);
+        if (const auto qa = transitionInAnimator(fresh.data())) {
+            qa->setCurrentBaseValue(qMax(1, qMin(n, overlap)));
+        }
+        mInWriteback = false;
+        finishAction();
+        emit logMessage(QStringLiteral("转场已替换为「%1」")
+                        .arg(fresh->prp_getName()));
+        return true;
+    }
+    const auto lBox = enve_cast<BoundingBox*>(L.layer.data());
+    if (transitionEffectOn(lBox)) {
+        emit logMessage(QStringLiteral("左侧片段已参与转场，不能连用"));
+        return false;
+    }
+    // 窗口 = 默认 12 帧夹进两侧块长与可回退空间
+    int n = 12;
+    n = qMin(n, L.duration - 1);
+    n = qMin(n, R.duration - 1);
+    n = qBound(2, n, 600);
+    const int overlap = L.start + L.duration - R.start; // 恒 0（贴邻）
+    Q_UNUSED(overlap)
+    mInWriteback = true;
+    // 右块左移 N 帧：与左块尾重叠 N 帧 = CapCut 转场窗口
+    shiftLayer(rBox, -n);
+    const auto fresh = createRasterEffectForNonCustomType(
+                RasterEffectType(transitionType));
+    if (fresh) {
+        rBox->addRasterEffect(fresh);
+        if (const auto qa = transitionInAnimator(fresh.data())) {
+            qa->setCurrentBaseValue(qreal(n));
+        }
+        // 出窗口恒 0：转场只锚定右块头部
+        if (const int m = fresh->ca_getNumberOfChildren()) {
+            for (int i = 0; i < m; i++) {
+                const auto qa = enve_cast<QrealAnimator*>(
+                            fresh->ca_getChildAt(i));
+                // 第二个 qreal 子恒为出窗口（构造序：入/出/其余）
+                if (qa && transitionInAnimator(fresh.data()) != qa) {
+                    const QString nm = qa->prp_getName();
+                    if (nm.contains(QStringLiteral("淡出")) ||
+                        nm.contains(QStringLiteral("滑出"))) {
+                        qa->setCurrentBaseValue(0.);
+                    }
+                }
+            }
+        }
+    }
+    mInWriteback = false;
+    finishAction();
+    if (fresh) {
+        emit logMessage(QStringLiteral("已添加转场「%1」（%2 帧）")
+                        .arg(fresh->prp_getName()).arg(n));
+    }
+    return fresh != nullptr;
+}
+
+bool NleTimelineModel::requestApplyTransition(
+        const int junctionFrame, const int transitionType)
+{
+    if (mInWriteback || mGestureActive) { return false; }
+    const int mainId = mainTrackId();
+    if (mainId < 0) { return false; }
+    QList<QPair<int, const Clip*>> order;
+    for (const auto &c : mClips) {
+        if (c.trackId != mainId || c.audio) { continue; }
+        order.append({c.start, &c});
+    }
+    std::sort(order.begin(), order.end(),
+              [](const auto &a, const auto &b) { return a.first < b.first; });
+    // 播放头规则：落在块 L 上（含左端）且右邻贴邻 → L|R；
+    // 或正落在贴邻对右块 R 的首帧 → L|R
+    for (int i = 0; i + 1 < order.size(); i++) {
+        const auto L = order.at(i).second;
+        const auto R = order.at(i + 1).second;
+        // 贴邻对（新装）或转场重叠对（替换类型）都合法：
+        // 只认贴邻会让"换类型"在转场已存在时永远找不到对
+        const bool butt = R->start == L->start + L->duration;
+        const bool transOverlap = transitionWindowOf(*R) > 0 &&
+                R->start <= L->start + L->duration;
+        if (!butt && !transOverlap) { continue; }
+        const bool onL = junctionFrame >= L->start &&
+                junctionFrame <= L->start + L->duration - 1;
+        const bool onRHead = junctionFrame == R->start;
+        if (onL || onRHead) {
+            return requestApplyTransitionOnPair(*L, *R, transitionType);
+        }
+    }
+    emit logMessage(QStringLiteral("请把播放头移到主轨两个相邻片段之间"));
+    return false;
+}
+
+bool NleTimelineModel::requestApplyTransitionAtDrop(
+        const int dropFrame, const int transitionType)
+{
+    if (mInWriteback || mGestureActive) { return false; }
+    const int mainId = mainTrackId();
+    if (mainId < 0) { return false; }
+    QList<QPair<int, const Clip*>> order;
+    for (const auto &c : mClips) {
+        if (c.trackId != mainId || c.audio) { continue; }
+        order.append({c.start, &c});
+    }
+    std::sort(order.begin(), order.end(),
+              [](const auto &a, const auto &b) { return a.first < b.first; });
+    const int snap = qMax(2, qRound(mFps)); // ±1 秒吸附窗
+    int bestDist = snap + 1;
+    const Clip *bestL = nullptr;
+    const Clip *bestR = nullptr;
+    for (int i = 0; i + 1 < order.size(); i++) {
+        const auto L = order.at(i).second;
+        const auto R = order.at(i + 1).second;
+        const bool butt = R->start == L->start + L->duration;
+        const bool transOverlap = transitionWindowOf(*R) > 0 &&
+                R->start <= L->start + L->duration;
+        if (!butt && !transOverlap) { continue; }
+        const int j = L->start + L->duration;
+        const int d = qAbs(j - dropFrame);
+        if (d < bestDist) { bestDist = d; bestL = L; bestR = R; }
+    }
+    if (!bestL) {
+        emit logMessage(QStringLiteral("请拖到主轨两个相邻片段的交界处"));
+        return false;
+    }
+    return requestApplyTransitionOnPair(*bestL, *bestR, transitionType);
+}
+
+bool NleTimelineModel::requestRemoveTransition(const int rightClipId)
+{
+    if (mInWriteback || mGestureActive) { return false; }
+    const auto rc = clip(rightClipId);
+    if (!rc || !rc->layer) { return false; }
+    const auto box = enve_cast<BoundingBox*>(rc->layer.data());
+    const auto re = transitionEffectOn(box);
+    if (!re) { return false; }
+    // 回贴量 = 布局重叠宽（剥特效 + 右块右移恢复贴邻）
+    const int mainId = mainTrackId();
+    int overlap = 0;
+    for (const auto &c : mClips) {
+        if (c.trackId != mainId || c.audio || c.clipId == rightClipId) {
+            continue;
+        }
+        const int end = c.start + c.duration - 1;
+        if (end >= rc->start && c.start < rc->start) {
+            overlap = qMax(overlap, end + 1 - rc->start);
+        }
+    }
+    mInWriteback = true;
+    stripTransitionEffect(rc->layer.data());
+    if (overlap > 0) { shiftLayer(rc->layer.data(), overlap); }
+    mInWriteback = false;
+    finishAction();
+    emit logMessage(QStringLiteral("已删除转场"));
+    return true;
+}
+
+bool NleTimelineModel::requestTransitionDuration(
+        const int rightClipId, const int frames)
+{
+    if (mInWriteback || mGestureActive) { return false; }
+    const auto rc = clip(rightClipId);
+    if (!rc || !rc->layer) { return false; }
+    const auto box = enve_cast<BoundingBox*>(rc->layer.data());
+    const auto re = transitionEffectOn(box);
+    if (!re) { return false; }
+    const int mainId = mainTrackId();
+    const Clip *lc = nullptr;
+    int overlap = 0;
+    for (const auto &c : mClips) {
+        if (c.trackId != mainId || c.audio || c.clipId == rightClipId) {
+            continue;
+        }
+        const int end = c.start + c.duration - 1;
+        if (end >= rc->start && c.start < rc->start) {
+            const int o = end + 1 - rc->start;
+            if (o > overlap) { overlap = o; lc = &c; }
+        }
+    }
+    if (!lc || overlap <= 0) { return false; }
+    // 新窗口夹进两侧块长；右块随窗口差位移（贴邻关系不变）
+    const int n = qBound(2, frames, qMin(lc->duration - 1, rc->duration - 1));
+    const int delta = overlap - n;
+    mInWriteback = true;
+    if (delta != 0) { shiftLayer(rc->layer.data(), delta); }
+    if (const auto qa = transitionInAnimator(re)) {
+        qa->setCurrentBaseValue(qreal(n));
+    }
+    mInWriteback = false;
+    finishAction();
+    return true;
+}
+
 // ---------------------------------------------------------------- tracks
 
 int NleTimelineModel::requestTrackAdd(const bool audio, const bool atTop)
@@ -1560,18 +1929,22 @@ QVector<NleTimelineModel::Move> NleTimelineModel::magneticRearrangePlan(
     // 包从 0 起压收拢内部间隙
     int cursor = 0;
     for (const Clip *c : left) {
-        if (cursor != c->start) {
-            moves.append({c->clipId, trackId, cursor, c->duration});
+        // 转场右块允许沉入游标左侧的转场重叠窗口
+        const int target = qMax(0, cursor - transitionWindowOf(*c));
+        if (target != c->start) {
+            moves.append({c->clipId, trackId, target, c->duration});
         }
-        cursor = cursor + c->duration;
+        cursor = target + c->duration;
     }
     moves.append({draggedId, trackId, drop, dur});
     cursor = drop + dur;
     for (const Clip *c : right) {
-        if (cursor != c->start) {
-            moves.append({c->clipId, trackId, cursor, c->duration});
+        // 被拖块让开后的紧链：转场右块同样沉入重叠窗口
+        const int target = qMax(0, cursor - transitionWindowOf(*c));
+        if (target != c->start) {
+            moves.append({c->clipId, trackId, target, c->duration});
         }
-        cursor = cursor + c->duration; // tight chain: no gaps
+        cursor = target + c->duration; // tight chain: no gaps
     }
     return moves;
 }
