@@ -400,6 +400,9 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     setlocale(LC_NUMERIC, "C");
 
+    qInfo("[BUILD] %s %s — 删除预览修复轮次2(anim_setAbsFrame陈旧缓存拒显)",
+          __DATE__, __TIME__);
+
     // dev-only menu probe: DREAMCUT_MENUPROBE=1 logs the lifecycle of
     // every QMenu/QMenuBar popup (polish/show/resize/expose order, size
     // vs sizeHint, window geometry) to diagnose the Wayland

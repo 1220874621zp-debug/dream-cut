@@ -560,6 +560,21 @@ void Canvas::renderSk(SkCanvas* const canvas,
                       const bool mouseGrabbing)
 {
     mDrawnSinceQue = true;
+    if (mNlePrvPaintProbe > 0) {
+        mNlePrvPaintProbe--;
+        const bool drawCanvasDbg = mSceneFrame &&
+                mSceneFrame->fBoxState == mStateId;
+        qInfo("[NLE-PRV] paint %s frame=%d stateId=%u cacheState=%d "
+              "cacheRange=[%d,%d] mem=%d contained=%d previewing=%d",
+              drawCanvasDbg ? "CACHED-FRAME" : "LIVE-DRAW",
+              anim_getCurrentAbsFrame(), mStateId,
+              mSceneFrame ? int(mSceneFrame->fBoxState) : -1,
+              mSceneFrame ? mSceneFrame->getRange().fMin : -1,
+              mSceneFrame ? mSceneFrame->getRange().fMax : -1,
+              mSceneFrame ? int(mSceneFrame->storesDataInMemory()) : 0,
+              getContained().count(),
+              int(isPreviewingOrRendering()));
+    }
     SkPaint paint;
     paint.setStyle(SkPaint::kFill_Style);
     const qreal pixelRatio = qApp->devicePixelRatio();
@@ -1844,12 +1859,21 @@ void Canvas::anim_setAbsFrame(const int frame)
 
     const auto cont = safeSceneFrame(mSceneFramesHandler, newRelFrame);
     if (cont) {
-        if (cont->storesDataInMemory()) {
+        if (cont->storesDataInMemory() &&
+                cont->fBoxState == mStateId) {
             setSceneFrame(cont);
+        } else if (cont->storesDataInMemory()) {
+            // stale cached frame (content edited after it rendered):
+            // serving it unconditionally let edits - deleted clips
+            // included - stay invisible whenever an invalidation gap
+            // left the old container in the handler. Treat as a miss:
+            // keep the last frame on screen and re-render this frame
+            mSceneFrameOutdated = true;
+            planUpdate(UpdateReason::frameChange);
         } else {
             setLoadingSceneFrame(cont);
+            mSceneFrameOutdated = true;
         }
-        mSceneFrameOutdated = !cont->storesDataInMemory();
     } else {
         mSceneFrameOutdated = true;
         planUpdate(UpdateReason::frameChange);

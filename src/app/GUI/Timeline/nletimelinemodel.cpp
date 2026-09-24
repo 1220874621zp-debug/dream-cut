@@ -826,10 +826,18 @@ bool NleTimelineModel::requestSpeed(const int clipId, const qreal rate)
 bool NleTimelineModel::requestDelete(const QSet<int> &clipIds,
                                      const bool ripple)
 {
-    if (mInWriteback || mGestureActive) { return false; }
+    if (mInWriteback || mGestureActive) {
+        qInfo("[NLE-PRV] delete REFUSED: writeback=%d gesture=%d "
+              "ids=%d", int(mInWriteback), int(mGestureActive),
+              clipIds.count());
+        return false;
+    }
     mCheckRangeShrink = true;
     const auto scene = mPanelScene.data();
-    if (!scene || mFps <= 0.) { return false; }
+    if (!scene || mFps <= 0.) {
+        qInfo("[NLE-PRV] delete REFUSED: no scene");
+        return false;
+    }
 
     QList<eBoxOrSound*> victims;
     QSet<int> victimIds;
@@ -1016,6 +1024,21 @@ bool NleTimelineModel::requestDelete(const QSet<int> &clipIds,
         }
     }
     mInWriteback = false;
+    // 诊断探针（常驻门控）：删除即武装画布绘制分支探针，落日志供
+    // 真机取证；判定删除在文档层是否真发生
+    {
+        QStringList victimNames;
+        for (const auto *layer : victims) {
+            victimNames << (layer ? layer->prp_getName() : QStringLiteral("null"));
+        }
+        qInfo("[NLE-PRV] delete victims=%d [%s] containedAfter=%d "
+              "stateId=%u ripple=%d",
+              victims.count(), qUtf8Printable(victimNames.join(
+                  QStringLiteral(","))),
+              scene->getContained().count(), scene->getBoxStateId(),
+              int(ripple));
+        scene->nlePrvArmPaintProbe(50);
+    }
     finishAction();
     return true;
 }

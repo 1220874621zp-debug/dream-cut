@@ -482,6 +482,8 @@ public:
                   const QRect &drawRect,
                   const QTransform &viewTrans,
                   const bool mouseGrabbing);
+    // 诊断：删除块后武装，随后 N 次绘制各打一条缓存/直绘分支探针
+    void nlePrvArmPaintProbe(const int paints) { mNlePrvPaintProbe = paints; }
     void drawWorkspaceBackdrop(SkCanvas* const canvas,
                                const QRect &drawRect,
                                const qreal pixelRatio);
@@ -1166,6 +1168,7 @@ protected:
     bool mRenderingOutput = false;
 
     bool mSceneFrameOutdated = false;
+    int mNlePrvPaintProbe = 0;
     // camera-change coalescing (see sceneCameraChanged)
     UseSharedPointer<SceneFrameContainer> mSceneFrame;
     UseSharedPointer<SceneFrameContainer> mLoadingSceneFrame;
