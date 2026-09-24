@@ -81,6 +81,7 @@
 #include "GUI/Timeline/nletimelineview.h"
 #include "GUI/Timeline/nletimelinecontroller.h"
 #include "directplayer.h"
+#include "Sound/soundcomposition.h"
 #include "Sound/audiohandler.h"
 
 namespace {

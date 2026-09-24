@@ -1,4 +1,5 @@
 #include "nletimelinemodel.h"
+#include "Sound/soundcomposition.h"
 
 #include "Private/document.h"
 #include "canvas.h"
@@ -386,21 +387,16 @@ void NleTimelineModel::shiftLayer(eBoxOrSound * const layer,
     if (!layer || frameDelta == 0) { return; }
     const auto dur = layer->getDurationRectangle();
     if (!dur) { return; }
-    // 右移先动 max 左移先动 min：min/max 恒先离后跟，中途绝不出现
-    // min>max 非法态（非法态会把 min 钳回 max 造成 1 帧漂移，右移
-    // 粘贴实测案）；波纹删除的左移路径行为不变
-    const auto moveMin = [&dur, frameDelta]() {
-        dur->startMinFramePosTransform();
-        dur->moveMinFrame(frameDelta);
-        dur->finishMinFramePosTransform();
-    };
-    const auto moveMax = [&dur, frameDelta]() {
-        dur->startMaxFramePosTransform();
-        dur->moveMaxFrame(frameDelta);
-        dur->finishMaxFramePosTransform();
-    };
-    if (frameDelta > 0) { moveMax(); moveMin(); }
-    else { moveMin(); moveMax(); }
+    // 整体平移动 relShift 而非 min/max（等价偏移：画面源帧映射
+    // pixId = abs - relShift - animMinRel，两种实现逐帧相同），但
+    // 声音链（eSound 的 getSampleShift 放置位置与 absSecondToRel-
+    // Seconds 源映射）只认 relShift——旧 moveMin/moveMax 版本平移
+    // 后画面走了声音不走，压实后音频与画面错开整段位移，播放被
+    // 删区间听到的是平移块旧位置的声音（“删除的部分依然在播”
+    // 的根因）。只动 relShift 也永无 min>max 非法态
+    dur->startPosTransform();
+    dur->changeFramePosBy(frameDelta);
+    dur->finishPosTransform();
 }
 
 bool NleTimelineModel::commitMoves(const QVector<Move> &moves,
@@ -1002,6 +998,25 @@ bool NleTimelineModel::requestDelete(const QSet<int> &clipIds,
                     }
                 }
             }
+        }
+    }
+
+    // 声音合成缓存失效（删除+压实平移的全景一次性收口）：
+    // SoundComposition 的已合并秒缓存只在 removeSound 时失效，而
+    // 删除走层析构路径不触发它（victim 的 removeSound 从未被调，
+    // PRV5 打点实证）——旧混音残留，再播放秒缓存全命中，被删块
+    // 的声音照响；压实平移的幸存声音同样只失效新位置。清掉删除
+    // 前时间线全景覆盖的所有新旧秒，Merger 按现存声音表重并
+    {
+        const auto comp = scene->getSoundComposition();
+        if (comp && !mClips.isEmpty()) {
+            int minF = INT_MAX;
+            int maxF = 0;
+            for (const auto &c : mClips) {
+                minF = qMin(minF, c.start);
+                maxF = qMax(maxF, c.start + c.duration);
+            }
+            if (minF <= maxF) { comp->invalidateRange({minF, maxF}); }
         }
     }
 

@@ -65,7 +65,15 @@ public:
     }
 
     void remove(const iValueRange& range) {
-        mConts.erase(range);
+        // std::map::erase(key) is a SINGLE-KEY lookup: erasing a wide
+        // range never matched the per-frame/per-second entries, so
+        // range invalidation silently dropped nothing (stale scene
+        // frames kept drawing from state-id luck; stale sound mixes
+        // kept playing deleted clips). Erase every intersecting entry
+        auto its = mConts.range(range);
+        while(its.first != its.second) {
+            its.first = mConts.erase(its.first);
+        }
     }
 
     template <class T = Cont>
