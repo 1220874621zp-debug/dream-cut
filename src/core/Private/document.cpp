@@ -318,6 +318,12 @@ void Document::setActiveSceneFrame(const int frame)
     if (!fActiveScene) { return; }
     if (fActiveScene->anim_getCurrentRelFrame() == frame) { return; }
     fActiveScene->anim_setAbsFrame(frame);
+    // pump the render queues: anim_setAbsFrame only parks the request
+    // (planned updates + mSceneFrameOutdated wait for queTasks).
+    // Playback pumps this every tick, but a plain frame set - ruler
+    // scrub, arrow keys, scripts - never did, so the canvas froze on
+    // the previous frame until the next unrelated interaction
+    actionFinished();
     emit activeSceneFrameSet(frame);
 }
 
