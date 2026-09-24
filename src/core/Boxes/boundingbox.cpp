@@ -746,7 +746,24 @@ void BoundingBox::updateCurrentPreviewDataFromRenderData(
 }
 
 void BoundingBox::planUpdate(const UpdateReason reason) {
-    if(mUpdatePlanned && mPlannedReason == UpdateReason::userChange) return;
+    if(mUpdatePlanned && mPlannedReason == UpdateReason::userChange) {
+        // A render for the first change is already pending, but the
+        // state id is the CONTENT VERSION: skipping its bump here let
+        // the display cache (mSceneFrame->fBoxState == mStateId)
+        // compare equal forever, so later edits - deleted clips
+        // included - never showed while the pending render was stuck
+        // (planning gates: busy CPU pool, smoothChange grabs, ...).
+        // Bump the version on every userChange; the queued render
+        // discards as stale and the next cycle re-renders fresh.
+        if(reason == UpdateReason::userChange) {
+            mStateId++;
+            mDrawRenderContainer.setExpired(true);
+            if(const auto canvas = enve_cast<Canvas*>(this)) {
+                canvas->bumpContentGen();
+            }
+        }
+        return;
+    }
     if(!isVisibleAndInVisibleDurationRect()) return;
     const auto parent = getParentGroup();
     if(parent) parent->planUpdate(reason);
