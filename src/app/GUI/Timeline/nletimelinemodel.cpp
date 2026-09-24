@@ -2135,7 +2135,7 @@ QList<eTrackSpec> NleTimelineModel::deriveTrackSpecs(
     ensureType(true);
 
     scene->initTrackSpecs(specs);
-    qDebug("[NLE] track migration: %d tracks installed", specs.size());
+    qInfo("[TRK] derive migration: %d tracks installed", specs.size());
     return specs;
 }
 
@@ -2188,9 +2188,13 @@ void NleTimelineModel::refreshFromDocument()
 
     // tracks are explicit persistent entities: video specs first (top
     // lane = first video spec), then audio specs. A virgin scene (or
-    // a pre-P0 project) installs the derived legacy layout once
+    // a pre-P0 project) installs the derived legacy layout once.
+    // NEVER while the project streams in: layers arrive before the
+    // spec table, a mid-load derivation would rewrite every trackId
+    // against a table the file is about to replace
     auto specs = scene ? scene->getTrackSpecs() : QList<eTrackSpec>();
-    if (scene && specs.isEmpty()) {
+    const bool loadingProject = scene && scene->isLoadingProject();
+    if (scene && specs.isEmpty() && !loadingProject) {
         // the setTrackId calls inside must not re-enter the refresh,
         // and must not leave undo entries (a load-time migration must
         // not be the user's first Ctrl+Z)
@@ -2257,10 +2261,13 @@ void NleTimelineModel::refreshFromDocument()
             return false;
         }
     };
-    // typed 待收编层 → 各自的新轨 lane 索引（负 = 非定向）
-    QHash<int, int> typedAdoptLane;
+    // typed 待收编层：建轨后当场按 id 绑定（不记录 lane 索引——
+    // 索引随逐条插入漂移，旧路径四层全落进最后一条轨=删除/撤销后
+    // 轨道忽多忽少的二次塌方根因）
     {
-        // 插入锚：主轨在 mTracks 里的索引（找不到就用视频区尾）
+        // 装载中不收编：层先于 spec 表读入（positional tail），
+        // 此刻“trackId 无轨”全是表未到的假象，装载完成后的正式
+        // refresh 按文件表匹配
         int insertAt = -1;
         const int mainId = mainTrackId();
         for (int t = 0; t < mTracks.size(); ++t) {
@@ -2272,11 +2279,13 @@ void NleTimelineModel::refreshFromDocument()
                         [](const eTrackSpec &sp) { return sp.mAudio; }));
         }
         bool anyTyped = false;
-        for (int i2 = 0; i2 < items.size(); ++i2) {
-            if (items[i2].second || !isTypedLayer(items[i2].first)) { continue; }
-            if (laneById.contains(items[i2].first->trackId())) { continue; }
-            anyTyped = true;
-            break;
+        if (!loadingProject) {
+            for (int i2 = 0; i2 < items.size(); ++i2) {
+                if (items[i2].second || !isTypedLayer(items[i2].first)) { continue; }
+                if (laneById.contains(items[i2].first->trackId())) { continue; }
+                anyTyped = true;
+                break;
+            }
         }
         if (anyTyped && scene) {
             // specs 里主轨的位置（addTrackSpec 用 specs 索引）
@@ -2310,6 +2319,9 @@ void NleTimelineModel::refreshFromDocument()
                 qInfo("[TRK] adopt-spawn layer=%s lane=%s id=%d",
                       qUtf8Printable(items[i2].first->prp_getName()),
                       qUtf8Printable(laneName), newId);
+                // 当场绑定：层立刻认领新轨，下方 membership 按
+                // trackId 命中（索引漂移无关了）
+                items[i2].first->setTrackId(newId);
                 specs.insert(specMainIdx,
                              eTrackSpec{}); // 占位对齐（下面立刻重建）
                 mTracks.insert(insertAt, {newId, laneName,
@@ -2318,7 +2330,6 @@ void NleTimelineModel::refreshFromDocument()
                 for (int t = 0; t < mTracks.size(); ++t) {
                     laneById.insert(mTracks.at(t).id, t);
                 }
-                typedAdoptLane.insert(i2, insertAt);
             }
             mInWriteback = false;
         }
@@ -2336,29 +2347,28 @@ void NleTimelineModel::refreshFromDocument()
     for (int i = 0; i < items.size(); ++i) {
         int laneIdx = laneById.value(items[i].first->trackId(), -1);
         if (laneIdx < 0) {
-            if (typedAdoptLane.contains(i)) {
-                laneIdx = typedAdoptLane.value(i);
-            } else {
-                // CapCut: imported media lands on the MAIN track -
-                // typed lanes sit ABOVE main, so "first matching
-                // lane" would capture every later import onto a
-                // 文字/图形矮轨; main first, other lanes as fallback
-                if (!items[i].second) {
-                    const int mid = mainTrackId();
-                    for (int t = 0; t < trackCount; ++t) {
-                        if (mTracks.at(t).id == mid) { laneIdx = t; break; }
-                    }
+            // CapCut: imported media lands on the MAIN track -
+            // typed lanes sit ABOVE main, so "first matching
+            // lane" would capture every later import onto a
+            // 文字/图形矮轨; main first, other lanes as fallback
+            if (!items[i].second) {
+                const int mid = mainTrackId();
+                for (int t = 0; t < trackCount; ++t) {
+                    if (mTracks.at(t).id == mid) { laneIdx = t; break; }
                 }
-                if (laneIdx < 0) {
-                    for (int t = 0; t < trackCount; ++t) {
-                        if (mTracks.at(t).audio == items[i].second) {
-                            laneIdx = t;
-                            break;
-                        }
+            }
+            if (laneIdx < 0) {
+                for (int t = 0; t < trackCount; ++t) {
+                    if (mTracks.at(t).audio == items[i].second) {
+                        laneIdx = t;
+                        break;
                     }
                 }
             }
-            if (laneIdx >= 0) { adoptions.append({items[i].first, laneIdx}); }
+            // 装载中不写回停靠：表未到，写回即污染（见 loadingProject）
+            if (laneIdx >= 0 && !loadingProject) {
+                adoptions.append({items[i].first, laneIdx});
+            }
         }
         if (laneIdx < 0) { laneIdx = 0; }
         lane[i] = laneIdx;

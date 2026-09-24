@@ -2415,6 +2415,13 @@ void Canvas::writeBoundingBox(eWriteStream& dst) const
 
 void Canvas::readBoundingBox(eReadStream& src)
 {
+    // RAII: mid-load refreshes must not adopt/derive/spawn tracks
+    // (layers stream in before the spec table; see mReadingProject).
+    // A checkpoint throw must also clear the flag.
+    struct ReadingGuard {
+        bool &flag;
+        ~ReadingGuard() { flag = false; }
+    } readingGuard{mReadingProject = true};
     if (src.evFileVersion() > 5) { readGradients(src); }
     ContainerBox::readBoundingBox(src);
     if (src.evFileVersion() < EvFormat::readSceneSettingsBeforeContent) {
@@ -2447,6 +2454,14 @@ void Canvas::readBoundingBox(eReadStream& src)
             spec.mName = QString::fromUtf8(name);
             mTrackSpecs.append(spec);
         }
+        QString dbgSpecs;
+        for (const auto &sp : mTrackSpecs) {
+            dbgSpecs += QStringLiteral("%1(%2,%3) ").arg(sp.mId).arg(
+                        sp.mName, sp.mAudio ? QStringLiteral("A")
+                                           : QStringLiteral("V"));
+        }
+        qInfo("[TRK] load read specs: %s",
+              qUtf8Printable(dbgSpecs.trimmed()));
     }
     clearGradientRWIds();
 }
@@ -2464,6 +2479,7 @@ bool Canvas::hasTrackSpec(const int id) const
 void Canvas::initTrackSpecs(const QList<eTrackSpec> &specs)
 {
     mTrackSpecs = specs;
+    qInfo("[TRK] initTrackSpecs: %d specs", specs.count());
 }
 
 int Canvas::addTrackSpec(const bool audio, const QString &name,

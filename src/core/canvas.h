@@ -974,6 +974,16 @@ private:
     // the teardown never performs active cross-object updates
     bool mDestructing = false;
 
+    // true while readBoundingBox streams the project in: layers arrive
+    // BEFORE the track-spec table (positional tail), so a mid-load
+    // refresh sees layers whose trackId has no lane yet. While true
+    // the timeline refresh must not adopt/derive/spawn tracks - the
+    // table read at the end is authoritative
+    bool mReadingProject = false;
+
+public:
+    bool isLoadingProject() const { return mReadingProject; }
+
     // scene position of the last canvas context menu opening (read by
     // "create here" menu actions such as puppet-pin placement)
     QPointF mLastContextMenuAbsPos;

@@ -25,6 +25,7 @@
 
 #include <fstream>
 #include "Animators/qrealanimator.h"
+#include "GUI/Timeline/nletimelinemodel.h"
 #include "Animators/qpointfanimator.h"
 #include "Animators/coloranimator.h"
 #include "Animators/qstringanimator.h"
@@ -142,6 +143,12 @@ void MainWindow::loadEVFile(const QString &path)
     file.close();
     addRecentFile(path);
     mRenderWidget->updateRenderSettings();
+    // mid-load refreshes were suppressed (layers stream in before the
+    // track-spec table): rebuild the timeline clips once against the
+    // authoritative table now that the load is complete
+    if (mTimeline && mTimeline->nleModel()) {
+        mTimeline->nleModel()->refreshFromDocument();
+    }
 }
 
 void MainWindow::saveToFile(const QString &path,
