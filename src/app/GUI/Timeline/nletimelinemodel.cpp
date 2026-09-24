@@ -598,6 +598,13 @@ void NleTimelineModel::purgeEmptyTracks(const QHash<int, int> &members)
     // primary track and also guarantees the video-type invariant
     const int mainId = mainTrackId();
     const auto specs = scene->getTrackSpecs();
+    QString memberDump;
+    for (const auto &s : specs) {
+        memberDump += QStringLiteral("%1:%2 ").arg(s.mId).arg(
+                    members.value(s.mId, 0));
+    }
+    qInfo("[TRK] purge scan main=%d members[%s]", mainId,
+          qUtf8Printable(memberDump.trimmed()));
     for (int type = 0; type < 2; ++type) {
         const bool audio = type == 1;
         int withMembers = 0;
@@ -611,6 +618,8 @@ void NleTimelineModel::purgeEmptyTracks(const QHash<int, int> &members)
         for (const auto &s : specs) {
             if (s.mAudio == audio && members.value(s.mId, 0) == 0 &&
                     s.mId != mainId) {
+                qInfo("[TRK] purge lane id=%d name=%s", s.mId,
+                      qUtf8Printable(s.mName));
                 scene->removeTrackSpec(s.mId);
             }
         }
@@ -1037,6 +1046,14 @@ bool NleTimelineModel::requestDelete(const QSet<int> &clipIds,
                   QStringLiteral(","))),
               scene->getContained().count(), scene->getBoxStateId(),
               int(ripple));
+        QString specDump;
+        for (const auto &s : scene->getTrackSpecs()) {
+            specDump += QStringLiteral("%1(%2,%3) ").arg(s.mId).arg(
+                        s.mName, s.mAudio ? QStringLiteral("A")
+                                          : QStringLiteral("V"));
+        }
+        qInfo("[TRK] specs after delete: %s",
+              qUtf8Printable(specDump.trimmed()));
         scene->nlePrvArmPaintProbe(50);
     }
     finishAction();
@@ -2290,6 +2307,9 @@ void NleTimelineModel::refreshFromDocument()
                     if (newId >= 0) { scene->setTrackSpecHeight(newId, 0); }
                 }
                 if (newId < 0) { continue; }
+                qInfo("[TRK] adopt-spawn layer=%s lane=%s id=%d",
+                      qUtf8Printable(items[i2].first->prp_getName()),
+                      qUtf8Printable(laneName), newId);
                 specs.insert(specMainIdx,
                              eTrackSpec{}); // 占位对齐（下面立刻重建）
                 mTracks.insert(insertAt, {newId, laneName,

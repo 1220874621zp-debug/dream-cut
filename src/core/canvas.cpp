@@ -2469,6 +2469,10 @@ void Canvas::initTrackSpecs(const QList<eTrackSpec> &specs)
 int Canvas::addTrackSpec(const bool audio, const QString &name,
                          const int insertIdx)
 {
+    // 诊断探针（常驻，轨道操作属罕见事件）：新增轨道全量落日志
+    qInfo("[TRK] addSpec id-pending audio=%d name=%s insertIdx=%d "
+          "specs=%d", int(audio), qUtf8Printable(name), insertIdx,
+          mTrackSpecs.count());
     // ids share the space with the layers' trackIds (per scene) so a
     // spec id can never collide with an id a member allocates later
     int maxId = -1;
@@ -2509,7 +2513,11 @@ bool Canvas::removeTrackSpec(const int id)
     // a track carrying members cannot be removed (move or delete the
     // clips first); empty tracks delete freely
     for (const auto &c : getContained()) {
-        if (c && c->trackId() == id) { return false; }
+        if (c && c->trackId() == id) {
+            qInfo("[TRK] removeSpec id=%d REFUSED member=%s",
+                  id, qUtf8Printable(c->prp_getName()));
+            return false;
+        }
     }
     int index = -1;
     eTrackSpec spec;
@@ -2538,6 +2546,8 @@ bool Canvas::removeTrackSpec(const int id)
     };
     remove();
     addUndoRedo(tr("Remove Track"), insert, remove);
+    qInfo("[TRK] removeSpec id=%d name=%s OK specs=%d", id,
+          qUtf8Printable(spec.mName), mTrackSpecs.count());
     return true;
 }
 

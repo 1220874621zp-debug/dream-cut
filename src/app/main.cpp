@@ -400,7 +400,7 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     setlocale(LC_NUMERIC, "C");
 
-    qInfo("[BUILD] %s %s — 删除预览修复轮次2(anim_setAbsFrame陈旧缓存拒显)",
+    qInfo("[BUILD] %s %s — 删除预览修复轮次3(轨道全链探针+缓存拒显)",
           __DATE__, __TIME__);
 
     // dev-only menu probe: DREAMCUT_MENUPROBE=1 logs the lifecycle of
