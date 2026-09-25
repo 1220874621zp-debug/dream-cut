@@ -295,6 +295,7 @@ set(
     RasterEffects/pageflipeffect.cpp
     RasterEffects/transitionanchor.cpp
     ReadWrite/ereadstream.cpp
+    ReadWrite/evtail.cpp
     ReadWrite/ewritestream.cpp
     ReadWrite/filefooter.cpp
     Segments/fitcurves.cpp
@@ -657,6 +658,7 @@ set(
     ReadWrite/efuturepos.h
     ReadWrite/ereadstream.h
     ReadWrite/evformat.h
+    ReadWrite/evtail.h
     ReadWrite/ewritestream.h
     ReadWrite/filefooter.h
     ReadWrite/xevformat.h

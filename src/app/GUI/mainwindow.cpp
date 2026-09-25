@@ -30,6 +30,7 @@
 #include <QKeyEvent>
 #include <QApplication>
 #include <QDebug>
+#include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QUrl>
 #include <QStatusBar>
@@ -60,6 +61,7 @@
 #include <QTabBar>
 #include <QGroupBox>
 #include <QTimer>
+#include <QBuffer>
 #include <QStandardPaths>
 #include <QTextStream>
 #include <QInputDialog>
@@ -103,6 +105,9 @@
 #include "efiltersettings.h"
 #include "Settings/settingsdialog.h"
 #include "appsupport.h"
+#include "ReadWrite/evformat.h"
+#include "ReadWrite/evtail.h"
+#include "ReadWrite/filefooter.h"
 #include "projectmanagerdialog.h"
 #include "themesupport.h"
 
@@ -2008,6 +2013,43 @@ void MainWindow::saveFile()
     }
 }
 
+namespace {
+    // 备份目录按工程绝对路径哈希收进应用数据目录（AppSupport::
+    // getAppBackupsPath），工程目录只留一个 .dreamcut 文件
+    QString backupDirFor(const QString& evPath)
+    {
+        const QString key = QCryptographicHash::hash(
+                    QFileInfo(evPath).absoluteFilePath().toUtf8(),
+                    QCryptographicHash::Sha1).toHex().left(16);
+        return AppSupport::getAppBackupsPath() + QStringLiteral("/") + key;
+    }
+
+    // 旧版备份文件夹（<工程>.dreamcut_backup）整体搬进新家：逐个
+    // 迁移（跨盘 rename 失败则复制），全部迁空后移除空文件夹；任何
+    // 文件迁不走就原样保留，绝不删备份
+    void migrateLegacyBackupFolder(const QString& evPath)
+    {
+        const QString legacyPath = evPath + QStringLiteral("_backup");
+        QDir legacyDir(legacyPath);
+        if (!legacyDir.exists()) { return; }
+
+        const QString target = backupDirFor(evPath);
+        QDir().mkpath(target);
+        const auto entries = legacyDir.entryInfoList(
+                    {QStringLiteral("backup_*.dreamcut")}, QDir::Files, QDir::Name);
+        for (const auto& info : entries) {
+            const QString dst = target + QStringLiteral("/") + info.fileName();
+            if (QFile::exists(dst)) { continue; }
+            if (!QFile::rename(info.absoluteFilePath(), dst)) {
+                if (!QFile::copy(info.absoluteFilePath(), dst)) { continue; }
+            }
+            QFile::remove(info.absoluteFilePath());
+        }
+        // 只在确实迁空后才摘掉旧文件夹
+        QDir(legacyPath).rmdir(legacyPath);
+    }
+}
+
 void MainWindow::saveFile(const QString& path,
                           const bool setPath)
 {
@@ -2024,6 +2066,7 @@ void MainWindow::saveFile(const QString& path,
         if (setPath) mDocument.setPath(path);
         setFileChangedSinceSaving(false);
         updateLastSaveDir(path);
+        migrateLegacyBackupFolder(path);
         if (mBackupOnSave) {
             qDebug() << "auto backup";
             saveBackup();
@@ -2054,7 +2097,13 @@ void MainWindow::saveBackup()
     const QString defPath = mDocument.fEvFile;
     QFileInfo defInfo(defPath);
     if (defPath.isEmpty() || defInfo.isDir())  { return; }
-    const QString backupPath = defPath + "_backup/backup_%1.dreamcut";
+    // 备份收进应用数据目录，不再在工程旁生成 _backup 文件夹
+    const QString dir = backupDirFor(defPath);
+    if (!QDir().mkpath(dir)) {
+        qDebug() << "backup dir unavailable" << dir;
+        return;
+    }
+    const QString backupPath = dir + QStringLiteral("/backup_%1.dreamcut");
     int id = 1;
     QFile backupFile(backupPath.arg(id));
     while (backupFile.exists()) {

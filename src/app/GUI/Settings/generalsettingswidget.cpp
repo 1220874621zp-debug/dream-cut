@@ -78,8 +78,11 @@ GeneralSettingsWidget::GeneralSettingsWidget(QWidget *parent)
         mAutoBackup->setToolTip(tr("Backup files are not supported in flatpak."));
     } else {
         mAutoBackup->setCheckable(true);
-        mAutoBackup->setToolTip(tr("Creates a backup file after each successful save.\n\n"
-                                   "Backup files are stored in a folder called PROJECT.friction_backup."));
+        mAutoBackup->setToolTip(tr("每次保存成功后自动创建一份备份。\n\n"
+                                   "备份统一存放在应用数据目录的 backups 下"
+                                   "（可在 %1 查看），不会在工程旁边生成文件夹。")
+                                .arg(QDir::toNativeSeparators(
+                                         AppSupport::getAppBackupsPath())));
     }
 
     mProjectLayout->addWidget(mAutoBackup);

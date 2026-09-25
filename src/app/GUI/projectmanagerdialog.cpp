@@ -32,6 +32,7 @@
 
 #include "appsupport.h"
 #include "themesupport.h"
+#include "ReadWrite/evtail.h"
 
 namespace
 {
@@ -41,10 +42,24 @@ namespace
     constexpr int THUMB_H = 117;
     constexpr int GRID_COLUMNS = 4;
 
-    // 工程缩略图 sidecar：<工程>.dreamcut.png，保存工程时写入
+    // 旧版缩略图 sidecar（<工程>.dreamcut.png）：仅作读取回退，
+    // 新版保存的封面封在工程文件尾部（EvTail）里
     QString thumbPathFor(const QString& projectPath)
     {
         return projectPath + QStringLiteral(".png");
+    }
+
+    // 读工程封面：优先工程文件尾部的 EvTail 块，旧工程回退 sidecar
+    QImage loadProjectThumb(const QString& projectPath)
+    {
+        QByteArray pngData;
+        EvTail::probePath(projectPath, &pngData);
+        QImage img;
+        if (!pngData.isEmpty()) {
+            img.loadFromData(pngData, "PNG");
+        }
+        if (img.isNull()) { img.load(thumbPathFor(projectPath)); }
+        return img;
     }
 
     QStringList recentProjects()
@@ -270,8 +285,9 @@ void ProjectManagerDialog::requestThumbnail(const QString& path)
     QPointer<ProjectManagerDialog> guard(this);
     QThreadPool::globalInstance()->start([guard, path]
     {
-        // sidecar 缩略图全尺寸解码后等比缩到 2x 卡片尺寸
-        QImage source(thumbPathFor(path));
+        // 封面全尺寸解码后等比缩到 2x 卡片尺寸（新版在工程文件尾部，
+        // 旧版在 sidecar）
+        QImage source = loadProjectThumb(path);
         QImage thumb;
         if (!source.isNull())
         {

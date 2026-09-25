@@ -67,6 +67,7 @@
 #include "GUI/BoxesList/boxscrollwidget.h"
 #include "ReadWrite/evformat.h"
 #include "ReadWrite/ereadstream.h"
+#include "ReadWrite/evtail.h"
 #include "ReadWrite/ewritestream.h"
 #include "skia/skiahelpers.h"
 #include "Private/document.h"
@@ -110,7 +111,9 @@ void MainWindow::loadEVFile(const QString &path)
         readStream.setPath(path);
 
         const qint64 savedPos = file.pos();
-        const qint64 pos = file.size() - FileFooter::sSize(evVersion) -
+        // 封面尾部块挂在 FileFooter 之后，future 表定位须以
+        // 剥离尾部块后的流末尾为基准
+        const qint64 pos = EvTail::probe(&file) - FileFooter::sSize(evVersion) -
                 qint64(sizeof(int));
         file.seek(pos);
         readStream.readFutureTable();
@@ -178,6 +181,29 @@ void MainWindow::saveToFile(const QString &path,
     if (!file.open(QIODevice::WriteOnly)) {
         RuntimeThrow("Could not open file for writing " + tmpPath + ".");
     }
+
+    // 封面 PNG 编码进内存：保存成功后作为尾部块（EvTail）追加进
+    // 工程文件本体，工程目录不再出现 sidecar 图片；当前帧还没渲
+    // 出来就跳过（项目管理器显示占位图）
+    QByteArray thumbBytes;
+    if (addRecent) {
+        const auto scene = *Document::sInstance->fActiveScene;
+        if (scene) {
+            const auto contRaw = scene->getSceneFramesHandler()
+                    .atFrame(scene->getCurrentFrame());
+            const auto cont = dynamic_cast<SceneFrameContainer*>(contRaw);
+            const sk_sp<SkImage> img = cont ? cont->getImage() : nullptr;
+            if (img) {
+                const sk_sp<SkData> pngData =
+                        img->encodeToData(SkEncodedImageFormat::kPNG, 90);
+                if (pngData) {
+                    thumbBytes = QByteArray(static_cast<const char*>(pngData->data()),
+                                            static_cast<int>(pngData->size()));
+                }
+            }
+        }
+    }
+
     eWriteStream writeStream(&file);
     writeStream.setPath(path);
     try {
@@ -197,6 +223,13 @@ void MainWindow::saveToFile(const QString &path,
 
         writeStream.writeFutureTable();
         FileFooter::sWrite(writeStream);
+
+        // 封面尾部块：仍写在临时文件内，跟随下面的原子交换一起落地
+        if (!thumbBytes.isEmpty()) {
+            if (!EvTail::append(&file, thumbBytes)) {
+                RuntimeThrow("Could not append project thumbnail");
+            }
+        }
     } catch(...) {
         file.close();
         QFile::remove(tmpPath);
@@ -220,19 +253,10 @@ void MainWindow::saveToFile(const QString &path,
     BoundingBox::sClearWriteBoxes();
     if (addRecent) {
         addRecentFile(path);
-        // 项目缩略图 sidecar（<工程>.dreamcut.png）：从当前帧缓存取
-        // 已渲染画面；当前帧还没渲出来就跳过（面板显示占位图）
-        const auto scene = *Document::sInstance->fActiveScene;
-        if (scene) {
-            const auto contRaw = scene->getSceneFramesHandler()
-                    .atFrame(scene->getCurrentFrame());
-            const auto cont = dynamic_cast<SceneFrameContainer*>(contRaw);
-            const sk_sp<SkImage> img = cont ? cont->getImage() : nullptr;
-            if (img) {
-                SkiaHelpers::saveImage(path + QStringLiteral(".png"), img,
-                                       SkEncodedImageFormat::kPNG, 90);
-            }
-        }
+        // 清掉旧版保存留下的 sidecar 封面（<工程>.dreamcut.png），
+        // 保证工程目录只留一个 .dreamcut 文件
+        const QString legacySidecar = path + QStringLiteral(".png");
+        if (QFile::exists(legacySidecar)) { QFile::remove(legacySidecar); }
     }
 }
 

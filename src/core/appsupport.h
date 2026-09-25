@@ -90,6 +90,7 @@ public:
     static const QString getAppCommitUrl();
     static const QString getAppBranchUrl();
     static const QString getAppConfigPath();
+    static const QString getAppBackupsPath();
     static const QString getAppPath();
     static const QString getAppCachePath();
     static const QString getAppTempPath(const QString &filename);

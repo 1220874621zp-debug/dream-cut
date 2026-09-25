@@ -411,6 +411,27 @@ const QString AppSupport::getAppConfigPath()
     return path;
 }
 
+const QString AppSupport::getAppBackupsPath()
+{
+    // 工程备份统一收进应用数据目录（便携模式收进程序目录），
+    // 工程目录不再出现 PROJECT.dreamcut_backup 文件夹
+    QString path = QString::fromUtf8("%1/%2/backups")
+                   .arg(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation),
+                        getAppName());
+
+    if (isAppPortable()) {
+        const QString appPath = getAppPath();
+        if (QFileInfo(appPath).isWritable()) {
+            path = QString("%1/config/backups").arg(appPath);
+        }
+    }
+
+    QDir dir(path);
+    if (!dir.exists()) { dir.mkpath(path); }
+
+    return path;
+}
+
 const QString AppSupport::getAppPath()
 {
     return QApplication::applicationDirPath();

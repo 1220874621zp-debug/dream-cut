@@ -1,6 +1,7 @@
 #include "filefooter.h"
 
 #include "evformat.h"
+#include "evtail.h"
 #include "ewritestream.h"
 
 char FileFooter::sEVFormat[15] = "enve ev";
@@ -21,7 +22,9 @@ qint64 FileFooter::sSize(const int evVersion) {
 
 int FileFooter::sReadEvFileVersion(QIODevice * const src) {
     const qint64 savedPos = src->pos();
-    const qint64 pos = src->size() - static_cast<qint64>(3*sizeof(char[15]));
+    // 新版工程文件在 FileFooter 之后还挂着封面尾部块（EvTail），
+    // footer 扫描须以剥离尾部块后的流末尾为基准，否则读到封面数据
+    const qint64 pos = EvTail::probe(src) - static_cast<qint64>(3*sizeof(char[15]));
     if(!src->seek(pos))
         RuntimeThrow("Failed to seek to FileFooter");
 
