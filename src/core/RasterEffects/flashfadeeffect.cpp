@@ -81,8 +81,9 @@ stdsptr<RasterEffectCaller> FlashFadeEffect::getEffectCaller(
 
     const qreal fadeIn = mFadeIn->getEffectiveValue(relFrame);
     const qreal fadeOut = mFadeOut->getEffectiveValue(relFrame);
+    const qreal local = nleTransitionClipRelFrame(relFrame, data);
     const qreal total = nleTransitionTotalFrames(data);
-    const qreal openness = nleTransitionOpenness(relFrame, total,
+    const qreal openness = nleTransitionOpenness(local, total,
                                                  fadeIn, fadeOut) * influence;
     const QColor bg = mColor->getColor(relFrame);
 

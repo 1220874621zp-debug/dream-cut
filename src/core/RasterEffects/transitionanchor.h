@@ -26,10 +26,10 @@
 
 struct BoxRenderData;
 
-// CapCut-style clip transition anchoring: relFrame is the frame
-// inside the clip (the layer's duration rect coordinates), total is
-// the clip length in frames (nleTransitionTotalFrames). Returns the
-// transition openness 0..1 at this frame: the fade-in window ramps
+// CapCut-style clip transition anchoring: relFrame is the clip-local
+// frame (0 = first visible frame of the clip), total is the clip length
+// in frames (nleTransitionTotalFrames). Returns the transition
+// openness 0..1 at this frame: the fade-in window ramps
 // 0 -> 1, the fade-out window ramps 1 -> 0, the middle holds 1.
 // fadeIn/fadeOut <= 0.5 frames disable that end.
 inline qreal nleTransitionOpenness(const qreal relFrame, const qreal total,
@@ -40,6 +40,19 @@ inline qreal nleTransitionOpenness(const qreal relFrame, const qreal total,
     const qreal b = fadeOut > 0.5 ? (total - relFrame) / fadeOut : 1.;
     return qBound(0., qMin(a, b), 1.);
 }
+
+// The render pipeline hands effects the RAW animator relFrame, where
+// the layer's duration rect sits at [minRel..maxRel] and minRel equals
+// the layer's placement frame at creation time (e.g. 300 for a clip
+// imported mid-timeline; later whole-clip moves change relShift, never
+// minRel). Transition progress must instead count from the clip's
+// first visible frame: convert to clip-local coordinates. Without
+// this, headOpen = 300/fadeIn clamps to 1 on every frame and the
+// transition renders as identity (the applied-but-invisible bug).
+// The effect-preview path passes no BoxRenderData and already sweeps
+// local frames 0..N, so fall back to the raw frame there.
+qreal nleTransitionClipRelFrame(const qreal relFrame,
+                                const BoxRenderData * const data);
 
 // clip length for the anchor: from the layer's duration rect; the
 // effect-preview path passes no BoxRenderData, so fall back to a 2s

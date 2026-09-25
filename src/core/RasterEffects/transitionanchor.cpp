@@ -24,6 +24,21 @@
 #include "Boxes/boundingbox.h"
 #include "Timeline/durationrectangle.h"
 
+qreal nleTransitionClipRelFrame(const qreal relFrame,
+                                const BoxRenderData * const data)
+{
+    if (data) {
+        const auto box = data->fParentBox.data();
+        if (box) {
+            const auto dur = box->getDurationRectangle();
+            if (dur) {
+                return relFrame - dur->getMinRelFrame();
+            }
+        }
+    }
+    return relFrame;
+}
+
 qreal nleTransitionTotalFrames(const BoxRenderData * const data)
 {
     if (data) {
@@ -32,7 +47,7 @@ qreal nleTransitionTotalFrames(const BoxRenderData * const data)
             const auto dur = box->getDurationRectangle();
             if (dur) {
                 const qreal total = dur->getMaxRelFrame() -
-                                    dur->getMinRelFrame();
+                                    dur->getMinRelFrame() + 1;
                 if (total >= 1.) { return total; }
             }
         }

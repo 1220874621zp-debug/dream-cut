@@ -72,14 +72,15 @@ stdsptr<RasterEffectCaller> SlideEffect::getEffectCaller(
 
     const qreal slideIn = mSlideIn->getEffectiveValue(relFrame);
     const qreal slideOut = mSlideOut->getEffectiveValue(relFrame);
+    const qreal local = nleTransitionClipRelFrame(relFrame, data);
     const qreal total = nleTransitionTotalFrames(data);
 
     // head window: openness 0 -> 1 (offset collapses to 0)
     const qreal headOpen = slideIn > 0.5 ?
-                qBound(0., relFrame / slideIn, 1.) : 1.;
+                qBound(0., local / slideIn, 1.) : 1.;
     // tail window: 1 -> 0 (offset grows out along -direction)
     const qreal tailOpen = slideOut > 0.5 ?
-                qBound(0., (total - relFrame) / slideOut, 1.) : 1.;
+                qBound(0., (total - local) / slideOut, 1.) : 1.;
 
     const qreal k = (1. - headOpen) * influence - (1. - tailOpen);
 

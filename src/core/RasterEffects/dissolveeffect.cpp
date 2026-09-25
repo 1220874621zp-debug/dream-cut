@@ -60,8 +60,9 @@ stdsptr<RasterEffectCaller> DissolveEffect::getEffectCaller(
 
     const qreal fadeIn = mFadeIn->getEffectiveValue(relFrame);
     const qreal fadeOut = mFadeOut->getEffectiveValue(relFrame);
+    const qreal local = nleTransitionClipRelFrame(relFrame, data);
     const qreal total = nleTransitionTotalFrames(data);
-    const qreal alpha = nleTransitionOpenness(relFrame, total,
+    const qreal alpha = nleTransitionOpenness(local, total,
                                               fadeIn, fadeOut) * influence;
 
     return enve::make_shared<DissolveEffectCaller>(instanceHwSupport(),
