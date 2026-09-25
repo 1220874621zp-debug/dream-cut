@@ -503,11 +503,14 @@ void CanvasWindow::mousePressEvent(QMouseEvent *event)
     const auto button = event->button();
     bool leftAndAltPressed = (button == Qt::LeftButton) &&
                              QGuiApplication::keyboardModifiers().testFlag(Qt::AltModifier);
-    // 监视器式视口：中键/右键/Alt+左键不再进入平移态；右键释放仍走
-    // Canvas 菜单逻辑（对象/控制点菜单），空白新建菜单已迁时间轴加号
-    if (button == Qt::MiddleButton ||
-        button == Qt::RightButton ||
-        leftAndAltPressed) {
+    // 监视器式视口：中键按下进入平移态（观察视频细节），右键/Alt+左键
+    // 仍不进入；右键释放走 Canvas 菜单逻辑（对象/控制点菜单）
+    if (button == Qt::MiddleButton) {
+        QApplication::setOverrideCursor(Qt::ClosedHandCursor);
+        mPrevMousePos = mapToCanvasCoord(event->pos());
+        return;
+    }
+    if (button == Qt::RightButton || leftAndAltPressed) {
         return;
     }
     KFT_setFocus();
@@ -568,8 +571,12 @@ void CanvasWindow::mousePressEvent(QMouseEvent *event)
 void CanvasWindow::mouseReleaseEvent(QMouseEvent *event)
 {
     const auto button = event->button();
-    // 监视器式视口：不再有平移态需要恢复；右键释放交给 Canvas
-    // 处理（对象/控制点菜单或清除选择）
+    if (button == Qt::MiddleButton) {
+        // 平移态结束：恢复光标，不进 Canvas（中键不参与选择/变换）
+        QApplication::restoreOverrideCursor();
+        return;
+    }
+    // 右键释放交给 Canvas 处理（对象/控制点菜单或清除选择）
     // PS-style guide drop: back onto the ruler = remove, into the
     // canvas = create/keep
     if (mDragGuide && button == Qt::LeftButton) {
@@ -622,7 +629,18 @@ void CanvasWindow::mouseMoveEvent(QMouseEvent *event)
         update();
         return;
     }
-    // 监视器式视口：不再支持中键/右键/Alt+左键拖动平移
+    // 中键拖动平移（1:1 跟手）：pos/mPrevMousePos 是画布坐标，画布差
+    // 直接传 translateView——QTransform::translate 的参数先过已有缩放
+    // （实际位移=参数×m11），画布差×m11 恰为设备像素位移=逻辑位移×dpr；
+    // 随后冻结 pos 让 Canvas 看到的指针不动
+    if (event->buttons() & Qt::MiddleButton) {
+        if (!QApplication::overrideCursor()) {
+            QApplication::setOverrideCursor(Qt::ClosedHandCursor);
+        }
+        translateView(pos - mPrevMousePos);
+        mUserAdjustedView = true;
+        pos = mPrevMousePos;
+    }
     mCurrentCanvas->mouseMoveEvent(eMouseEvent(pos,
                                                mPrevMousePos,
                                                mPrevPressPos,
@@ -640,12 +658,23 @@ void CanvasWindow::mouseMoveEvent(QMouseEvent *event)
 
 void CanvasWindow::wheelEvent(QWheelEvent *event)
 {
-    // 监视器式视口：滚轮不再缩放/平移，画布恒为适配窗口的完整场景
-    Q_UNUSED(event)
+    // 滚轮以光标为锚缩放（kdenlive 监视器语义），方便观察视频细节；
+    // 竖滚为主，触控板横滚（竖分量为 0）也当缩放用
+    if (!mCurrentCanvas) { return; }
+    const int delta = event->angleDelta().y() != 0 ?
+                event->angleDelta().y() : event->angleDelta().x();
+    if (delta == 0) { return; }
+    zoomView(delta > 0 ? 1.1 : 0.9, event->position());
+    update();
 }
 
 void CanvasWindow::mouseDoubleClickEvent(QMouseEvent *event)
 {
+    // 中键双击 = 快速回到适配（观察完细节复位，同小键盘 0）
+    if (event->button() == Qt::MiddleButton) {
+        fitCanvasToSize();
+        return;
+    }
     if (!mCurrentCanvas || mBlockInput) { return; }
     const auto pos = mapToCanvasCoord(event->pos());
     mCurrentCanvas->mouseDoubleClickEvent(eMouseEvent(pos,
@@ -758,9 +787,17 @@ bool CanvasWindow::handleTransformationKeyPress(QKeyEvent *event)
 {
     const int key = event->key();
     const bool keypad = event->modifiers() & Qt::KeypadModifier;
-    // 监视器式视口：仅保留小键盘 0 = 适配窗口；百分比缩放已无意义
+    // 监视器式视口 + 自由观察：小键盘 0 = 适配窗口（退出观察态），
+    // 小键盘 1 = 100%，+/- 在光标处缩放
     if (key == Qt::Key_0 && keypad) {
         fitCanvasToSize();
+    } else if (key == Qt::Key_1 && keypad) {
+        resetTransformation();
+    } else if (key == Qt::Key_Minus || key == Qt::Key_Plus) {
+        if (mCurrentCanvas->isPreviewingOrRendering()) { return false; }
+        const auto relPos = mapFromGlobal(QCursor::pos());
+        if (key == Qt::Key_Plus) { zoomView(1.2, relPos); }
+        else { zoomView(0.8, relPos); }
     } else { return false; }
     update();
     return true;

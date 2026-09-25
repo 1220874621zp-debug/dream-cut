@@ -47,6 +47,11 @@ void CanvasWindow::zoomView(const qreal scaleBy,
                             const QPointF &absOrigin)
 {
     if (!mCurrentCanvas) { return; }
+    // 缩放钳制：防止滚轮连击把比例推到退化区间（mapToCanvasCoord
+    // 求逆在极小/极大比例下精度崩坏，标尺刻度同样失真）
+    const qreal target = mViewTransform.m11() * scaleBy;
+    if (target < 1./64. || target > 64.) { return; }
+    mUserAdjustedView = true;
     const QPointF transPoint = -mapToCanvasCoord(absOrigin);
 
     mViewTransform.translate(-transPoint.x(), -transPoint.y());
@@ -54,18 +59,33 @@ void CanvasWindow::zoomView(const qreal scaleBy,
     mViewTransform.translate(transPoint.x(), transPoint.y());
 }
 
-// 监视器式视口（kdenlive 语义）：窗口尺寸变化即重新适配场景，
-// 画布永远完整可见，不再保留无限画布的平移补偿
+// 监视器式视口（kdenlive 语义）：默认窗口尺寸变化即重新适配场景；
+// 用户已滚轮缩放/中键平移进入自由观察态时改为中心锚定补偿，
+// 正在观察的细节不因窗口微调被打回全幅
 void CanvasWindow::resizeEvent(QResizeEvent *e)
 {
-    Q_UNUSED(e)
-    fitCanvasToSize();
+    if (mUserAdjustedView && e->size().isValid() && mOldSize.isValid()) {
+        const auto dSize = e->size() - mOldSize;
+        const qreal dpr = devicePixelRatioF();
+        // 目标：内容随窗口中心锚定，设备像素位移=dSize*dpr/2；
+        // translateView 的参数先过已有缩放（实际位移=参数×m11），
+        // 故除回 m11（QTransform::translate 语义，无头台架实证）
+        const qreal scale = mViewTransform.m11();
+        if (!qFuzzyIsNull(scale)) {
+            translateView({dSize.width() * dpr * 0.5 / scale,
+                           dSize.height() * dpr * 0.5 / scale});
+        }
+    } else {
+        fitCanvasToSize();
+    }
+    if (e->size().isValid()) { mOldSize = e->size(); }
     GLWindow::resizeEvent(e);
 }
 
 void CanvasWindow::fitCanvasToSize(const bool &fitWidth)
 {
     if (!mCurrentCanvas) { return; }
+    mUserAdjustedView = false;
     mViewTransform.reset();
     qreal pixelRatio = devicePixelRatioF();
     const auto canvasSize = mCurrentCanvas->getCanvasSize();
@@ -83,6 +103,7 @@ void CanvasWindow::fitCanvasToSize(const bool &fitWidth)
 void CanvasWindow::zoomInView()
 {
     if (!mCurrentCanvas) { return; }
+    mUserAdjustedView = true;
     const auto canvasSize = mCurrentCanvas->getCanvasSize();
     mViewTransform.translate(canvasSize.width() * 0.5, canvasSize.height() * 0.5);
     mViewTransform.scale(1.1, 1.1);
@@ -93,6 +114,7 @@ void CanvasWindow::zoomInView()
 void CanvasWindow::zoomOutView()
 {
     if (!mCurrentCanvas) { return; }
+    mUserAdjustedView = true;
     const auto canvasSize = mCurrentCanvas->getCanvasSize();
     mViewTransform.translate(canvasSize.width() * 0.5, canvasSize.height() * 0.5);
     mViewTransform.scale(0.9, 0.9);
@@ -136,7 +158,11 @@ void CanvasWindow::showEvent(QShowEvent *e)
 void CanvasWindow::resetTransformation()
 {
     if (!mCurrentCanvas) { return; }
+    mUserAdjustedView = true;
     mViewTransform.reset();
-    translateView({(width() - mCurrentCanvas->getCanvasWidth()) * 0.5,
-                   (height() - mCurrentCanvas->getCanvasHeight()) * 0.5});
+    // 与 fitCanvasToSize 同口径：平移分量是设备像素，逻辑尺寸须乘 dpr
+    // （上游原版漏乘 dpr，高 DPI 下 100% 视图偏向往左上）
+    const qreal dpr = devicePixelRatioF();
+    translateView({(width() * dpr - mCurrentCanvas->getCanvasWidth()) * 0.5,
+                   (height() * dpr - mCurrentCanvas->getCanvasHeight()) * 0.5});
 }

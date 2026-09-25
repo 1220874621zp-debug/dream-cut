@@ -162,6 +162,10 @@ private:
     QTransform mViewTransform;
     QPointF mPrevMousePos;
     QPointF mPrevPressPos;
+    // 自由观察态：滚轮缩放/中键平移后视图脱离"恒适配"监视器语义，
+    // resize 改为中心锚定补偿而非重适配；fitCanvasToSize 退出该态
+    bool mUserAdjustedView = false;
+    QSize mOldSize{-1, -1};
 
     bool mBlockInput;
     bool mMouseGrabber;
