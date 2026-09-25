@@ -48,6 +48,8 @@
 #include <QDebug>
 #include <stdio.h>
 #include <stdlib.h>
+#include <cerrno>
+#include <cstring>
 #include <fstream>
 
 #include "exceptions.h"
@@ -117,7 +119,10 @@ void MemoryChecker::sGetFreeKB(intKB& procFreeKB,
         freeInternal = physical_memory_used - bytes_in_use_by_app;
         int found = 0;
         FILE * const meminfo = fopen("/proc/meminfo", "r");
-        if (!meminfo) { RuntimeThrow("Failed to open /proc/meminfo"); }
+        if (!meminfo) {
+            RuntimeThrow(std::string("Failed to open /proc/meminfo: ")
+                         + std::strerror(errno));
+        }
         while(fgets(sLine, sizeof(sLine), meminfo)) {
             int ramPartKB;
             if (sscanf(sLine, "MemFree: %d kB", &ramPartKB) == 1) {
@@ -164,7 +169,17 @@ void MemoryChecker::checkMemory() {
     intKB procFreeKB;
     intKB sysFreeKB;
     intKB usedKB;
-    sGetFreeKB(procFreeKB, sysFreeKB, usedKB);
+    try {
+        sGetFreeKB(procFreeKB, sysFreeKB, usedKB);
+    } catch(const std::exception& e) {
+        // 本函数经 queued 连接跑在专用 QThread 的事件循环里，栈上无任何
+        // catch：sGetFreeKB 一旦抛出（/proc/meminfo 打不开或条目缺失，
+        // fd/内存耗尽的典型表征）异常会穿出事件回调直接
+        // std::terminate = 整个应用 SIGABRT（17:12 用户会话实证）。
+        // 监视线程的采样失败只该跳过本轮并留痕，绝不能杀死宿主。
+        qWarning() << "MemoryChecker: poll skipped," << e.what();
+        return;
+    }
 
     if(sysFreeKB < mLowFreeKB) {
         const intKB toFree = mLowFreeKB - sysFreeKB;

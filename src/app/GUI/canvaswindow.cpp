@@ -81,6 +81,13 @@ CanvasWindow::CanvasWindow(Document &document,
 CanvasWindow::~CanvasWindow()
 {
     sInstances.removeAll(this);
+    // 退出析构链实证（main→中央场景栈 deleteChildren→本析构）：此刻仍持
+    // KFT 焦点时下面的 setCurrentCanvas(nullptr) 会 setActiveScene →
+    // activeSceneSet 打进已进入子件删除阶段的 MainWindow——工具栏链先于
+    // 中央场景栈被删、信号断连要等到更晚的 ~QObject 才生效，
+    // updateSettingsForCurrentCanvas 遂对已释放控件 setEnabled = UAF 段错误。
+    // 析构期先摘焦点，让场景卸载静默完成（removeVisibleScene 等簿记不受影响）。
+    if (KFT_hasFocus()) { KFT_setCurrentTarget(nullptr); }
     setCurrentCanvas(nullptr);
 }
 
