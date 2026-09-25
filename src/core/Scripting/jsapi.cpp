@@ -1231,7 +1231,13 @@ namespace Friction
             { RasterEffectType::TRANSITION_DISSOLVE, "dissolve|crossfade|x dissolve" },
             { RasterEffectType::TRANSITION_FLASH, "flash_fade|fade_black|fade_white" },
             { RasterEffectType::TRANSITION_SLIDE, "slide|slide_in" },
-            { RasterEffectType::TRANSITION_WIPE_CIRCLE, "wipe_circle|circle_wipe|iris" }
+            { RasterEffectType::TRANSITION_WIPE_CIRCLE, "wipe_circle|circle_wipe|iris" },
+            { RasterEffectType::TRANSITION_WIPE_LINEAR, "wipe_linear|linear_wipe|wipe_left" },
+            { RasterEffectType::TRANSITION_BLINDS, "blinds|venetian" },
+            { RasterEffectType::TRANSITION_NOISE, "noise_dissolve|noise_transition|dissolve_noise" },
+            { RasterEffectType::TRANSITION_BLUR, "blur_dissolve|blur_transition|soft_dissolve" },
+            { RasterEffectType::TRANSITION_ZOOM, "zoom|zoom_in|zoom_out" },
+            { RasterEffectType::TRANSITION_MOSAIC, "mosaic|pixel_dissolve|pixel_transition" }
         };
 
         QString normalizeEffectName(const QString &name)

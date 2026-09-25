@@ -138,7 +138,15 @@ enum class RasterEffectType : short {
     TRANSITION_DISSOLVE,
     TRANSITION_FLASH,
     TRANSITION_SLIDE,
-    TRANSITION_WIPE_CIRCLE
+    TRANSITION_WIPE_CIRCLE,
+    // second wave: legacy Wipe/Stripe/NoiseFade rebuilt as real
+    // transitions + blur/zoom/mosaic transition variants
+    TRANSITION_WIPE_LINEAR,
+    TRANSITION_BLINDS,
+    TRANSITION_NOISE,
+    TRANSITION_BLUR,
+    TRANSITION_ZOOM,
+    TRANSITION_MOSAIC
 };
 
 struct BoxRenderData;

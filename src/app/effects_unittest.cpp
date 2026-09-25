@@ -132,7 +132,13 @@ int main(int argc, char *argv[])
             RasterEffectType::TRANSITION_DISSOLVE,
             RasterEffectType::TRANSITION_FLASH,
             RasterEffectType::TRANSITION_SLIDE,
-            RasterEffectType::TRANSITION_WIPE_CIRCLE
+            RasterEffectType::TRANSITION_WIPE_CIRCLE,
+            RasterEffectType::TRANSITION_WIPE_LINEAR,
+            RasterEffectType::TRANSITION_BLINDS,
+            RasterEffectType::TRANSITION_NOISE,
+            RasterEffectType::TRANSITION_BLUR,
+            RasterEffectType::TRANSITION_ZOOM,
+            RasterEffectType::TRANSITION_MOSAIC
         };
 
         for (const auto t : types) {
@@ -377,7 +383,13 @@ int main(int argc, char *argv[])
             RasterEffectType::TRANSITION_DISSOLVE,
             RasterEffectType::TRANSITION_FLASH,
             RasterEffectType::TRANSITION_SLIDE,
-            RasterEffectType::TRANSITION_WIPE_CIRCLE
+            RasterEffectType::TRANSITION_WIPE_CIRCLE,
+            RasterEffectType::TRANSITION_WIPE_LINEAR,
+            RasterEffectType::TRANSITION_BLINDS,
+            RasterEffectType::TRANSITION_NOISE,
+            RasterEffectType::TRANSITION_BLUR,
+            RasterEffectType::TRANSITION_ZOOM,
+            RasterEffectType::TRANSITION_MOSAIC
         };
         QString dumpDir;
         if (argc >= 3) {
@@ -847,7 +859,87 @@ int main(int argc, char *argv[])
                 throw std::runtime_error(QString("Missing key layer preset: %1").arg(id).toStdString());
             }
             if (p->name.isEmpty() || p->duration <= 0.0 || (!p->gen && !p->outGen)) {
-                throw std::runtime_error(QString("Invalid data or missing generator in layer preset: %1").arg(id).toStdString());
+                throw std::runtime_error(QString("Invalid data or missing generator in layer preset: %1").toStdString());
+            }
+        }
+    });
+
+    // Test 9: transition unfold convergence — every real transition
+    // (head window unfold -> hold plateau -> tail window close, the
+    // preview loop pins fadeIn = fadeOut = 12 of 48) must converge
+    // toward the untouched frame across the head window, sit exactly
+    // on it during the plateau and depart again over the tail. The
+    // convergence metric is total pixel difference against a plateau
+    // frame, which catches both failure modes: an effect that does
+    // nothing (identical everywhere, no head convergence) and one
+    // with a reversed/wrong direction (diverges instead).
+    runTest("Test 9: Transition unfold convergence", [&]() {
+        const RasterEffectType types[] = {
+            RasterEffectType::TRANSITION_DISSOLVE,
+            RasterEffectType::TRANSITION_FLASH,
+            RasterEffectType::TRANSITION_SLIDE,
+            RasterEffectType::TRANSITION_WIPE_CIRCLE,
+            RasterEffectType::TRANSITION_WIPE_LINEAR,
+            RasterEffectType::TRANSITION_BLINDS,
+            RasterEffectType::TRANSITION_NOISE,
+            RasterEffectType::TRANSITION_BLUR,
+            RasterEffectType::TRANSITION_ZOOM,
+            RasterEffectType::TRANSITION_MOSAIC
+        };
+        // 16 frames sample the 48-frame loop at step 3: frames 0..3
+        // walk the head window, 4..12 the hold plateau, 13..15 the
+        // closing tail
+        auto diffTo = [](const QImage& a, const QImage& b) {
+            qint64 diff = 0;
+            for (int y = 0; y < a.height(); y += 4) {
+                for (int x = 0; x < a.width(); x += 4) {
+                    const QRgb pa = a.pixel(x, y);
+                    const QRgb pb = b.pixel(x, y);
+                    diff += qAbs(qRed(pa) - qRed(pb)) +
+                            qAbs(qGreen(pa) - qGreen(pb)) +
+                            qAbs(qBlue(pa) - qBlue(pb)) +
+                            qAbs(qAlpha(pa) - qAlpha(pb));
+                }
+            }
+            return diff;
+        };
+        for (const auto t : types) {
+            const auto frames = EffectPreview::renderEffectFrames(
+                        t, 16, QSize(160, 160));
+            if (frames.count() != 16) {
+                throw std::runtime_error("frame count mismatch for type "
+                                         + std::to_string(int(t)));
+            }
+            const auto name = std::to_string(int(t));
+            const QImage& plateau = frames.at(8);
+            if (plateau.isNull()) {
+                throw std::runtime_error("plateau frame null for type " + name);
+            }
+            QVector<qint64> err(16, 0);
+            for (int i = 0; i < 16; i++) {
+                if (frames.at(i).isNull()) {
+                    throw std::runtime_error("null frame " +
+                                             std::to_string(i) +
+                                             " for type " + name);
+                }
+                err[i] = diffTo(frames.at(i), plateau);
+            }
+            // head window converges (frame 3 well below frame 0)
+            if (!(err.at(3) < err.at(0) * 0.9)) {
+                throw std::runtime_error("head window not converging for type "
+                                         + name + " (err0=" +
+                                         std::to_string(err.at(0)) + " err3=" +
+                                         std::to_string(err.at(3)) + ")");
+            }
+            // plateau frames are identical to the reference
+            if (err.at(6) != 0 || err.at(10) != 0) {
+                throw std::runtime_error("plateau not identical for type "
+                                         + name);
+            }
+            // tail window departs again
+            if (!(err.at(15) > err.at(12))) {
+                throw std::runtime_error("tail window not closing for type "
+                                         + name);
             }
         }
     });

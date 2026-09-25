@@ -2957,11 +2957,25 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
         update();
         QMenu menu(this);
         menu.addSection(tr("转场"));
-        QAction *typeAct[4];
-        typeAct[0] = menu.addAction(QStringLiteral("叠化"));
-        typeAct[1] = menu.addAction(QStringLiteral("闪黑闪白"));
-        typeAct[2] = menu.addAction(QStringLiteral("滑动"));
-        typeAct[3] = menu.addAction(QStringLiteral("圆形划像"));
+        // 全部转场类型：与过渡面板一一对应
+        const struct { int type; const char* name; } kTransTypes[] = {
+            { int(RasterEffectType::TRANSITION_DISSOLVE), "叠化" },
+            { int(RasterEffectType::TRANSITION_FLASH), "闪黑闪白" },
+            { int(RasterEffectType::TRANSITION_SLIDE), "滑动" },
+            { int(RasterEffectType::TRANSITION_WIPE_CIRCLE), "圆形划像" },
+            { int(RasterEffectType::TRANSITION_WIPE_LINEAR), "线性划像" },
+            { int(RasterEffectType::TRANSITION_BLINDS), "百叶窗" },
+            { int(RasterEffectType::TRANSITION_NOISE), "噪波渐变" },
+            { int(RasterEffectType::TRANSITION_BLUR), "模糊叠化" },
+            { int(RasterEffectType::TRANSITION_ZOOM), "缩放" },
+            { int(RasterEffectType::TRANSITION_MOSAIC), "马赛克" }
+        };
+        const int nTypes = int(sizeof(kTransTypes) / sizeof(kTransTypes[0]));
+        QVector<QAction*> typeAct(nTypes);
+        for (int i = 0; i < nTypes; i++) {
+            typeAct[i] = menu.addAction(
+                        QString::fromUtf8(kTransTypes[i].name));
+        }
         menu.addSeparator();
         QAction *del = menu.addAction(tr("删除转场"));
         QAction *act = menu.exec(e->globalPos());
@@ -2969,19 +2983,14 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
             mModel->requestRemoveTransition(trHit);
             mSelTransition = -1;
         } else {
-            const int types[4] = {
-                int(RasterEffectType::TRANSITION_DISSOLVE),
-                int(RasterEffectType::TRANSITION_FLASH),
-                int(RasterEffectType::TRANSITION_SLIDE),
-                int(RasterEffectType::TRANSITION_WIPE_CIRCLE)};
-            for (int i = 0; i < 4; i++) {
+            for (int i = 0; i < nTypes; i++) {
                 if (act == typeAct[i]) {
                     // 右键处的交界帧 = 转场左块出点+1，落点吸附
                     // 规则按 ±1 秒窗口找回该交界
                     for (const auto &t : mModel->transitions()) {
                         if (t.rightId != trHit) { continue; }
                         mModel->requestApplyTransitionAtDrop(
-                                    t.end + 1, types[i]);
+                                    t.end + 1, kTransTypes[i].type);
                     }
                     break;
                 }

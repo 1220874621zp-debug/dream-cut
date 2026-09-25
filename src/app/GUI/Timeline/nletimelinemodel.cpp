@@ -39,10 +39,21 @@ QString frameToTimecode(const int frame, const qreal fps)
 
 bool isTransitionType(const RasterEffectType t)
 {
-    return t == RasterEffectType::TRANSITION_DISSOLVE ||
-           t == RasterEffectType::TRANSITION_FLASH ||
-           t == RasterEffectType::TRANSITION_SLIDE ||
-           t == RasterEffectType::TRANSITION_WIPE_CIRCLE;
+    switch (t) {
+    case RasterEffectType::TRANSITION_DISSOLVE:
+    case RasterEffectType::TRANSITION_FLASH:
+    case RasterEffectType::TRANSITION_SLIDE:
+    case RasterEffectType::TRANSITION_WIPE_CIRCLE:
+    case RasterEffectType::TRANSITION_WIPE_LINEAR:
+    case RasterEffectType::TRANSITION_BLINDS:
+    case RasterEffectType::TRANSITION_NOISE:
+    case RasterEffectType::TRANSITION_BLUR:
+    case RasterEffectType::TRANSITION_ZOOM:
+    case RasterEffectType::TRANSITION_MOSAIC:
+        return true;
+    default:
+        return false;
+    }
 }
 
 // 层上的转场特效（一个层最多一个：转场右块标识）

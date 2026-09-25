@@ -345,10 +345,21 @@ namespace {
 // 转场类特效：应用语义是"投到两块之间的交界"而非加到层上
 bool isTransitionTileType(const RasterEffectType t)
 {
-    return t == RasterEffectType::TRANSITION_DISSOLVE ||
-           t == RasterEffectType::TRANSITION_FLASH ||
-           t == RasterEffectType::TRANSITION_SLIDE ||
-           t == RasterEffectType::TRANSITION_WIPE_CIRCLE;
+    switch (t) {
+    case RasterEffectType::TRANSITION_DISSOLVE:
+    case RasterEffectType::TRANSITION_FLASH:
+    case RasterEffectType::TRANSITION_SLIDE:
+    case RasterEffectType::TRANSITION_WIPE_CIRCLE:
+    case RasterEffectType::TRANSITION_WIPE_LINEAR:
+    case RasterEffectType::TRANSITION_BLINDS:
+    case RasterEffectType::TRANSITION_NOISE:
+    case RasterEffectType::TRANSITION_BLUR:
+    case RasterEffectType::TRANSITION_ZOOM:
+    case RasterEffectType::TRANSITION_MOSAIC:
+        return true;
+    default:
+        return false;
+    }
 }
 }
 

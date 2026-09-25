@@ -354,6 +354,12 @@ NamedScan namedScanFor(const RasterEffectType type) {
     case RasterEffectType::TRANSITION_SLIDE:
         return { "滑入时长", nullptr, 12., 12. };
     case RasterEffectType::TRANSITION_WIPE_CIRCLE:
+    case RasterEffectType::TRANSITION_WIPE_LINEAR:
+    case RasterEffectType::TRANSITION_BLINDS:
+    case RasterEffectType::TRANSITION_NOISE:
+    case RasterEffectType::TRANSITION_BLUR:
+    case RasterEffectType::TRANSITION_ZOOM:
+    case RasterEffectType::TRANSITION_MOSAIC:
         return { "淡入时长", nullptr, 12., 12. };
     case RasterEffectType::WIPE:
         return { "time", nullptr, 0., 1. };
@@ -575,8 +581,13 @@ QList<QImage> renderEffectFrames(const RasterEffectType type,
         const NamedScan named = namedScanFor(type);
         QrealAnimator* namedParam = nullptr;
         if (named.paramName) {
+            // paramName is a UTF-8 byte string: Chinese parameter
+            // names ("淡入时长") decode into mojibake under fromLatin1,
+            // the lookup silently misses and the generic scan takes
+            // over (the fade window then drifts across the loop
+            // instead of staying pinned)
             namedParam = findAnimatorByName(
-                        eff.get(), QString::fromLatin1(named.paramName),
+                        eff.get(), QString::fromUtf8(named.paramName),
                         named.altName ? QString::fromUtf8(named.altName)
                                       : QString());
         }

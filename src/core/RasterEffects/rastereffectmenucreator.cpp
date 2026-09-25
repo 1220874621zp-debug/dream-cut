@@ -122,6 +122,20 @@ void RasterEffectMenuCreator::forEveryEffectCore(const EffectAdder &add)
         []() { return enve::make_shared<SlideEffect>(); });
     add(QObject::tr("圆形划像"), QObject::tr("Transitions"),
         []() { return enve::make_shared<WipeCircleEffect>(); });
+    // second wave: legacy Wipe/Stripe/NoiseFade rebuilt as real
+    // transitions + blur/zoom/mosaic variants from other categories
+    add(QObject::tr("线性划像"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<WipeLinearEffect>(); });
+    add(QObject::tr("百叶窗"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<BlindsEffect>(); });
+    add(QObject::tr("噪波渐变"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<NoiseDissolveEffect>(); });
+    add(QObject::tr("模糊叠化"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<BlurDissolveEffect>(); });
+    add(QObject::tr("缩放"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<ZoomTransitionEffect>(); });
+    add(QObject::tr("马赛克"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<MosaicDissolveEffect>(); });
     add(QObject::tr("卷页 (Page Curl)"), QObject::tr("Distort"),
         []() { return enve::make_shared<PageCurlEffect>(); });
     add(QObject::tr("晶格变形"), QObject::tr("Distort"),

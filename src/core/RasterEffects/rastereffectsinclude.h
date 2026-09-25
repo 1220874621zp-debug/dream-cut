@@ -43,5 +43,11 @@
 #include "flashfadeeffect.h"
 #include "slideeffect.h"
 #include "wipecircleeffect.h"
+#include "wipelineareffect.h"
+#include "blindseffect.h"
+#include "noisedissolveeffect.h"
+#include "blurdissolveeffect.h"
+#include "zoomtransitioneffect.h"
+#include "mosaicdissolveeffect.h"
 
 #endif // RASTEREFFECTSINCLUDE_H

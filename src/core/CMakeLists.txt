@@ -271,6 +271,12 @@ set(
     RasterEffects/flashfadeeffect.cpp
     RasterEffects/slideeffect.cpp
     RasterEffects/wipecircleeffect.cpp
+    RasterEffects/wipelineareffect.cpp
+    RasterEffects/blindseffect.cpp
+    RasterEffects/noisedissolveeffect.cpp
+    RasterEffects/blurdissolveeffect.cpp
+    RasterEffects/zoomtransitioneffect.cpp
+    RasterEffects/mosaicdissolveeffect.cpp
     RasterEffects/transitionanchor.cpp
     ReadWrite/ereadstream.cpp
     ReadWrite/ewritestream.cpp

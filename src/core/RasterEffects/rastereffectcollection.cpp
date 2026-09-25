@@ -310,6 +310,18 @@ qsptr<RasterEffect> createRasterEffectForNonCustomType(const RasterEffectType ty
             return enve::make_shared<SlideEffect>();
         case(RasterEffectType::TRANSITION_WIPE_CIRCLE):
             return enve::make_shared<WipeCircleEffect>();
+        case(RasterEffectType::TRANSITION_WIPE_LINEAR):
+            return enve::make_shared<WipeLinearEffect>();
+        case(RasterEffectType::TRANSITION_BLINDS):
+            return enve::make_shared<BlindsEffect>();
+        case(RasterEffectType::TRANSITION_NOISE):
+            return enve::make_shared<NoiseDissolveEffect>();
+        case(RasterEffectType::TRANSITION_BLUR):
+            return enve::make_shared<BlurDissolveEffect>();
+        case(RasterEffectType::TRANSITION_ZOOM):
+            return enve::make_shared<ZoomTransitionEffect>();
+        case(RasterEffectType::TRANSITION_MOSAIC):
+            return enve::make_shared<MosaicDissolveEffect>();
         default: return nullptr;
     }
 }
