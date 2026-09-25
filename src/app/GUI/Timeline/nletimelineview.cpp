@@ -212,6 +212,10 @@ void NleTimelineView::paintEvent(QPaintEvent *)
     drawTrackHeaders(p);
 
     // clips (model order; candidates override the moving ones)
+    mTransCutCache.clear();
+    for (const auto &t : mModel->transitions()) {
+        mTransCutCache.insert(t.rightId, t.end + 1);
+    }
     for (const auto &c : mModel->clips()) {
         drawClip(p, c);
     }
@@ -571,21 +575,20 @@ void NleTimelineView::drawSeamDots(QPainter &p)
     }
 }
 
-// 转场块几何：主轨重叠区 [t.start, t.end] 上的居中圆角条；
-// 太窄时保持最小可视宽（居中在交界上）
+// 转场块几何：以两块的交界（左块出点）为中心、与视频块同高的
+// 圆角竖条——转场是两块之间的独立实体（CapCut），不是骑在某块
+// 头/尾上的贴纸。宽度=转场窗口帧数，太窄时保最小可视宽（仍居中
+// 在交界上）；重叠区 [R.start..L.end] 只是播放模型，UI 恒以交界
+// 为准呈现
 QRectF NleTimelineView::transitionRect(
         const NleTimelineModel::Transition &t) const
 {
     const int idx = mModel->trackIndex(mModel->mainTrackId());
     if (idx < 0) { return QRectF(); }
-    const qreal x0 = frameToX(t.start);
-    const qreal x1 = frameToX(t.end + 1);
-    qreal w = qMax(14., x1 - x0);
-    qreal x = x0;
-    if (x1 - x0 < 14.) { x = x0 - (14. - (x1 - x0)) / 2.; }
+    const qreal xc = frameToX(t.end + 1);
+    const qreal w = qMax(28., t.frames * mPxPerFrame);
     const int laneH = trackHeight(idx);
-    const qreal h = qMin(24., laneH - 12.);
-    return QRectF(x, trackY(idx) + (laneH - h) / 2., w, h);
+    return QRectF(xc - w / 2., trackY(idx) + 2., w, laneH - 4.);
 }
 
 int NleTimelineView::transitionAt(const QPoint &pos) const
@@ -608,16 +611,20 @@ void NleTimelineView::drawTransitions(QPainter &p)
     for (const auto &t : trans) {
         QRectF r = transitionRect(t);
         if (r.width() < 1) { continue; }
-        // 拖拽预览：窗口按新帧数从右块出点往左重算
+        // 拖拽预览：窗口按新帧数以交界为中心重算
         if (mDrag == DragMode::TransitionSize &&
                 mSelTransition == t.rightId && mTransPreviewN > 0) {
-            const qreal xEnd = frameToX(t.end + 1);
-            const qreal xStart = frameToX(t.end + 1 - mTransPreviewN);
-            r.setLeft(qMin(xStart, xEnd - 1));
-            r.setRight(xEnd);
+            const qreal xc = frameToX(t.end + 1);
+            const qreal w = qMax(28., mTransPreviewN * mPxPerFrame);
+            r = QRectF(xc - w / 2., r.top(), w, r.height());
         }
         const bool sel = mSelTransition == t.rightId;
         p.setRenderHint(QPainter::Antialiasing);
+        // 实心底色打底（块体同款深底）再叠渐变高光：转场条压在两块
+        // 交界上，不能透出底下块的缩略图，否则像贴在某块的头上
+        QPainterPath base;
+        base.addRoundedRect(r, 4, 4);
+        p.fillPath(base, QColor(0x14, 0x1c, 0x22));
         QRadialGradient grad(r.center(), r.width() / 2. + 1);
         grad.setColorAt(0., QColor(0x18, 0x8a, 0x74, sel ? 235 : 185));
         grad.setColorAt(1., QColor(0x0c, 0x60, 0x52, sel ? 225 : 165));
@@ -625,12 +632,12 @@ void NleTimelineView::drawTransitions(QPainter &p)
         p.setPen(QPen(sel ? QColor(0xd8, 0xff, 0xf2)
                          : QColor(0x2a, 0xb0, 0x98, 200), sel ? 2 : 1));
         p.drawRoundedRect(r, 4, 4);
-        // 选中态两侧把手
+        // 选中态两侧把手（全高竖条）
         if (sel) {
             p.setBrush(QColor(0xd8, 0xff, 0xf2));
             p.setPen(Qt::NoPen);
-            p.drawRoundedRect(r.adjusted(1, 4, -r.width() + 4, -4), 1.5, 1.5);
-            p.drawRoundedRect(r.adjusted(r.width() - 4, 4, -1, -4), 1.5, 1.5);
+            p.drawRoundedRect(r.adjusted(1, 6, -r.width() + 4, -6), 1.5, 1.5);
+            p.drawRoundedRect(r.adjusted(r.width() - 4, 6, -1, -6), 1.5, 1.5);
         }
         p.setFont(f);
         p.setPen(QColor(0xea, 0xff, 0xf8));
@@ -941,7 +948,16 @@ void NleTimelineView::drawClip(QPainter &p,
         const auto it = mCandidates.constFind(c.clipId);
         if (it != mCandidates.constEnd()) { m = it.value(); }
     }
-    const QRectF r = moveRect(m);
+    QRectF r = moveRect(m);
+    // 转场右块：重叠头部区（R.start..交界）不画——时间轴上右块从
+    // 交界起步与左块视觉贴邻，转场条骑在交界正中（CapCut 布局，
+    // 命中/拖拽/修剪仍用模型真值不受影响）
+    const auto cutIt = mTransCutCache.constFind(c.clipId);
+    if (cutIt != mTransCutCache.constEnd()) {
+        const qreal cx = frameToX(cutIt.value());
+        if (r.left() < cx) { r.setLeft(cx); }
+        if (r.width() < 1.) { return; }
+    }
     if (r.right() < headerWidth() || r.left() > width()) { return; }
 
     const bool selected = mModel->isSelected(c.clipId) && !ghost;
@@ -1599,6 +1615,8 @@ void NleTimelineView::mousePressEvent(QMouseEvent *e)
                 mDragClipId = trId;
                 mTransDragFrames = t.frames;
                 mTransDragX = e->pos().x();
+                // 按住交界左半往左拖 = 加长，右半往右拖 = 加长
+                mTransDragDir = e->pos().x() <= frameToX(t.end + 1) ? -1 : 1;
                 break;
             }
             update();
@@ -1796,13 +1814,19 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
         break;
     }
     case DragMode::TransitionSize: {
-        // 水平拖 = 窗口帧数（左拖加长右拖缩短）；预览走绘制覆盖
+        // 远离交界拖 = 加长窗口，朝向交界拖 = 缩短（按住左半往左/
+        // 右半往右都是加长）；上限取两侧块长（提交侧模型再夹制）；
+        // 预览走绘制覆盖
         const auto t = mModel->transitions();
         for (const auto &tr : t) {
             if (tr.rightId != mDragClipId) { continue; }
-            const int df = qRound((e->pos().x() - mTransDragX)
-                                  / mPxPerFrame);
-            const int maxN = qMin(tr.end - tr.start + 1, 600);
+            const int df = mTransDragDir * qRound(
+                        (e->pos().x() - mTransDragX) / mPxPerFrame);
+            const auto rc = mModel->clip(tr.rightId);
+            const auto lc = mModel->clip(tr.leftId);
+            int maxN = 600;
+            if (rc) { maxN = qMin(maxN, rc->duration - 1); }
+            if (lc) { maxN = qMin(maxN, lc->duration - 1); }
             mTransPreviewN = qBound(2, mTransDragFrames + df, maxN);
             feedback(QStringLiteral("转场窗口 %1 帧（%2）")
                      .arg(mTransPreviewN)

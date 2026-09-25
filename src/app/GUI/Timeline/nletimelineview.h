@@ -272,11 +272,16 @@ private:
     int mHoverId = -1;
     QPoint mHoverPos;          // live cursor pos for the razor guide
     // 转场选中（= 右块 clipId）+ 窗口拖拽态：按下窗口帧数/起始 x、
-    // 拖拽中的预览窗口（-1 = 无预览）
+    // 拖拽中的预览窗口（-1 = 无预览）、按住交界左/右半决定拖拽方向
     int mSelTransition = -1;
     int mTransDragFrames = 0;
     int mTransDragX = 0;
     int mTransPreviewN = -1;
+    int mTransDragDir = 1;
+    // 每帧绘制前刷新：转场右块 clipId -> 交界帧（左块出点）。
+    // 绘制右块时可见左缘推到交界（重叠头部不画），两块视觉贴邻、
+    // 转场条骑在交界上（CapCut 布局）
+    QHash<int, int> mTransCutCache;
     bool mRubber = false;      // rubber band selection in progress
     QPoint mRubberStart;
     bool mInsertMode = false;  // kdenlive insert/overwrite default
