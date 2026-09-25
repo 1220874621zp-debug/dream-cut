@@ -2968,7 +2968,23 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
             { int(RasterEffectType::TRANSITION_NOISE), "噪波渐变" },
             { int(RasterEffectType::TRANSITION_BLUR), "模糊叠化" },
             { int(RasterEffectType::TRANSITION_ZOOM), "缩放" },
-            { int(RasterEffectType::TRANSITION_MOSAIC), "马赛克" }
+            { int(RasterEffectType::TRANSITION_MOSAIC), "马赛克" },
+            { int(RasterEffectType::TRANSITION_SPIN), "旋转" },
+            { int(RasterEffectType::TRANSITION_MIRROR_FLIP), "镜像翻转" },
+            { int(RasterEffectType::TRANSITION_TWIRL), "漩涡" },
+            { int(RasterEffectType::TRANSITION_GLITCH), "故障" },
+            { int(RasterEffectType::TRANSITION_SHAKE), "抖动" },
+            { int(RasterEffectType::TRANSITION_ZOOM_BLUR), "变焦模糊" },
+            { int(RasterEffectType::TRANSITION_DIR_BLUR), "方向模糊" },
+            { int(RasterEffectType::TRANSITION_CHANNEL_SPLIT), "通道分离" },
+            { int(RasterEffectType::TRANSITION_HALFTONE), "半调网点" },
+            { int(RasterEffectType::TRANSITION_EDGE), "线稿" },
+            { int(RasterEffectType::TRANSITION_INVERT), "反色" },
+            { int(RasterEffectType::TRANSITION_POSTERIZE), "海报" },
+            { int(RasterEffectType::TRANSITION_VIGNETTE), "暗角" },
+            { int(RasterEffectType::TRANSITION_LIGHT_SWEEP), "扫光" },
+            { int(RasterEffectType::TRANSITION_FILM_GRAIN), "胶片颗粒" },
+            { int(RasterEffectType::TRANSITION_PAGE_FLIP), "翻页" }
         };
         const int nTypes = int(sizeof(kTransTypes) / sizeof(kTransTypes[0]));
         QVector<QAction*> typeAct(nTypes);

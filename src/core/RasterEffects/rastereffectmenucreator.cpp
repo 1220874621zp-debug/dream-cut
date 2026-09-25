@@ -136,6 +136,38 @@ void RasterEffectMenuCreator::forEveryEffectCore(const EffectAdder &add)
         []() { return enve::make_shared<ZoomTransitionEffect>(); });
     add(QObject::tr("马赛克"), QObject::tr("Transitions"),
         []() { return enve::make_shared<MosaicDissolveEffect>(); });
+    add(QObject::tr("旋转"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<SpinEffect>(); });
+    add(QObject::tr("镜像翻转"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<MirrorFlipEffect>(); });
+    add(QObject::tr("漩涡"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<TwirlTransitionEffect>(); });
+    add(QObject::tr("故障"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<GlitchTransitionEffect>(); });
+    add(QObject::tr("抖动"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<ShakeTransitionEffect>(); });
+    add(QObject::tr("变焦模糊"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<ZoomBlurTransitionEffect>(); });
+    add(QObject::tr("方向模糊"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<DirectionalBlurTransitionEffect>(); });
+    add(QObject::tr("通道分离"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<ChannelSplitTransitionEffect>(); });
+    add(QObject::tr("半调网点"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<HalftoneTransitionEffect>(); });
+    add(QObject::tr("线稿"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<EdgeTransitionEffect>(); });
+    add(QObject::tr("反色"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<InvertTransitionEffect>(); });
+    add(QObject::tr("海报"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<PosterizeTransitionEffect>(); });
+    add(QObject::tr("暗角"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<VignetteTransitionEffect>(); });
+    add(QObject::tr("扫光"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<LightSweepTransitionEffect>(); });
+    add(QObject::tr("胶片颗粒"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<FilmGrainTransitionEffect>(); });
+    add(QObject::tr("翻页"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<PageFlipEffect>(); });
     add(QObject::tr("卷页 (Page Curl)"), QObject::tr("Distort"),
         []() { return enve::make_shared<PageCurlEffect>(); });
     add(QObject::tr("晶格变形"), QObject::tr("Distort"),

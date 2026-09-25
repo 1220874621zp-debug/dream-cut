@@ -146,7 +146,25 @@ enum class RasterEffectType : short {
     TRANSITION_NOISE,
     TRANSITION_BLUR,
     TRANSITION_ZOOM,
-    TRANSITION_MOSAIC
+    TRANSITION_MOSAIC,
+    // third wave: every remaining effect with a well-defined
+    // "unfold into place" meaning rebuilt as a transition
+    TRANSITION_SPIN,
+    TRANSITION_MIRROR_FLIP,
+    TRANSITION_TWIRL,
+    TRANSITION_GLITCH,
+    TRANSITION_SHAKE,
+    TRANSITION_ZOOM_BLUR,
+    TRANSITION_DIR_BLUR,
+    TRANSITION_CHANNEL_SPLIT,
+    TRANSITION_HALFTONE,
+    TRANSITION_EDGE,
+    TRANSITION_INVERT,
+    TRANSITION_POSTERIZE,
+    TRANSITION_VIGNETTE,
+    TRANSITION_LIGHT_SWEEP,
+    TRANSITION_FILM_GRAIN,
+    TRANSITION_PAGE_FLIP
 };
 
 struct BoxRenderData;

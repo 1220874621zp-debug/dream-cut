@@ -1237,7 +1237,23 @@ namespace Friction
             { RasterEffectType::TRANSITION_NOISE, "noise_dissolve|noise_transition|dissolve_noise" },
             { RasterEffectType::TRANSITION_BLUR, "blur_dissolve|blur_transition|soft_dissolve" },
             { RasterEffectType::TRANSITION_ZOOM, "zoom|zoom_in|zoom_out" },
-            { RasterEffectType::TRANSITION_MOSAIC, "mosaic|pixel_dissolve|pixel_transition" }
+            { RasterEffectType::TRANSITION_MOSAIC, "mosaic|pixel_dissolve|pixel_transition" },
+            { RasterEffectType::TRANSITION_SPIN, "spin|rotate|spin_transition" },
+            { RasterEffectType::TRANSITION_MIRROR_FLIP, "mirror_flip|flip_transition" },
+            { RasterEffectType::TRANSITION_TWIRL, "twirl|swirl" },
+            { RasterEffectType::TRANSITION_GLITCH, "glitch_transition|glitch_in" },
+            { RasterEffectType::TRANSITION_SHAKE, "shake_transition|shake_in" },
+            { RasterEffectType::TRANSITION_ZOOM_BLUR, "zoom_blur|radial_streak" },
+            { RasterEffectType::TRANSITION_DIR_BLUR, "directional_blur|motion_blur_transition" },
+            { RasterEffectType::TRANSITION_CHANNEL_SPLIT, "channel_split|rgb_split" },
+            { RasterEffectType::TRANSITION_HALFTONE, "halftone_transition|dots" },
+            { RasterEffectType::TRANSITION_EDGE, "sketch|edge_transition|line_art" },
+            { RasterEffectType::TRANSITION_INVERT, "invert_transition|negative_transition" },
+            { RasterEffectType::TRANSITION_POSTERIZE, "posterize_transition" },
+            { RasterEffectType::TRANSITION_VIGNETTE, "vignette_transition|curtain" },
+            { RasterEffectType::TRANSITION_LIGHT_SWEEP, "light_sweep|sheen" },
+            { RasterEffectType::TRANSITION_FILM_GRAIN, "film_grain_transition|grain_dissolve" },
+            { RasterEffectType::TRANSITION_PAGE_FLIP, "page_flip|page_turn" }
         };
 
         QString normalizeEffectName(const QString &name)

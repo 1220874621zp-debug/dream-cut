@@ -277,6 +277,22 @@ set(
     RasterEffects/blurdissolveeffect.cpp
     RasterEffects/zoomtransitioneffect.cpp
     RasterEffects/mosaicdissolveeffect.cpp
+    RasterEffects/spineffect.cpp
+    RasterEffects/mirrorflipeffect.cpp
+    RasterEffects/twirltransitioneffect.cpp
+    RasterEffects/glitchtransitioneffect.cpp
+    RasterEffects/shaketransitioneffect.cpp
+    RasterEffects/zoomblurtransitioneffect.cpp
+    RasterEffects/directionalblurtransitioneffect.cpp
+    RasterEffects/channelsplittransitioneffect.cpp
+    RasterEffects/halftonetransitioneffect.cpp
+    RasterEffects/edgetransitioneffect.cpp
+    RasterEffects/inverttransitioneffect.cpp
+    RasterEffects/posterizetransitioneffect.cpp
+    RasterEffects/vignetetransitioneffect.cpp
+    RasterEffects/lightsweeptransitioneffect.cpp
+    RasterEffects/filmgraintransitioneffect.cpp
+    RasterEffects/pageflipeffect.cpp
     RasterEffects/transitionanchor.cpp
     ReadWrite/ereadstream.cpp
     ReadWrite/ewritestream.cpp

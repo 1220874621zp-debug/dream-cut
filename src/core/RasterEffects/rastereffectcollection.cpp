@@ -322,6 +322,38 @@ qsptr<RasterEffect> createRasterEffectForNonCustomType(const RasterEffectType ty
             return enve::make_shared<ZoomTransitionEffect>();
         case(RasterEffectType::TRANSITION_MOSAIC):
             return enve::make_shared<MosaicDissolveEffect>();
+        case(RasterEffectType::TRANSITION_SPIN):
+            return enve::make_shared<SpinEffect>();
+        case(RasterEffectType::TRANSITION_MIRROR_FLIP):
+            return enve::make_shared<MirrorFlipEffect>();
+        case(RasterEffectType::TRANSITION_TWIRL):
+            return enve::make_shared<TwirlTransitionEffect>();
+        case(RasterEffectType::TRANSITION_GLITCH):
+            return enve::make_shared<GlitchTransitionEffect>();
+        case(RasterEffectType::TRANSITION_SHAKE):
+            return enve::make_shared<ShakeTransitionEffect>();
+        case(RasterEffectType::TRANSITION_ZOOM_BLUR):
+            return enve::make_shared<ZoomBlurTransitionEffect>();
+        case(RasterEffectType::TRANSITION_DIR_BLUR):
+            return enve::make_shared<DirectionalBlurTransitionEffect>();
+        case(RasterEffectType::TRANSITION_CHANNEL_SPLIT):
+            return enve::make_shared<ChannelSplitTransitionEffect>();
+        case(RasterEffectType::TRANSITION_HALFTONE):
+            return enve::make_shared<HalftoneTransitionEffect>();
+        case(RasterEffectType::TRANSITION_EDGE):
+            return enve::make_shared<EdgeTransitionEffect>();
+        case(RasterEffectType::TRANSITION_INVERT):
+            return enve::make_shared<InvertTransitionEffect>();
+        case(RasterEffectType::TRANSITION_POSTERIZE):
+            return enve::make_shared<PosterizeTransitionEffect>();
+        case(RasterEffectType::TRANSITION_VIGNETTE):
+            return enve::make_shared<VignetteTransitionEffect>();
+        case(RasterEffectType::TRANSITION_LIGHT_SWEEP):
+            return enve::make_shared<LightSweepTransitionEffect>();
+        case(RasterEffectType::TRANSITION_FILM_GRAIN):
+            return enve::make_shared<FilmGrainTransitionEffect>();
+        case(RasterEffectType::TRANSITION_PAGE_FLIP):
+            return enve::make_shared<PageFlipEffect>();
         default: return nullptr;
     }
 }

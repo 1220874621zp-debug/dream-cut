@@ -138,7 +138,23 @@ int main(int argc, char *argv[])
             RasterEffectType::TRANSITION_NOISE,
             RasterEffectType::TRANSITION_BLUR,
             RasterEffectType::TRANSITION_ZOOM,
-            RasterEffectType::TRANSITION_MOSAIC
+            RasterEffectType::TRANSITION_MOSAIC,
+            RasterEffectType::TRANSITION_SPIN,
+            RasterEffectType::TRANSITION_MIRROR_FLIP,
+            RasterEffectType::TRANSITION_TWIRL,
+            RasterEffectType::TRANSITION_GLITCH,
+            RasterEffectType::TRANSITION_SHAKE,
+            RasterEffectType::TRANSITION_ZOOM_BLUR,
+            RasterEffectType::TRANSITION_DIR_BLUR,
+            RasterEffectType::TRANSITION_CHANNEL_SPLIT,
+            RasterEffectType::TRANSITION_HALFTONE,
+            RasterEffectType::TRANSITION_EDGE,
+            RasterEffectType::TRANSITION_INVERT,
+            RasterEffectType::TRANSITION_POSTERIZE,
+            RasterEffectType::TRANSITION_VIGNETTE,
+            RasterEffectType::TRANSITION_LIGHT_SWEEP,
+            RasterEffectType::TRANSITION_FILM_GRAIN,
+            RasterEffectType::TRANSITION_PAGE_FLIP
         };
 
         for (const auto t : types) {
@@ -389,7 +405,23 @@ int main(int argc, char *argv[])
             RasterEffectType::TRANSITION_NOISE,
             RasterEffectType::TRANSITION_BLUR,
             RasterEffectType::TRANSITION_ZOOM,
-            RasterEffectType::TRANSITION_MOSAIC
+            RasterEffectType::TRANSITION_MOSAIC,
+            RasterEffectType::TRANSITION_SPIN,
+            RasterEffectType::TRANSITION_MIRROR_FLIP,
+            RasterEffectType::TRANSITION_TWIRL,
+            RasterEffectType::TRANSITION_GLITCH,
+            RasterEffectType::TRANSITION_SHAKE,
+            RasterEffectType::TRANSITION_ZOOM_BLUR,
+            RasterEffectType::TRANSITION_DIR_BLUR,
+            RasterEffectType::TRANSITION_CHANNEL_SPLIT,
+            RasterEffectType::TRANSITION_HALFTONE,
+            RasterEffectType::TRANSITION_EDGE,
+            RasterEffectType::TRANSITION_INVERT,
+            RasterEffectType::TRANSITION_POSTERIZE,
+            RasterEffectType::TRANSITION_VIGNETTE,
+            RasterEffectType::TRANSITION_LIGHT_SWEEP,
+            RasterEffectType::TRANSITION_FILM_GRAIN,
+            RasterEffectType::TRANSITION_PAGE_FLIP
         };
         QString dumpDir;
         if (argc >= 3) {
@@ -884,7 +916,23 @@ int main(int argc, char *argv[])
             RasterEffectType::TRANSITION_NOISE,
             RasterEffectType::TRANSITION_BLUR,
             RasterEffectType::TRANSITION_ZOOM,
-            RasterEffectType::TRANSITION_MOSAIC
+            RasterEffectType::TRANSITION_MOSAIC,
+            RasterEffectType::TRANSITION_SPIN,
+            RasterEffectType::TRANSITION_MIRROR_FLIP,
+            RasterEffectType::TRANSITION_TWIRL,
+            RasterEffectType::TRANSITION_GLITCH,
+            RasterEffectType::TRANSITION_SHAKE,
+            RasterEffectType::TRANSITION_ZOOM_BLUR,
+            RasterEffectType::TRANSITION_DIR_BLUR,
+            RasterEffectType::TRANSITION_CHANNEL_SPLIT,
+            RasterEffectType::TRANSITION_HALFTONE,
+            RasterEffectType::TRANSITION_EDGE,
+            RasterEffectType::TRANSITION_INVERT,
+            RasterEffectType::TRANSITION_POSTERIZE,
+            RasterEffectType::TRANSITION_VIGNETTE,
+            RasterEffectType::TRANSITION_LIGHT_SWEEP,
+            RasterEffectType::TRANSITION_FILM_GRAIN,
+            RasterEffectType::TRANSITION_PAGE_FLIP
         };
         // 16 frames sample the 48-frame loop at step 3: frames 0..3
         // walk the head window, 4..12 the hold plateau, 13..15 the

@@ -50,6 +50,22 @@ bool isTransitionType(const RasterEffectType t)
     case RasterEffectType::TRANSITION_BLUR:
     case RasterEffectType::TRANSITION_ZOOM:
     case RasterEffectType::TRANSITION_MOSAIC:
+    case RasterEffectType::TRANSITION_SPIN:
+    case RasterEffectType::TRANSITION_MIRROR_FLIP:
+    case RasterEffectType::TRANSITION_TWIRL:
+    case RasterEffectType::TRANSITION_GLITCH:
+    case RasterEffectType::TRANSITION_SHAKE:
+    case RasterEffectType::TRANSITION_ZOOM_BLUR:
+    case RasterEffectType::TRANSITION_DIR_BLUR:
+    case RasterEffectType::TRANSITION_CHANNEL_SPLIT:
+    case RasterEffectType::TRANSITION_HALFTONE:
+    case RasterEffectType::TRANSITION_EDGE:
+    case RasterEffectType::TRANSITION_INVERT:
+    case RasterEffectType::TRANSITION_POSTERIZE:
+    case RasterEffectType::TRANSITION_VIGNETTE:
+    case RasterEffectType::TRANSITION_LIGHT_SWEEP:
+    case RasterEffectType::TRANSITION_FILM_GRAIN:
+    case RasterEffectType::TRANSITION_PAGE_FLIP:
         return true;
     default:
         return false;
