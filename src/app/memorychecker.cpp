@@ -24,6 +24,10 @@
 // Fork of enve - Copyright (C) 2016-2020 Maurycy Liebner
 
 #include "memorychecker.h"
+#include <QDir>
+#include <QFileInfo>
+#include <QMap>
+#include <QStringList>
 
 
 #if defined(Q_OS_WIN)
@@ -166,6 +170,66 @@ void MemoryChecker::sGetFreeKB(intKB& procFreeKB,
 }
 
 void MemoryChecker::checkMemory() {
+#if defined(Q_OS_LINUX)
+    // fd 耗尽观测（18:43 卡死会话实证 EMFILE=资源耗尽直接死因：
+    // /proc/meminfo 打不开、eventfd/PipeWire 全崩）。每轮只列一次
+    // 目录（微秒级）；跨阈值上行时做一次目标清单 dump（readlink
+    // 分类汇总），下次复现的日志直接指认泄漏家族；目录列空且此前
+    // 已越过阈值=EMFILE 前兆，单独留痕
+    {
+        static int lastFdThreshold = 0;
+        const QDir fdDir(QStringLiteral("/proc/self/fd"));
+        const auto entries = fdDir.entryList(
+                    QDir::NoDotAndDotDot | QDir::Files, QDir::Name);
+        const int nFds = int(entries.count());
+        const int thresholds[] = {256, 512, 768, 900, 968};
+        int thr = 0;
+        for (const int t : thresholds) { if (nFds >= t) { thr = t; } }
+        if (thr > lastFdThreshold) {
+            lastFdThreshold = thr;
+            QMap<QString, int> kinds;
+            for (const QString &name : entries) {
+                const QString target = QFileInfo(
+                            QStringLiteral("/proc/self/fd/") + name)
+                            .symLinkTarget();
+                QString kind;
+                if (target.contains(QLatin1String("eCache_"))) {
+                    kind = QStringLiteral("eCache-tmp");
+                } else if (target.contains(QLatin1String(".mp4")) ||
+                           target.contains(QLatin1String(".mov")) ||
+                           target.contains(QLatin1String(".mkv")) ||
+                           target.contains(QLatin1String(".avi"))) {
+                    kind = QStringLiteral("video-file");
+                } else if (target.startsWith(QLatin1String("pipe:"))) {
+                    kind = QStringLiteral("pipe");
+                } else if (target.startsWith(QLatin1String("socket:"))) {
+                    kind = QStringLiteral("socket");
+                } else if (target.startsWith(QLatin1String("anon_inode:"))) {
+                    kind = target.contains(QLatin1String("eventfd"))
+                            ? QStringLiteral("eventfd")
+                            : QStringLiteral("anon_inode");
+                } else if (target.startsWith(QLatin1String("/dev/"))) {
+                    kind = QStringLiteral("dev");
+                } else if (target.endsWith(QLatin1String(".dreamcut"))) {
+                    kind = QStringLiteral("project-file");
+                } else {
+                    kind = QStringLiteral("other");
+                }
+                kinds[kind]++;
+            }
+            QStringList parts;
+            for (auto it = kinds.constBegin(); it != kinds.constEnd(); ++it) {
+                parts << QStringLiteral("%1=%2").arg(it.key()).arg(it.value());
+            }
+            qWarning() << "[FDWATCH] descriptors" << nFds
+                       << "crossed" << thr << parts.join(
+                           QStringLiteral(" "));
+        } else if (entries.isEmpty() && lastFdThreshold > 0) {
+            qWarning() << "[FDWATCH] listing empty with history - EMFILE?";
+            lastFdThreshold = 0;
+        }
+    }
+#endif
     intKB procFreeKB;
     intKB sysFreeKB;
     intKB usedKB;

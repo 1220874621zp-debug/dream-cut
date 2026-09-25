@@ -98,6 +98,9 @@ static LONG WINAPI writeCrashMiniDump(EXCEPTION_POINTERS* const pep) {
 #include <QJSEngine>
 #include <QTranslator>
 #include <QLocale>
+#ifdef Q_OS_LINUX
+#include <sys/resource.h>
+#endif
 #include <QFile>
 #include <QTextStream>
 #include <QProxyStyle>
@@ -339,6 +342,21 @@ static LONG WINAPI firstChanceCrashReporter(
 
 int main(int argc, char *argv[])
 {
+#if defined(Q_OS_LINUX)
+    // fd 软限抬到硬限：18:43 卡死会话实证 EMFILE（打开的文件过多）
+    // 是资源耗尽的直接死因——PipeWire 流/视频解码/临时缓存并发时
+    // 1024 的默认软限几轮播放就见底，抬到硬限（通常百万级）为一切
+    // 潜在泄漏与合法重负载买余量（配合 MemoryChecker 的 [FDWATCH]
+    // 阈值观测，泄漏家族下次复现直接由日志指认）
+    {
+        struct rlimit rl;
+        if (getrlimit(RLIMIT_NOFILE, &rl) == 0 &&
+                rl.rlim_cur < rl.rlim_max) {
+            rl.rlim_cur = rl.rlim_max;
+            setrlimit(RLIMIT_NOFILE, &rl);
+        }
+    }
+#endif
 #ifdef Q_OS_WIN
     SetUnhandledExceptionFilter(writeCrashMiniDump);
     cacheCrashModules();

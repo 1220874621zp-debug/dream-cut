@@ -101,11 +101,16 @@ void RasterEffectMenuCreator::forEveryEffectCore(const EffectAdder &add)
         []() { return enve::make_shared<LiquidGlassEffect>(); });
     add(QObject::tr("Pixel Art"), QObject::tr("Stylize"),
         []() { return enve::make_shared<PixelArtEffect>(); });
-    add(QObject::tr("Wipe"), QObject::tr("Transitions"),
+    // Wipe/Stripe/Noise Fade 是 8ec62fe61 时代的旧单块特效（挂层上
+    // 对本块做视觉处理），不是块间转场——留在 Transitions 类目会让
+    // 过渡面板出现"点了只加个普通特效"的卡片：无重叠模型、无转场
+    // 条 UI、无跨块过渡（用户感知=有些转场没 UI/没效果）。归入
+    // Stylize，过渡类目只留真转场
+    add(QObject::tr("Wipe"), QObject::tr("Stylize"),
         []() { return enve::make_shared<WipeEffect>(); });
-    add(QObject::tr("Stripe"), QObject::tr("Transitions"),
+    add(QObject::tr("Stripe"), QObject::tr("Stylize"),
         []() { return enve::make_shared<StripeEffect>(); });
-    add(QObject::tr("Noise Fade"), QObject::tr("Transitions"),
+    add(QObject::tr("Noise Fade"), QObject::tr("Stylize"),
         []() { return enve::make_shared<NoiseFadeEffect>(); });
     add(QObject::tr("叠化（淡入淡出）"), QObject::tr("Transitions"),
         []() { return enve::make_shared<DissolveEffect>(); });
