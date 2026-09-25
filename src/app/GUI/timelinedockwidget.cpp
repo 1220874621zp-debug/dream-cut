@@ -218,12 +218,15 @@ const char* kNleToolHandSvg =
         " V12 M16.3 12 V6.5 a1.3 1.3 0 0 1 2.6 0 V14.5 c0 4.1-2.4 6.5"
         " -6.5 6.5 c-2.7 0-4.2-.9-5.6-2.6 l-3.3-4.2 a1.35 1.35 0 0 1"
         " 2-1.8 l2.5 2.1 Z\"/></svg>";
-// freeze: snowflake-ish asterisk
+// freeze: a frame box holding a still (pause bars inside a rounded
+// frame = one fixed frame at the playhead)
 const char* kNleFreezeSvg =
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
+        "<rect x=\"3.5\" y=\"5.5\" width=\"17\" height=\"13\" rx=\"2.5\""
+        " fill=\"none\" stroke=\"%1\" stroke-width=\"1.9\"/>"
         "<path fill=\"none\" stroke=\"%1\" stroke-width=\"1.9\""
-        " stroke-linecap=\"round\" d=\"M12 3 V21 M4.2 7.5 L19.8 16.5"
-        " M19.8 7.5 L4.2 16.5\"/></svg>";
+        " stroke-linecap=\"round\" d=\"M9.8 9.2 V14.8 M14.2 9.2 V14.8\"/>"
+        "</svg>";
 // split at playhead: two half blocks cut by a dashed line
 const char* kNleSplitSvg =
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
@@ -794,7 +797,7 @@ void TimelineDockWidget::setupNleActions()
                 QIcon(nleGlyphPixmap(kNleFreezeSvg, QColor(0xc8, 0xc8, 0xc8))),
                 tr("定格"), this);
     mNleFreezeAct->setToolTip(
-                tr("在播放头处定格选中块：切点起冻结为静止画面到块尾"));
+                tr("定格：播放头起插入 2 秒固定画面（当前帧），之后视频继续"));
     mNleFreezeAct->setData(mNleFreezeAct->toolTip());
     connect(mNleFreezeAct, &QAction::triggered, mNleView,
             &NleTimelineView::freezeAtPlayhead);
@@ -828,24 +831,6 @@ void TimelineDockWidget::setupNleActions()
 
     // NLE editing group (joins the tool cluster at the left; CapCut
     // keeps every editing control in one contiguous toolbar block)
-    mNleDeleteAct = new QAction(tr("删除块"), this);
-    mNleDeleteAct->setToolTip(tr("删除选中的块（Delete）；Shift=波纹删除，后续块左移补洞"));
-    mNleDeleteAct->setData(mNleDeleteAct->toolTip());
-    connect(mNleDeleteAct, &QAction::triggered, this, [this]() {
-        if (mNleView) { mNleView->requestDelete(false); }
-    });
-    insertAct(mNleDeleteAct);
-    mMainWindow->cmdAddAction(mNleDeleteAct);
-
-    mNleRippleAct = new QAction(tr("波纹删除"), this);
-    mNleRippleAct->setToolTip(tr("删除选中的块并让同轨后续块左移补洞（Shift+Delete）"));
-    mNleRippleAct->setData(mNleRippleAct->toolTip());
-    connect(mNleRippleAct, &QAction::triggered, this, [this]() {
-        if (mNleView) { mNleView->requestDelete(true); }
-    });
-    insertAct(mNleRippleAct);
-    mMainWindow->cmdAddAction(mNleRippleAct);
-
     mMagneticAct = new QAction(
                 QIcon(nleMagneticPixmap(QColor(0xc8, 0xc8, 0xc8))), QString(), this);
     mMagneticAct->setCheckable(true);
@@ -921,20 +906,6 @@ void TimelineDockWidget::setupNleActions()
     });
     insertAct(mFollowAct);
     mMainWindow->cmdAddAction(mFollowAct);
-
-    // kdenlive insert/overwrite toggle: when on, a drop pushes the
-    // touched run right instead of requiring free space; Ctrl flips
-    // it for a single gesture
-    mNleInsertAct = new QAction(tr("插入模式"), this);
-    mNleInsertAct->setCheckable(true);
-    mNleInsertAct->setToolTip(
-                tr("插入模式（kdenlive）：拖放时落点处的现有块整体右移让位；按住 Ctrl 可临时反转"));
-    mNleInsertAct->setData(mNleInsertAct->toolTip());
-    connect(mNleInsertAct, &QAction::toggled, this, [this](const bool on) {
-        if (mNleView) { mNleView->setInsertMode(on); }
-    });
-    insertAct(mNleInsertAct);
-    mMainWindow->cmdAddAction(mNleInsertAct);
 
     mNleZoomFitAct = new QAction(tr("适配"), this);
     mNleZoomFitAct->setToolTip(tr("时间轴缩放适配窗口宽度"));

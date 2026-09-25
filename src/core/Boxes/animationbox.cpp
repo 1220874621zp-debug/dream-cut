@@ -158,9 +158,15 @@ void AnimationBox::freezeFrameAction() {
     const int relFrame = prp_absFrameToRelFrame(absFrame);
     if(relFrame < durRect->getMinRelFrame() ||
        relFrame > durRect->getMaxRelFrame()) return;
-    const int animFrame = getAnimationFrameForRelFrame(relFrame);
+    freezeToAnimFrame(getAnimationFrameForRelFrame(relFrame));
+}
 
-    // a single remapping key holds the playhead's frame value at every
+void AnimationBox::freezeToAnimFrame(const int animFrame) {
+    if(!mSrcFramesCache) return;
+    const auto durRect = getAnimationDurationRect();
+    if(!durRect) return;
+
+    // a single remapping key holds the frozen frame value at every
     // point in time: before/after a lone key the animator clamps to
     // the key's value, which is exactly the freeze we want
     prp_pushUndoRedoName(tr("冻结帧"));

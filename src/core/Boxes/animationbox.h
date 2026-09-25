@@ -72,6 +72,13 @@ public:
     // the whole layer (single constant remapping key)
     void freezeFrameAction();
 
+    // freeze holding an explicit SOURCE frame number - the timeline
+    // 定格 path needs this: after splitting at the playhead the cut
+    // frame itself lies outside the new piece's window, so the
+    // scene-frame-based freezeFrameAction guard would early-return
+    // (the "freeze did nothing, still a playing video" bug)
+    void freezeToAnimFrame(const int animFrame);
+
     qreal getStretch() const { return mStretch; }
 
     void reload();

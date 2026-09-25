@@ -849,23 +849,60 @@ bool NleTimelineModel::requestFreeze(const QSet<int> &clipIds,
         return false;
     }
 
-    // freezeFrameAction freezes the CURRENT scene frame: park the
-    // playhead on the cut frame for the freeze, then restore it
-    const int savedFrame = scene->anim_getCurrentAbsFrame();
-    scene->anim_setAbsFrame(frame);
-    scene->clearBoxesSelection();
-    for (auto *b : animBoxes) { scene->addBoxToSelection(b); }
-    // split: the ORIGINAL boxes become the right halves [frame..max]
-    scene->splitBoxesAtFrame(frame);
-    const qreal fps = mFps;
+    // 冻结的源帧 = 播放头帧经原块的源映射（两刀分割不动锚，前后
+    // 一致）；直接按源帧号冻结，不依赖场景当前帧——分割后切点帧
+    // 已落在块窗之外，场景帧版守卫会早退（"定格没生效还是视频块"
+    // 的旧根因）
+    QHash<AnimationBox*, int> srcFrame;
     for (auto *b : animBoxes) {
-        b->freezeFrameAction();
-        // CapCut 视觉：定格段块名 = “定格 时码”
-        b->prp_setName(QStringLiteral("定格 ") + frameToTimecode(frame, fps));
+        srcFrame.insert(b, b->getAnimationFrameForRelFrame(
+                    b->prp_absFrameToRelFrame(frame)));
     }
-    scene->anim_setAbsFrame(savedFrame);
+
+    // CapCut 语义：定格 = 播放头起插入一段固定画面（默认 2 秒），
+    // 之后原视频继续。两刀分割（播放头 + 播放头 + N），中间产生的
+    // 拷贝即定格段；右半剩余不足 N 时第二刀被块内守卫自动跳过
+    // （整个右半冻结）
+    const int N = qMax(2, qRound(2. * mFps));
+    for (int cut = 0; cut < 2; cut++) {
+        const int cutFrame = frame + (cut == 0 ? 0 : N);
+        mInWriteback = true;
+        scene->clearBoxesSelection();
+        for (auto *b : animBoxes) { scene->addBoxToSelection(b); }
+        scene->splitBoxesAtFrame(cutFrame);
+        mInWriteback = false;
+        finishAction();
+    }
+
+    // 定格段 = 各块所在轨道上窗口起点 frame+1 的块（第二刀的拷贝）
+    bool did = false;
+    for (auto *b : animBoxes) {
+        const int trackId = b->trackId();
+        BoundingBox *piece = nullptr;
+        for (const auto &c : mClips) {
+            if (c.trackId != trackId || c.audio || !c.layer) { continue; }
+            if (c.start == frame + 1) {
+                piece = enve_cast<BoundingBox*>(c.layer.data());
+                break;
+            }
+        }
+        if (!piece) { continue; }
+        const auto pAnim = dynamic_cast<AnimationBox*>(piece);
+        if (!pAnim) { continue; }
+        pAnim->freezeToAnimFrame(srcFrame.value(b, 0));
+        piece->prp_setName(QStringLiteral("定格 %1")
+                           .arg(frameToTimecode(frame, mFps)));
+        // 定格段静音（CapCut：固定画面无声）
+        const auto vBox = dynamic_cast<VideoBox*>(piece);
+        if (vBox && vBox->sound()) { vBox->sound()->setVisible(false); }
+        did = true;
+    }
     finishAction();
-    return true;
+    if (did) {
+        emit logMessage(QStringLiteral("已在播放头定格 %1")
+                                .arg(frameToTimecode(frame, mFps)));
+    }
+    return did;
 }
 
 bool NleTimelineModel::requestSpeed(const int clipId, const qreal rate)
