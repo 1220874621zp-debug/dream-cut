@@ -79,8 +79,8 @@ stdsptr<RasterEffectCaller> GlitchTransitionEffect::getEffectCaller(
     const qreal fadeOut = mFadeOut->getEffectiveValue(relFrame);
     const qreal local = nleTransitionClipRelFrame(relFrame, data);
     const qreal total = nleTransitionTotalFrames(data);
-    const qreal openness = nleTransitionOpenness(local, total,
-                                                 fadeIn, fadeOut) * influence;
+    const qreal openness = nleTransitionOpenness(local, total, fadeIn, fadeOut,
+                                                 transitionEaseMode()) * influence;
 
     // per-frame seed so the tearing jumps every frame like real
     // signal glitching (frame-local coordinate, stable in preview)

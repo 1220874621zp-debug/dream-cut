@@ -72,8 +72,8 @@ stdsptr<RasterEffectCaller> HalftoneTransitionEffect::getEffectCaller(
     const qreal fadeOut = mFadeOut->getEffectiveValue(relFrame);
     const qreal local = nleTransitionClipRelFrame(relFrame, data);
     const qreal total = nleTransitionTotalFrames(data);
-    const qreal openness = nleTransitionOpenness(local, total,
-                                                 fadeIn, fadeOut) * influence;
+    const qreal openness = nleTransitionOpenness(local, total, fadeIn, fadeOut,
+                                                 transitionEaseMode()) * influence;
 
     // a fixed-grid halftone print of the frame develops into the
     // true image as the clip opens up (a "developing print", not a

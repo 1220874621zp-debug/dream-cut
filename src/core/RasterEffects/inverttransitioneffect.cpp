@@ -63,8 +63,8 @@ stdsptr<RasterEffectCaller> InvertTransitionEffect::getEffectCaller(
     const qreal fadeOut = mFadeOut->getEffectiveValue(relFrame);
     const qreal local = nleTransitionClipRelFrame(relFrame, data);
     const qreal total = nleTransitionTotalFrames(data);
-    const qreal openness = nleTransitionOpenness(local, total,
-                                                 fadeIn, fadeOut) * influence;
+    const qreal openness = nleTransitionOpenness(local, total, fadeIn, fadeOut,
+                                                 transitionEaseMode()) * influence;
 
     // 0 = full negative, 1 = true colours
     return enve::make_shared<InvertTransitionEffectCaller>(

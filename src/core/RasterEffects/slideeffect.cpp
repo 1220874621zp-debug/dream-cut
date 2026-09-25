@@ -75,12 +75,15 @@ stdsptr<RasterEffectCaller> SlideEffect::getEffectCaller(
     const qreal local = nleTransitionClipRelFrame(relFrame, data);
     const qreal total = nleTransitionTotalFrames(data);
 
-    // head window: openness 0 -> 1 (offset collapses to 0)
+    // head window: openness 0 -> 1 (offset collapses to 0), shaped
+    // by the shared ease curve like every other transition (slide
+    // computes its ramps itself instead of nleTransitionOpenness)
     const qreal headOpen = slideIn > 0.5 ?
-                qBound(0., local / slideIn, 1.) : 1.;
+                nleTransitionEase(local / slideIn, transitionEaseMode()) : 1.;
     // tail window: 1 -> 0 (offset grows out along -direction)
     const qreal tailOpen = slideOut > 0.5 ?
-                qBound(0., (total - local) / slideOut, 1.) : 1.;
+                nleTransitionEase((total - local) / slideOut,
+                                  transitionEaseMode()) : 1.;
 
     const qreal k = (1. - headOpen) * influence - (1. - tailOpen);
 

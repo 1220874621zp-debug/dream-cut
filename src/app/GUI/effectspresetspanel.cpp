@@ -345,37 +345,8 @@ namespace {
 // 转场类特效：应用语义是"投到两块之间的交界"而非加到层上
 bool isTransitionTileType(const RasterEffectType t)
 {
-    switch (t) {
-    case RasterEffectType::TRANSITION_DISSOLVE:
-    case RasterEffectType::TRANSITION_FLASH:
-    case RasterEffectType::TRANSITION_SLIDE:
-    case RasterEffectType::TRANSITION_WIPE_CIRCLE:
-    case RasterEffectType::TRANSITION_WIPE_LINEAR:
-    case RasterEffectType::TRANSITION_BLINDS:
-    case RasterEffectType::TRANSITION_NOISE:
-    case RasterEffectType::TRANSITION_BLUR:
-    case RasterEffectType::TRANSITION_ZOOM:
-    case RasterEffectType::TRANSITION_MOSAIC:
-    case RasterEffectType::TRANSITION_SPIN:
-    case RasterEffectType::TRANSITION_MIRROR_FLIP:
-    case RasterEffectType::TRANSITION_TWIRL:
-    case RasterEffectType::TRANSITION_GLITCH:
-    case RasterEffectType::TRANSITION_SHAKE:
-    case RasterEffectType::TRANSITION_ZOOM_BLUR:
-    case RasterEffectType::TRANSITION_DIR_BLUR:
-    case RasterEffectType::TRANSITION_CHANNEL_SPLIT:
-    case RasterEffectType::TRANSITION_HALFTONE:
-    case RasterEffectType::TRANSITION_EDGE:
-    case RasterEffectType::TRANSITION_INVERT:
-    case RasterEffectType::TRANSITION_POSTERIZE:
-    case RasterEffectType::TRANSITION_VIGNETTE:
-    case RasterEffectType::TRANSITION_LIGHT_SWEEP:
-    case RasterEffectType::TRANSITION_FILM_GRAIN:
-    case RasterEffectType::TRANSITION_PAGE_FLIP:
-        return true;
-    default:
-        return false;
-    }
+    // single source of truth lives next to the RasterEffectType enum
+    return isTransitionEffectType(t);
 }
 }
 

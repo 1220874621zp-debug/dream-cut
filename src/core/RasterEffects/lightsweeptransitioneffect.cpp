@@ -43,6 +43,9 @@ LightSweepTransitionEffect::LightSweepTransitionEffect() :
 
     mBandWidth = enve::make_shared<QrealAnimator>(0.25, 0.05, 0.8, 0.01, "光带宽度");
     ca_addChild(mBandWidth);
+
+    mIntensity = enve::make_shared<QrealAnimator>(130, 0, 255, 5, "光强");
+    ca_addChild(mIntensity);
 }
 
 class LightSweepTransitionEffectCaller : public RasterEffectCaller {
@@ -50,15 +53,17 @@ public:
     LightSweepTransitionEffectCaller(const HardwareSupport hwSupport,
                                      const qreal bandCenter,
                                      const qreal bandWidth,
+                                     const qreal intensity,
                                      const qreal alpha) :
         RasterEffectCaller(hwSupport), mCenter(bandCenter),
-        mWidth(bandWidth), mAlpha(alpha) {}
+        mWidth(bandWidth), mIntensity(intensity), mAlpha(alpha) {}
 
     void processCpu(CpuRenderTools& renderTools,
                     const CpuRenderData& data);
 private:
     const qreal mCenter;
     const qreal mWidth;
+    const qreal mIntensity;
     const qreal mAlpha;
 };
 
@@ -72,8 +77,8 @@ stdsptr<RasterEffectCaller> LightSweepTransitionEffect::getEffectCaller(
     const qreal fadeOut = mFadeOut->getEffectiveValue(relFrame);
     const qreal local = nleTransitionClipRelFrame(relFrame, data);
     const qreal total = nleTransitionTotalFrames(data);
-    const qreal openness = nleTransitionOpenness(local, total,
-                                                 fadeIn, fadeOut) * influence;
+    const qreal openness = nleTransitionOpenness(local, total, fadeIn, fadeOut,
+                                                 transitionEaseMode()) * influence;
 
     const qreal band = mBandWidth->getEffectiveValue(relFrame);
     // the band starts fully off-frame left, crosses the diagonal and
@@ -83,7 +88,8 @@ stdsptr<RasterEffectCaller> LightSweepTransitionEffect::getEffectCaller(
     const qreal center = openness * (1. + 4. * band) - band;
 
     return enve::make_shared<LightSweepTransitionEffectCaller>(
-                instanceHwSupport(), center, band, openness);
+                instanceHwSupport(), center, band,
+                mIntensity->getEffectiveValue(relFrame), openness);
 }
 
 void LightSweepTransitionEffectCaller::processCpu(
@@ -124,7 +130,7 @@ void LightSweepTransitionEffectCaller::processCpu(
             // the add term is exactly zero everywhere (identity)
             const float g = d > 3. || d < -3. ?
                         0.f : float(std::exp(-d * d));
-            const float add = g * 130.f;
+            const float add = g * float(mIntensity);
             for (int c = 0; c < 3; c++) {
                 const float v = *src * a + add * a;
                 *dst++ = v > 255.f ? uchar(255) : uchar(v);

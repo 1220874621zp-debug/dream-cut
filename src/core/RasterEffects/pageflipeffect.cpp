@@ -43,14 +43,19 @@ PageFlipEffect::PageFlipEffect() :
 
     mBandWidth = enve::make_shared<QrealAnimator>(0.2, 0.05, 0.5, 0.01, "卷边宽度");
     ca_addChild(mBandWidth);
+
+    mShade = enve::make_shared<QrealAnimator>(0.55, 0, 1, 0.05, "卷边明暗");
+    ca_addChild(mShade);
 }
 
 class PageFlipEffectCaller : public RasterEffectCaller {
 public:
     PageFlipEffectCaller(const HardwareSupport hwSupport,
                          const qreal curlFront,
-                         const qreal bandWidth) :
-        RasterEffectCaller(hwSupport), mCurl(curlFront), mBand(bandWidth) {}
+                         const qreal bandWidth,
+                         const qreal shadeDepth) :
+        RasterEffectCaller(hwSupport), mCurl(curlFront), mBand(bandWidth),
+        mShadeDepth(shadeDepth) {}
 
     void processCpu(CpuRenderTools& renderTools,
                     const CpuRenderData& data);
@@ -59,6 +64,7 @@ private:
     // 1+band = fully unrolled past the far corner)
     const qreal mCurl;
     const qreal mBand;
+    const qreal mShadeDepth;
 };
 
 stdsptr<RasterEffectCaller> PageFlipEffect::getEffectCaller(
@@ -71,8 +77,8 @@ stdsptr<RasterEffectCaller> PageFlipEffect::getEffectCaller(
     const qreal fadeOut = mFadeOut->getEffectiveValue(relFrame);
     const qreal local = nleTransitionClipRelFrame(relFrame, data);
     const qreal total = nleTransitionTotalFrames(data);
-    const qreal openness = nleTransitionOpenness(local, total,
-                                                 fadeIn, fadeOut) * influence;
+    const qreal openness = nleTransitionOpenness(local, total, fadeIn, fadeOut,
+                                                 transitionEaseMode()) * influence;
 
     const qreal band = mBandWidth->getEffectiveValue(relFrame);
     // travel from 0 to 1 + 1.2*band so the band fully clears the
@@ -80,7 +86,8 @@ stdsptr<RasterEffectCaller> PageFlipEffect::getEffectCaller(
     const qreal curl = openness * (1. + 1.2 * band);
 
     return enve::make_shared<PageFlipEffectCaller>(
-                instanceHwSupport(), curl, band);
+                instanceHwSupport(), curl, band,
+                mShade->getEffectiveValue(relFrame));
 }
 
 void PageFlipEffectCaller::processCpu(CpuRenderTools& renderTools,
@@ -125,7 +132,7 @@ void PageFlipEffectCaller::processCpu(CpuRenderTools& renderTools,
                 // the front then a bright rim just behind it, like a
                 // cylinder catching light
                 const qreal s = (pos - curlBack) / mBand; // 0..1
-                const qreal shade = 1. - 0.55 * std::sin(M_PI * s);
+                const qreal shade = 1. - mShadeDepth * std::sin(M_PI * s);
                 for (int c = 0; c < 3; c++) {
                     *dst++ = uchar(*src++ * shade);
                 }

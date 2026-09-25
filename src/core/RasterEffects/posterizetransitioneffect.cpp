@@ -67,8 +67,8 @@ stdsptr<RasterEffectCaller> PosterizeTransitionEffect::getEffectCaller(
     const qreal fadeOut = mFadeOut->getEffectiveValue(relFrame);
     const qreal local = nleTransitionClipRelFrame(relFrame, data);
     const qreal total = nleTransitionTotalFrames(data);
-    const qreal openness = nleTransitionOpenness(local, total,
-                                                 fadeIn, fadeOut) * influence;
+    const qreal openness = nleTransitionOpenness(local, total, fadeIn, fadeOut,
+                                                 transitionEaseMode()) * influence;
 
     const int minL = qRound(mMinLevels->getEffectiveValue(relFrame));
     // levels refine from minL up to 256 (full range = identity)

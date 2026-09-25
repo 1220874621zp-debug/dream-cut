@@ -33,6 +33,7 @@
 #include <cstring>
 
 #include "RasterEffects/rastereffectsinclude.h"
+#include "ReadWrite/evformat.h"
 #include "RasterEffects/rastereffectcollection.h"
 #include "RasterEffects/rastereffectmenucreator.h"
 #include "RasterEffects/effectpreview.h"
@@ -987,6 +988,92 @@ int main(int argc, char *argv[])
             // tail window departs again
             if (!(err.at(15) > err.at(12))) {
                 throw std::runtime_error("tail window not closing for type "
+                                         + name);
+            }
+        }
+    });
+
+    // Test 10: transition parameter serialization round-trip - the
+    // ease curve rides at the tail of the property stream behind the
+    // EvFormat::transitionEase gate while the legacy children keep
+    // their positional order; a round trip must restore the ease AND
+    // leave every classic parameter untouched
+    runTest("Test 10: Transition ease serialization", [&]() {
+        const RasterEffectType types[] = {
+            RasterEffectType::TRANSITION_DISSOLVE,
+            RasterEffectType::TRANSITION_SLIDE,
+            RasterEffectType::TRANSITION_PAGE_FLIP
+        };
+        for (const auto t : types) {
+            const auto eff = createRasterEffectForNonCustomType(t);
+            if (!eff) {
+                throw std::runtime_error("factory null for type " +
+                                         std::to_string(int(t)));
+            }
+            if (!eff->transitionEaseProperty()) {
+                throw std::runtime_error("ease combo missing for type " +
+                                         std::to_string(int(t)));
+            }
+            // pin a non-default ease and a non-default fade length
+            eff->transitionEaseProperty()->setCurrentValue(3);
+            const auto fadeIn = enve_cast<QrealAnimator*>(
+                        eff->ca_getChildAt(0));
+            if (!fadeIn) {
+                throw std::runtime_error("first child not qreal for type " +
+                                         std::to_string(int(t)));
+            }
+            fadeIn->setCurrentBaseValue(24.);
+
+            QBuffer buf;
+            buf.open(QIODevice::ReadWrite);
+            {
+                eWriteStream dst(&buf);
+                eff->prp_writeProperty(dst);
+            }
+            buf.seek(0);
+            const auto eff2 = createRasterEffectForNonCustomType(t);
+            {
+                // current file version carries the ease gate
+                eReadStream src(EvFormat::version, &buf);
+                eff2->prp_readProperty(src);
+            }
+            const auto name = std::to_string(int(t));
+            if (eff2->transitionEaseMode() != 3) {
+                throw std::runtime_error("ease not restored for type " + name +
+                                         " (got " +
+                                         std::to_string(eff2->transitionEaseMode()) + ")");
+            }
+            const auto fadeIn2 = enve_cast<QrealAnimator*>(
+                        eff2->ca_getChildAt(0));
+            if (!fadeIn2 || qRound(fadeIn2->getCurrentBaseValue()) != 24) {
+                throw std::runtime_error("fade-in corrupted for type " + name);
+            }
+            // old file (version below the gate): stream carries no
+            // ease tail, reading must stop cleanly and default linear
+            QBuffer legacy;
+            legacy.open(QIODevice::ReadWrite);
+            {
+                // write via a fresh effect, then read as an old file by
+                // handing a version-below-gate reader the same bytes:
+                // the tail qint32 stays unread, nothing misaligns
+                const auto eff3 = createRasterEffectForNonCustomType(t);
+                eWriteStream dst(&legacy);
+                eff3->prp_writeProperty(dst);
+            }
+            legacy.seek(0);
+            const auto eff4 = createRasterEffectForNonCustomType(t);
+            {
+                eReadStream src(EvFormat::transitionEase - 1, &legacy);
+                eff4->prp_readProperty(src);
+            }
+            if (eff4->transitionEaseMode() != 0) {
+                throw std::runtime_error("legacy read leaked into ease for type "
+                                         + name);
+            }
+            const auto fadeIn4 = enve_cast<QrealAnimator*>(
+                        eff4->ca_getChildAt(0));
+            if (!fadeIn4 || qRound(fadeIn4->getCurrentBaseValue()) != 12) {
+                throw std::runtime_error("legacy fade-in corrupted for type "
                                          + name);
             }
         }

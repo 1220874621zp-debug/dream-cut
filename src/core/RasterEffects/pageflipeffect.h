@@ -42,6 +42,7 @@ private:
     qsptr<QrealAnimator> mFadeIn;
     qsptr<QrealAnimator> mFadeOut;
     qsptr<QrealAnimator> mBandWidth;
+    qsptr<QrealAnimator> mShade;
 };
 
 #endif // PAGEFLIPEFFECT_H

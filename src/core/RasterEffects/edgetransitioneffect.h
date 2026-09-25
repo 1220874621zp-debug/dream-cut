@@ -40,6 +40,7 @@ public:
 private:
     qsptr<QrealAnimator> mFadeIn;
     qsptr<QrealAnimator> mFadeOut;
+    qsptr<QrealAnimator> mLineGain;
 };
 
 #endif // EDGETRANSITIONEFFECT_H

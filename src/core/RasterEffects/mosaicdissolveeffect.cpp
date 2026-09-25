@@ -70,8 +70,8 @@ stdsptr<RasterEffectCaller> MosaicDissolveEffect::getEffectCaller(
     const qreal fadeOut = mFadeOut->getEffectiveValue(relFrame);
     const qreal local = nleTransitionClipRelFrame(relFrame, data);
     const qreal total = nleTransitionTotalFrames(data);
-    const qreal openness = nleTransitionOpenness(local, total,
-                                                 fadeIn, fadeOut) * influence;
+    const qreal openness = nleTransitionOpenness(local, total, fadeIn, fadeOut,
+                                                 transitionEaseMode()) * influence;
 
     const qreal maxBlock = mMaxBlock->getEffectiveValue(relFrame);
     // block size shrinks from max to 1 (= original pixels) as the

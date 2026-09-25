@@ -79,8 +79,8 @@ stdsptr<RasterEffectCaller> FilmGrainTransitionEffect::getEffectCaller(
     const qreal fadeOut = mFadeOut->getEffectiveValue(relFrame);
     const qreal local = nleTransitionClipRelFrame(relFrame, data);
     const qreal total = nleTransitionTotalFrames(data);
-    const qreal openness = nleTransitionOpenness(local, total,
-                                                 fadeIn, fadeOut) * influence;
+    const qreal openness = nleTransitionOpenness(local, total, fadeIn, fadeOut,
+                                                 transitionEaseMode()) * influence;
 
     // per-frame seed: film grain boils frame to frame
     const quint32 seed = quint32(qRound(local)) * 2246822519u + 7u;

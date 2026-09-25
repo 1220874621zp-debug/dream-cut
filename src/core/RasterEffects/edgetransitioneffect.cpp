@@ -38,19 +38,25 @@ EdgeTransitionEffect::EdgeTransitionEffect() :
 
     mFadeOut = enve::make_shared<QrealAnimator>(12, 0, 600, 1, "淡出时长");
     ca_addChild(mFadeOut);
+
+    mLineGain = enve::make_shared<QrealAnimator>(2, 0.5, 8, 0.1, "线条浓度");
+    ca_addChild(mLineGain);
 }
 
 class EdgeTransitionEffectCaller : public RasterEffectCaller {
 public:
     EdgeTransitionEffectCaller(const HardwareSupport hwSupport,
-                               const qreal mix, const qreal alpha) :
-        RasterEffectCaller(hwSupport), mMix(mix), mAlpha(alpha) {}
+                               const qreal mix, const qreal alpha,
+                               const qreal gain) :
+        RasterEffectCaller(hwSupport), mMix(mix), mAlpha(alpha),
+        mGain(gain) {}
 
     void processCpu(CpuRenderTools& renderTools,
                     const CpuRenderData& data);
 private:
     const qreal mMix;
     const qreal mAlpha;
+    const qreal mGain;
 };
 
 stdsptr<RasterEffectCaller> EdgeTransitionEffect::getEffectCaller(
@@ -63,12 +69,13 @@ stdsptr<RasterEffectCaller> EdgeTransitionEffect::getEffectCaller(
     const qreal fadeOut = mFadeOut->getEffectiveValue(relFrame);
     const qreal local = nleTransitionClipRelFrame(relFrame, data);
     const qreal total = nleTransitionTotalFrames(data);
-    const qreal openness = nleTransitionOpenness(local, total,
-                                                 fadeIn, fadeOut) * influence;
+    const qreal openness = nleTransitionOpenness(local, total, fadeIn, fadeOut,
+                                                 transitionEaseMode()) * influence;
 
     // 0 = pure sketch, 1 = original image
     return enve::make_shared<EdgeTransitionEffectCaller>(
-                instanceHwSupport(), openness, openness);
+                instanceHwSupport(), openness, openness,
+                mLineGain->getEffectiveValue(relFrame));
 }
 
 void EdgeTransitionEffectCaller::processCpu(
@@ -136,7 +143,8 @@ void EdgeTransitionEffectCaller::processCpu(
                              - lumaAt(xi+1,yi-1)
                              + lumaAt(xi-1,yi+1) + 2.f*lumaAt(xi,yi+1)
                              + lumaAt(xi+1,yi+1);
-            const float mag = qBound(0.f, std::hypot(gx, gy) * 2.f, 1.f);
+            const float mag = qBound(0.f,
+                    std::hypot(gx, gy) * 2.f * float(mGain), 1.f);
             // opaque white paper with dark outlines premultiplied at
             // full weight, developing into the true pixel
             const float sketch = (1.f - mag) * 255.f;

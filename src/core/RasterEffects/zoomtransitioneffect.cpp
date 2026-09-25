@@ -74,8 +74,8 @@ stdsptr<RasterEffectCaller> ZoomTransitionEffect::getEffectCaller(
     const qreal fadeOut = mFadeOut->getEffectiveValue(relFrame);
     const qreal local = nleTransitionClipRelFrame(relFrame, data);
     const qreal total = nleTransitionTotalFrames(data);
-    const qreal openness = nleTransitionOpenness(local, total,
-                                                 fadeIn, fadeOut) * influence;
+    const qreal openness = nleTransitionOpenness(local, total, fadeIn, fadeOut,
+                                                 transitionEaseMode()) * influence;
 
     const qreal amount = mAmount->getEffectiveValue(relFrame);
     // shrink-in: amount -> 1; grow-in: 1/amount -> 1

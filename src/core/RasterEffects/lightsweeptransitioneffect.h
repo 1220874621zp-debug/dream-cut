@@ -41,6 +41,7 @@ private:
     qsptr<QrealAnimator> mFadeIn;
     qsptr<QrealAnimator> mFadeOut;
     qsptr<QrealAnimator> mBandWidth;
+    qsptr<QrealAnimator> mIntensity;
 };
 
 #endif // LIGHTSWEEPTRANSITIONEFFECT_H

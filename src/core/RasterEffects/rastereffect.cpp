@@ -25,6 +25,7 @@
 
 #include "rastereffect.h"
 #include "Animators/dynamiccomplexanimator.h"
+#include "Properties/comboboxproperty.h"
 #include "typemenu.h"
 #include "rastereffectcollection.h"
 #include "ReadWrite/ewritestream.h"
@@ -32,6 +33,7 @@
 #include "undoredo.h"
 #include "exceptions.h"
 #include "Private/document.h"
+#include "ReadWrite/evformat.h"
 #include <QBuffer>
 
 namespace {
@@ -134,6 +136,48 @@ RasterEffect::RasterEffect(const QString &name,
     } else if(hwSupport == HardwareSupport::gpuPreffered) {
         mInstHwSupport = HardwareSupport::gpuOnly;
     } else Q_ASSERT(false);
+    if (isTransitionEffectType(type)) {
+        // every real transition carries an ease curve for its
+        // head/tail ramps (CapCut-style). Deliberately NOT a ca child:
+        // StaticComplexAnimator serializes children positionally and
+        // inserting one would shift every stored transition's
+        // parameter bytes; instead the value rides at the tail of
+        // this effect's property stream behind an EvFormat gate
+        // (see prp_writeProperty_impl below)
+        const auto eases = QStringList() <<
+                QObject::tr("线性") <<
+                QObject::tr("缓入") <<
+                QObject::tr("缓出") <<
+                QObject::tr("平滑");
+        mEase = enve::make_shared<ComboBoxProperty>(
+                    QObject::tr("缓动"), eases);
+    }
+}
+
+int RasterEffect::transitionEaseMode() const
+{
+    return mEase ? mEase->getCurrentValue() : 0;
+}
+
+void RasterEffect::prp_writeProperty_impl(eWriteStream &dst) const
+{
+    // legacy layout first (children in order + visible + name), the
+    // ease value appended at the very tail behind the version gate
+    eEffect::prp_writeProperty_impl(dst);
+    if (isTransitionEffectType(mType)) {
+        dst << qint32(transitionEaseMode());
+    }
+}
+
+void RasterEffect::prp_readProperty_impl(eReadStream &src)
+{
+    eEffect::prp_readProperty_impl(src);
+    if (isTransitionEffectType(mType) &&
+        src.evFileVersion() >= EvFormat::transitionEase) {
+        qint32 ease = 0;
+        src >> ease;
+        if (mEase) { mEase->setCurrentValue(ease); }
+    }
 }
 
 void RasterEffect::writeIdentifier(eWriteStream &dst) const {

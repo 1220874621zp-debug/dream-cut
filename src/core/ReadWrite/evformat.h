@@ -133,6 +133,12 @@ namespace EvFormat {
         // are healed by a try-fixedlen-first name-length sniff
         nleDurRectType = 55,
 
+        // transition ease curve (one qint32 appended at the tail of
+        // every real transition effect's property stream, after the
+        // legacy children+visible+name layout); files up to 55 end
+        // right after the name and default to linear
+        transitionEase = 56,
+
         nextVersion
     };
 

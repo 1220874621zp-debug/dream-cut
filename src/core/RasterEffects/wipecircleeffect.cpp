@@ -69,8 +69,8 @@ stdsptr<RasterEffectCaller> WipeCircleEffect::getEffectCaller(
     const qreal fadeOut = mFadeOut->getEffectiveValue(relFrame);
     const qreal local = nleTransitionClipRelFrame(relFrame, data);
     const qreal total = nleTransitionTotalFrames(data);
-    const qreal openness = nleTransitionOpenness(local, total,
-                                                 fadeIn, fadeOut) * influence;
+    const qreal openness = nleTransitionOpenness(local, total, fadeIn, fadeOut,
+                                                 transitionEaseMode()) * influence;
     const qreal softness = mSoftness->getEffectiveValue(relFrame);
 
     return enve::make_shared<WipeCircleEffectCaller>(

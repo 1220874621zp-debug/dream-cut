@@ -168,6 +168,45 @@ enum class RasterEffectType : short {
 };
 
 struct BoxRenderData;
+class ComboBoxProperty;
+
+// single source of truth for "is this a real clip transition": the
+// model/panel checks and the base-class ease parameter all route
+// through here (app layers must not keep their own copies)
+inline bool isTransitionEffectType(const RasterEffectType t)
+{
+    switch (t) {
+    case RasterEffectType::TRANSITION_DISSOLVE:
+    case RasterEffectType::TRANSITION_FLASH:
+    case RasterEffectType::TRANSITION_SLIDE:
+    case RasterEffectType::TRANSITION_WIPE_CIRCLE:
+    case RasterEffectType::TRANSITION_WIPE_LINEAR:
+    case RasterEffectType::TRANSITION_BLINDS:
+    case RasterEffectType::TRANSITION_NOISE:
+    case RasterEffectType::TRANSITION_BLUR:
+    case RasterEffectType::TRANSITION_ZOOM:
+    case RasterEffectType::TRANSITION_MOSAIC:
+    case RasterEffectType::TRANSITION_SPIN:
+    case RasterEffectType::TRANSITION_MIRROR_FLIP:
+    case RasterEffectType::TRANSITION_TWIRL:
+    case RasterEffectType::TRANSITION_GLITCH:
+    case RasterEffectType::TRANSITION_SHAKE:
+    case RasterEffectType::TRANSITION_ZOOM_BLUR:
+    case RasterEffectType::TRANSITION_DIR_BLUR:
+    case RasterEffectType::TRANSITION_CHANNEL_SPLIT:
+    case RasterEffectType::TRANSITION_HALFTONE:
+    case RasterEffectType::TRANSITION_EDGE:
+    case RasterEffectType::TRANSITION_INVERT:
+    case RasterEffectType::TRANSITION_POSTERIZE:
+    case RasterEffectType::TRANSITION_VIGNETTE:
+    case RasterEffectType::TRANSITION_LIGHT_SWEEP:
+    case RasterEffectType::TRANSITION_FILM_GRAIN:
+    case RasterEffectType::TRANSITION_PAGE_FLIP:
+        return true;
+    default:
+        return false;
+    }
+}
 
 class CORE_EXPORT RasterEffect : public eEffect {
     e_OBJECT
@@ -207,6 +246,21 @@ public:
     }
 
     void switchInstanceHwSupport();
+
+    // transition ease curve carried by every real transition (the
+    // base class attaches the "缓动" combo in the constructor);
+    // 0 linear, see nleTransitionEase in transitionanchor.h.
+    // transitionEaseProperty exposes the combo itself so property
+    // panels can render a row for it (it is NOT a ca child, see the
+    // serialization note in the .cpp)
+    int transitionEaseMode() const;
+    ComboBoxProperty *transitionEaseProperty() const
+    { return mEase.data(); }
+
+    // legacy child order + visible + name, then (transitions only)
+    // the ease value behind the EvFormat::transitionEase gate
+    void prp_writeProperty_impl(eWriteStream &dst) const;
+    void prp_readProperty_impl(eReadStream &src);
 signals:
     void hardwareSupportChanged();
     void forcedMarginChanged();
@@ -215,6 +269,7 @@ private:
     const HardwareSupport mTypeHwSupport;
     const bool mHwInterchangeable;
     HardwareSupport mInstHwSupport;
+    qsptr<ComboBoxProperty> mEase;
 };
 
 #endif // RASTEREFFECT_H

@@ -1263,10 +1263,20 @@ void AEPropertiesInspector::setupEffectsControls(QVBoxLayout *layout, BoundingBo
         grid->setColumnMinimumWidth(3, 14);
 
         const int numProps = effect->ca_getNumberOfChildren();
+        int propRow = 0;
         for (int p = 0; p < numProps; ++p) {
             auto prop = effect->ca_getChildAt<Property>(p);
             if (!prop) { continue; }
-            setupEffectPropertyControl(grid, p, prop, box);
+            setupEffectPropertyControl(grid, propRow, prop, box);
+            propRow++;
+        }
+        // real transitions carry the ease curve as a plain member
+        // (NOT a ca child - positional serialization would shift
+        // stored parameter bytes), render its row here explicitly
+        if (isTransitionEffectType(effect->getEffectType())) {
+            if (const auto ease = effect->transitionEaseProperty()) {
+                setupEffectPropertyControl(grid, propRow, ease, box);
+            }
         }
 
         eLayout->addWidget(gridWidget);
