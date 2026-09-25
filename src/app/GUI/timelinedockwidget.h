@@ -140,7 +140,6 @@ private:
     void resumePreview();
     void setStepPreviewStop(const bool pause = false);
     void setStepPreviewStart();
-    void gotoFrame(int frame);
 
     void updateButtonsVisibility(const CanvasMode mode);
 
@@ -182,10 +181,6 @@ private:
 
     QAction *mFrameRewindAct;
     QAction *mFrameFastForwardAct;
-    QAction *mSetInPointAct;
-    QAction *mSetOutPointAct;
-    QAction *mCurrentFrameSpinAct;
-    FrameSpinBox *mCurrentFrameSpin;
     QSlider *mZoomSlider = nullptr;
 
     // NLE mode toolbar group

@@ -273,8 +273,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     , mToolBar(nullptr)
     , mFrameRewindAct(nullptr)
     , mFrameFastForwardAct(nullptr)
-    , mCurrentFrameSpinAct(nullptr)
-    , mCurrentFrameSpin(nullptr)
     , mRenderProgressAct(nullptr)
     , mRenderProgress(nullptr)
     , mPausedPreviewState({false, 0})
@@ -556,51 +554,13 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
                 this, [this]() { matchSelectedToCanvas(false); });
     }
 
-    mCurrentFrameSpin = new FrameSpinBox(this);
-    mCurrentFrameSpin->setKeyboardTracking(false);
-    mCurrentFrameSpin->setAlignment(Qt::AlignHCenter);
-    mCurrentFrameSpin->setObjectName(QString::fromUtf8("SpinBoxNoButtons"));
-    mCurrentFrameSpin->setFocusPolicy(Qt::ClickFocus);
-    mCurrentFrameSpin->setToolTip(tr("Current frame"));
-    mCurrentFrameSpin->setRange(-INT_MAX, INT_MAX);
-    connect(mCurrentFrameSpin,
-            &QSpinBox::editingFinished,
-            this, [this]() { gotoFrame(mCurrentFrameSpin->value()); });
-    connect(mCurrentFrameSpin,
-            &FrameSpinBox::wheelValueChanged,
-            this, &TimelineDockWidget::gotoFrame);
-
-    mSetInPointAct = new QAction(QIcon::fromTheme("range-in"),
-                                  tr("Set Layer In Point (Alt+[)"),
-                                  this);
-    mSetInPointAct->setToolTip(tr("Set Layer In Point (Alt+[)"));
-    mSetInPointAct->setData(mSetInPointAct->toolTip());
-    connect(mSetInPointAct, &QAction::triggered, this, [this]() {
-        const auto scene = *mDocument.fActiveScene;
-        if (!scene) { return; }
-        scene->setSelectedBoxesInPoint();
-        mDocument.actionFinished();
-    });
-
-    mSetOutPointAct = new QAction(QIcon::fromTheme("range-out"),
-                                   tr("Set Layer Out Point (Alt+])"),
-                                   this);
-    mSetOutPointAct->setToolTip(tr("Set Layer Out Point (Alt+])"));
-    mSetOutPointAct->setData(mSetOutPointAct->toolTip());
-    connect(mSetOutPointAct, &QAction::triggered, this, [this]() {
-        const auto scene = *mDocument.fActiveScene;
-        if (!scene) { return; }
-        scene->setSelectedBoxesOutPoint();
-        mDocument.actionFinished();
-    });
-
     mToolBar = new QToolBar(this);
     mToolBar->setMovable(false);
 
     mRenderProgress = new QProgressBar(this);
     mRenderProgress->setSizePolicy(QSizePolicy::Expanding,
                                    QSizePolicy::Expanding);
-    mRenderProgress->setFixedWidth(mCurrentFrameSpin->width());
+    mRenderProgress->setFixedWidth(90);
     mRenderProgress->setFormat(tr("Cache %p%"));
 
     eSizesUI::widget.add(mToolBar, [this](const int size) {
@@ -626,13 +586,7 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
     mToolBar->addAction(mFrameRewindAct);
     mToolBar->addAction(mFrameFastForwardAct);
 
-    mToolBar->addSeparator();
-    mToolBar->addAction(mSetInPointAct);
-    mToolBar->addAction(mSetOutPointAct);
-    mToolBar->addSeparator();
-
     mRenderProgressAct = mToolBar->addWidget(mRenderProgress);
-    mCurrentFrameSpinAct = mToolBar->addWidget(mCurrentFrameSpin);
 
     mToolBar->addAction(mPlayFromBeginningButton);
     mToolBar->addAction(mPlayButton);
@@ -654,8 +608,6 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
 
     mMainWindow->cmdAddAction(mFrameRewindAct);
     mMainWindow->cmdAddAction(mFrameFastForwardAct);
-    mMainWindow->cmdAddAction(mSetInPointAct);
-    mMainWindow->cmdAddAction(mSetOutPointAct);
     mMainWindow->cmdAddAction(mPlayFromBeginningButton);
     mMainWindow->cmdAddAction(mPlayButton);
     mMainWindow->cmdAddAction(mStopButton);
@@ -1000,14 +952,12 @@ void TimelineDockWidget::updateFrameRange(const FrameRange &range)
 
 void TimelineDockWidget::handleCurrentFrameChanged(int frame)
 {
-    mCurrentFrameSpin->setValue(frame);
     if (mRenderProgress->isVisible()) { mRenderProgress->setValue(frame); }
 }
 
 void TimelineDockWidget::showRenderStatus(bool show)
 {
     if (!show) { mRenderProgress->setValue(0); }
-    mCurrentFrameSpinAct->setVisible(!show);
     mRenderProgressAct->setVisible(show);
 }
 
@@ -1273,7 +1223,6 @@ void TimelineDockWidget::previewFinished()
         scene->setGizmosSuppressed(false);
     }
     //setPlaying(false);
-    mCurrentFrameSpinAct->setEnabled(true);
     showRenderStatus(false);
     mPlayFromBeginningButton->setDisabled(false);
     mStopButton->setDisabled(true);
@@ -1289,7 +1238,6 @@ void TimelineDockWidget::previewBeingPlayed()
     if (const auto scene = *mDocument.fActiveScene) {
         scene->setGizmosSuppressed(true);
     }
-    mCurrentFrameSpinAct->setEnabled(false);
     showRenderStatus(false);
     mPlayFromBeginningButton->setDisabled(true);
     mStopButton->setDisabled(false);
@@ -1302,7 +1250,6 @@ void TimelineDockWidget::previewBeingPlayed()
 
 void TimelineDockWidget::previewBeingRendered()
 {
-    mCurrentFrameSpinAct->setEnabled(false);
     showRenderStatus(true);
     mPlayFromBeginningButton->setDisabled(true);
     mStopButton->setDisabled(false);
@@ -1320,7 +1267,6 @@ void TimelineDockWidget::previewPaused()
     if (const auto scene = *mDocument.fActiveScene) {
         scene->setGizmosSuppressed(false);
     }
-    mCurrentFrameSpinAct->setEnabled(true);
     showRenderStatus(false);
     mPlayFromBeginningButton->setDisabled(true);
     mStopButton->setDisabled(false);
@@ -1402,14 +1348,6 @@ void TimelineDockWidget::setStepPreviewStart()
     }
 }
 
-void TimelineDockWidget::gotoFrame(int frame)
-{
-    const auto scene = *mDocument.fActiveScene;
-    if (!scene) { return; }
-    scene->anim_setAbsFrame(frame);
-    mDocument.actionFinished();
-}
-
 void TimelineDockWidget::updateButtonsVisibility(const CanvasMode mode)
 {
     Q_UNUSED(mode)
@@ -1466,19 +1404,6 @@ void TimelineDockWidget::updateSettingsForCurrentCanvas(Canvas* const canvas)
     const auto range = canvas->getFrameRange();
     updateFrameRange(range);
     handleCurrentFrameChanged(canvas->anim_getCurrentAbsFrame());
-
-    mCurrentFrameSpin->setDisplayTimeCode(canvas->getDisplayTimecode());
-
-    mCurrentFrameSpin->updateFps(canvas->getFps());
-
-    connect(canvas, &Canvas::fpsChanged,
-            this, [this](const qreal fps) {
-        mCurrentFrameSpin->updateFps(fps);
-    });
-    connect(canvas, &Canvas::displayTimeCodeChanged,
-            this, [this](const bool enabled) {
-        mCurrentFrameSpin->setDisplayTimeCode(enabled);
-    });
 
     connect(canvas,
             &Canvas::newFrameRange,
