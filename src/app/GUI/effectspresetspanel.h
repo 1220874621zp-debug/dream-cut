@@ -31,6 +31,7 @@
 #include <QImage>
 #include <QMap>
 #include <QPointer>
+#include <QSet>
 #include <functional>
 #include "RasterEffects/rastereffect.h"
 
@@ -47,6 +48,7 @@ class QHBoxLayout;
 class QButtonGroup;
 class QSlider;
 class FlowLayout;
+class QToolButton;
 
 // a null target applies to every selected layer (AE double-click
 // semantics); an explicit target applies to just that layer
@@ -88,15 +90,22 @@ public:
     // replay from the head window when a hover starts
     void restartPlayback();
 
+    // pins a small button to the preview's bottom-right corner (the
+    // favorite star); repositioned on every resize
+    void setCornerButton(QToolButton* const btn);
+
 protected:
     void paintEvent(QPaintEvent* const e) override;
+    void resizeEvent(QResizeEvent* const e) override;
 
 private:
     int posterIndex() const { return mFrames.count() > 3 ? 2 : 0; }
+    void positionCornerButton();
     QList<QImage> mFrames;
     int mFrame = 0;
     QString mPlaceholder;
     bool mLightBase = false;
+    QToolButton* mCornerBtn = nullptr;
 };
 
 // one effect card: preview, name, category tag and an apply button;
@@ -129,6 +138,9 @@ public:
     { if (mPreviewArea) { mPreviewArea->restartPlayback(); } }
     void showPosterFrame()
     { if (mPreviewArea) { mPreviewArea->showPosterFrame(); } }
+    // favorite star state (persisted by the panel, keyed by type id)
+    bool isFavorite() const { return mFavorite; }
+    void setFavorite(const bool favorite);
     void setUnavailable()
     {
         if (mPreviewArea) {
@@ -144,6 +156,8 @@ signals:
     void tileClicked(EffectPreviewTile* tile);
     // 转场类卡片的应用：不走"加到选中层"，改投时间轴交界
     void transitionApplyRequested(const int transitionType);
+    // the corner star was toggled (panel persists + refilters)
+    void favoriteToggled(EffectPreviewTile* tile, bool favorite);
 
 protected:
     void mousePressEvent(QMouseEvent* const e) override;
@@ -160,10 +174,12 @@ private:
     QString mCategory;
     EffectApplyFn mApply;
     EffectPreviewArea* mPreviewArea = nullptr;
+    QToolButton* mFavBtn = nullptr;
     QLabel* mNameLabel = nullptr;
     QLabel* mTagLabel = nullptr;
     QPushButton* mApplyBtn = nullptr;
     bool mChecked = false;
+    bool mFavorite = false;
     bool mAnimLoading = false;
     QPoint mDragStart;
     bool mDragging = false;
@@ -208,6 +224,7 @@ private slots:
     void onViewModeToggled(const bool checked);
     void onTileApplyRequested(EffectPreviewTile *tile);
     void onTileClicked(EffectPreviewTile *tile);
+    void onTileFavoriteToggled(EffectPreviewTile *tile, bool favorite);
 
 signals:
     // 转场类卡片的应用转发（tile 信号对信号直连到此）
@@ -234,6 +251,9 @@ private:
     void filterTiles();
     void updatePlayTimer();
     QString categoryTag(const QString& category) const;
+    // favorite effect type ids <-> "EffectsPanel/favorites" settings
+    void loadFavorites();
+    void saveFavorites() const;
 
     MainWindow *mMainWindow = nullptr;
     QLineEdit *mSearchEdit = nullptr;
@@ -269,6 +289,8 @@ private:
     // while the cursor is over any child widget - enter/leave events
     // would misfire when crossing the name label or apply button)
     QPointer<EffectPreviewTile> mHoveredTile;
+    // favorited effect type ids (int of RasterEffectType), persisted
+    QSet<int> mFavorites;
 
     static quint64 sDragGeneration;
     static EffectApplyFn sDragCallback;
