@@ -620,22 +620,14 @@ void NleTimelineView::drawTransitions(QPainter &p)
         }
         const bool sel = mSelTransition == t.rightId;
         p.setRenderHint(QPainter::Antialiasing);
-        // 实心底色打底（块体同款深底）再叠渐变高光：转场条压在两块
-        // 交界上，不能透出底下块的缩略图，否则像贴在某块的头上
-        // （CapCut 式金黄转场条，标签用深棕字保证黄底可读）
-        QPainterPath base;
-        base.addRoundedRect(r, 4, 4);
-        p.fillPath(base, QColor(0x20, 0x19, 0x08));
-        QRadialGradient grad(r.center(), r.width() / 2. + 1);
-        grad.setColorAt(0., QColor(0xf7, 0xc5, 0x3c, sel ? 240 : 190));
-        grad.setColorAt(1., QColor(0xcf, 0x92, 0x14, sel ? 230 : 170));
-        p.setBrush(grad);
-        p.setPen(QPen(sel ? QColor(0xff, 0xf0, 0xbe)
-                         : QColor(0xe6, 0xae, 0x2e, 200), sel ? 2 : 1));
+        // 纯色转场条（用户指定 #F5FF43，无渐变）：不透明纯色本身
+        // 就压住了底下块的缩略图；选中态用深棕描边+把手区分
+        p.setPen(sel ? QPen(QColor(0x40, 0x30, 0x06), 2) : Qt::NoPen);
+        p.setBrush(QColor(0xF5, 0xFF, 0x43));
         p.drawRoundedRect(r, 4, 4);
         // 选中态两侧把手（全高竖条）
         if (sel) {
-            p.setBrush(QColor(0xff, 0xf0, 0xbe));
+            p.setBrush(QColor(0x40, 0x30, 0x06));
             p.setPen(Qt::NoPen);
             p.drawRoundedRect(r.adjusted(1, 6, -r.width() + 4, -6), 1.5, 1.5);
             p.drawRoundedRect(r.adjusted(r.width() - 4, 6, -1, -6), 1.5, 1.5);
