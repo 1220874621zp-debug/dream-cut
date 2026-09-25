@@ -34,6 +34,18 @@ struct BoxRenderData;
 // fadeIn/fadeOut <= 0.5 frames disable that end.
 // easeMode reshapes each ramp: 0 linear, 1 ease-in, 2 ease-out,
 // 3 smooth (the "缓动" combo every transition carries).
+// deterministic integer hash -> 0..1, no time term: the pattern is
+// stable frame to frame so dissolve-style transitions read as grains
+// popping in, not as flickering static (shared by the cell-stagger
+// transitions: film burn / hex / squares / grid flip / puzzle /
+// fragment)
+inline float nleHash21(const int x, const int y)
+{
+    quint32 h = quint32(x) * 374761393u + quint32(y) * 668265263u;
+    h = (h ^ (h >> 13)) * 1274126177u;
+    return float(h & 0x00ffffffu) / float(0x01000000);
+}
+
 inline qreal nleTransitionEase(const qreal t, const int easeMode)
 {
     const qreal x = qBound(0., t, 1.);

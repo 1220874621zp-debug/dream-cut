@@ -155,7 +155,23 @@ int main(int argc, char *argv[])
             RasterEffectType::TRANSITION_VIGNETTE,
             RasterEffectType::TRANSITION_LIGHT_SWEEP,
             RasterEffectType::TRANSITION_FILM_GRAIN,
-            RasterEffectType::TRANSITION_PAGE_FLIP
+            RasterEffectType::TRANSITION_PAGE_FLIP,
+            RasterEffectType::TRANSITION_CROSS_ZOOM,
+            RasterEffectType::TRANSITION_DREAMY_ZOOM,
+            RasterEffectType::TRANSITION_FILM_BURN,
+            RasterEffectType::TRANSITION_OVEREXPOSE,
+            RasterEffectType::TRANSITION_DEFOCUS,
+            RasterEffectType::TRANSITION_HEX_DISSOLVE,
+            RasterEffectType::TRANSITION_SQUARES,
+            RasterEffectType::TRANSITION_CHESSBOARD,
+            RasterEffectType::TRANSITION_POLKA_DOTS,
+            RasterEffectType::TRANSITION_HEART,
+            RasterEffectType::TRANSITION_STAR,
+            RasterEffectType::TRANSITION_BOOK_FLIP,
+            RasterEffectType::TRANSITION_GRID_FLIP,
+            RasterEffectType::TRANSITION_PUZZLE,
+            RasterEffectType::TRANSITION_CUBE,
+            RasterEffectType::TRANSITION_FRAGMENT
         };
 
         for (const auto t : types) {
@@ -422,7 +438,23 @@ int main(int argc, char *argv[])
             RasterEffectType::TRANSITION_VIGNETTE,
             RasterEffectType::TRANSITION_LIGHT_SWEEP,
             RasterEffectType::TRANSITION_FILM_GRAIN,
-            RasterEffectType::TRANSITION_PAGE_FLIP
+            RasterEffectType::TRANSITION_PAGE_FLIP,
+            RasterEffectType::TRANSITION_CROSS_ZOOM,
+            RasterEffectType::TRANSITION_DREAMY_ZOOM,
+            RasterEffectType::TRANSITION_FILM_BURN,
+            RasterEffectType::TRANSITION_OVEREXPOSE,
+            RasterEffectType::TRANSITION_DEFOCUS,
+            RasterEffectType::TRANSITION_HEX_DISSOLVE,
+            RasterEffectType::TRANSITION_SQUARES,
+            RasterEffectType::TRANSITION_CHESSBOARD,
+            RasterEffectType::TRANSITION_POLKA_DOTS,
+            RasterEffectType::TRANSITION_HEART,
+            RasterEffectType::TRANSITION_STAR,
+            RasterEffectType::TRANSITION_BOOK_FLIP,
+            RasterEffectType::TRANSITION_GRID_FLIP,
+            RasterEffectType::TRANSITION_PUZZLE,
+            RasterEffectType::TRANSITION_CUBE,
+            RasterEffectType::TRANSITION_FRAGMENT
         };
         QString dumpDir;
         if (argc >= 3) {
@@ -467,6 +499,10 @@ int main(int argc, char *argv[])
                 frames.at(qMax(1, frames.count() / 4)).save(
                             dumpDir + "/q_" +
                             QString::number(int(t)) + ".png");
+                // mid-transition state (openness ~0.5): the frame the
+                // look actually lives in, f0/q are closed/identity
+                frames.at(2).save(dumpDir + "/m_" +
+                                  QString::number(int(t)) + ".png");
             }
         }
         std::cout << " (" << rendered << " rendered, "
@@ -933,7 +969,23 @@ int main(int argc, char *argv[])
             RasterEffectType::TRANSITION_VIGNETTE,
             RasterEffectType::TRANSITION_LIGHT_SWEEP,
             RasterEffectType::TRANSITION_FILM_GRAIN,
-            RasterEffectType::TRANSITION_PAGE_FLIP
+            RasterEffectType::TRANSITION_PAGE_FLIP,
+            RasterEffectType::TRANSITION_CROSS_ZOOM,
+            RasterEffectType::TRANSITION_DREAMY_ZOOM,
+            RasterEffectType::TRANSITION_FILM_BURN,
+            RasterEffectType::TRANSITION_OVEREXPOSE,
+            RasterEffectType::TRANSITION_DEFOCUS,
+            RasterEffectType::TRANSITION_HEX_DISSOLVE,
+            RasterEffectType::TRANSITION_SQUARES,
+            RasterEffectType::TRANSITION_CHESSBOARD,
+            RasterEffectType::TRANSITION_POLKA_DOTS,
+            RasterEffectType::TRANSITION_HEART,
+            RasterEffectType::TRANSITION_STAR,
+            RasterEffectType::TRANSITION_BOOK_FLIP,
+            RasterEffectType::TRANSITION_GRID_FLIP,
+            RasterEffectType::TRANSITION_PUZZLE,
+            RasterEffectType::TRANSITION_CUBE,
+            RasterEffectType::TRANSITION_FRAGMENT
         };
         // 16 frames sample the 48-frame loop at step 3: frames 0..3
         // walk the head window, 4..12 the hold plateau, 13..15 the

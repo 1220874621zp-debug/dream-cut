@@ -378,6 +378,22 @@ NamedScan namedScanFor(const RasterEffectType type) {
     case RasterEffectType::TRANSITION_LIGHT_SWEEP:
     case RasterEffectType::TRANSITION_FILM_GRAIN:
     case RasterEffectType::TRANSITION_PAGE_FLIP:
+    case RasterEffectType::TRANSITION_CROSS_ZOOM:
+    case RasterEffectType::TRANSITION_DREAMY_ZOOM:
+    case RasterEffectType::TRANSITION_FILM_BURN:
+    case RasterEffectType::TRANSITION_OVEREXPOSE:
+    case RasterEffectType::TRANSITION_DEFOCUS:
+    case RasterEffectType::TRANSITION_HEX_DISSOLVE:
+    case RasterEffectType::TRANSITION_SQUARES:
+    case RasterEffectType::TRANSITION_CHESSBOARD:
+    case RasterEffectType::TRANSITION_POLKA_DOTS:
+    case RasterEffectType::TRANSITION_HEART:
+    case RasterEffectType::TRANSITION_STAR:
+    case RasterEffectType::TRANSITION_BOOK_FLIP:
+    case RasterEffectType::TRANSITION_GRID_FLIP:
+    case RasterEffectType::TRANSITION_PUZZLE:
+    case RasterEffectType::TRANSITION_CUBE:
+    case RasterEffectType::TRANSITION_FRAGMENT:
         // 24-frame ramps on the 96-frame preview loop: the motion
         // phase runs 1s in / 2s hold / 1s out so direction reads
         // clearly instead of flashing by in half a second
@@ -596,6 +612,11 @@ void overlayTransitionCues(QImage &img, RasterEffect * const eff)
         comboName = "模式"; break;          // 0 shrink-in 1 grow-in
     case RasterEffectType::TRANSITION_MIRROR_FLIP:
         comboName = "翻转轴"; break;        // 0 vertical 1 horizontal
+    case RasterEffectType::TRANSITION_CROSS_ZOOM:
+    case RasterEffectType::TRANSITION_DREAMY_ZOOM:
+        // zoom-family without a direction combo: the incoming clip
+        // always settles inward, comboVal stays 0
+        break;
     default:
         return; // non-directional transitions get no cue
     }
@@ -623,9 +644,12 @@ void overlayTransitionCues(QImage &img, RasterEffect * const eff)
         previewDrawArrow(p, c - d * m * 0.30, c + d * m * 0.30, th);
         break;
     }
-    case RasterEffectType::TRANSITION_ZOOM: {
+    case RasterEffectType::TRANSITION_ZOOM:
+    case RasterEffectType::TRANSITION_CROSS_ZOOM:
+    case RasterEffectType::TRANSITION_DREAMY_ZOOM: {
         // four corner arrows along the diagonals: shrink-in points
-        // at the centre, grow-in points away from it
+        // at the centre, grow-in points away from it (cross/dreamy
+        // zoom always settle inward)
         const bool inward = comboVal == 0;
         const qreal inset = m * 0.15;
         const QPointF corners[4] = {
@@ -722,7 +746,18 @@ QList<QImage> renderEffectFrames(const RasterEffectType type,
                                                 imgSize.height(), t)
                         : makeFractalSample(imgSize.width(),
                                             imgSize.height(), t);
+                // Skia N32 is RGBA on Linux (byte 0 = R) while Qt's
+                // ARGB32 is BGRA in little-endian memory: memcpy the
+                // skia buffer into an ARGB32 view R/B-swaps any
+                // coloured content (invisible while every CPU effect
+                // was order-agnostic or grayscale - the film-burn
+                // fire exposed it). RGBA8888 keeps Qt's byte order
+                // identical to N32 on this platform
+#if SK_R32_SHIFT == 0 && SK_B32_SHIFT == 16
+                QImage img(imgSize, QImage::Format_RGBA8888_Premultiplied);
+#else
                 QImage img(imgSize, QImage::Format_ARGB32_Premultiplied);
+#endif
                 if (img.sizeInBytes() > 0) {
                     memcpy(img.bits(), frame.getPixels(),
                            static_cast<size_t>(img.sizeInBytes()));
@@ -793,7 +828,14 @@ QList<QImage> renderEffectFrames(const RasterEffectType type,
             }
 
             const auto caller = eff->getEffectCaller(relFrame, 1., 1., nullptr);
+            // see the liquid/lattice memcpy above: the skia surface
+            // is N32 (RGBA on Linux) - the QImage view must match its
+            // byte order or coloured CPU output R/B-swaps
+#if SK_R32_SHIFT == 0 && SK_B32_SHIFT == 16
+            QImage img(imgSize, QImage::Format_RGBA8888_Premultiplied);
+#else
             QImage img(imgSize, QImage::Format_ARGB32_Premultiplied);
+#endif
             img.fill(Qt::transparent);
             if (caller && !caller->samplesBackdrop()) {
                 // the skia raster surface writes straight into the

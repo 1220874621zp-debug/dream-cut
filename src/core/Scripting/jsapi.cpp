@@ -1253,7 +1253,23 @@ namespace Friction
             { RasterEffectType::TRANSITION_VIGNETTE, "vignette_transition|curtain" },
             { RasterEffectType::TRANSITION_LIGHT_SWEEP, "light_sweep|sheen" },
             { RasterEffectType::TRANSITION_FILM_GRAIN, "film_grain_transition|grain_dissolve" },
-            { RasterEffectType::TRANSITION_PAGE_FLIP, "page_flip|page_turn" }
+            { RasterEffectType::TRANSITION_PAGE_FLIP, "page_flip|page_turn" },
+            { RasterEffectType::TRANSITION_CROSS_ZOOM, "cross_zoom|crosszoom" },
+            { RasterEffectType::TRANSITION_DREAMY_ZOOM, "dreamy_zoom|dreamy" },
+            { RasterEffectType::TRANSITION_FILM_BURN, "film_burn|burn_transition" },
+            { RasterEffectType::TRANSITION_OVEREXPOSE, "overexposure|over_expose" },
+            { RasterEffectType::TRANSITION_DEFOCUS, "defocus|focus_pull|rack_focus" },
+            { RasterEffectType::TRANSITION_HEX_DISSOLVE, "hex_dissolve|honeycomb" },
+            { RasterEffectType::TRANSITION_SQUARES, "random_squares|squares_dissolve" },
+            { RasterEffectType::TRANSITION_CHESSBOARD, "chessboard|checkerboard" },
+            { RasterEffectType::TRANSITION_POLKA_DOTS, "polka_dots|dots_curtain" },
+            { RasterEffectType::TRANSITION_HEART, "heart_wipe|heart" },
+            { RasterEffectType::TRANSITION_STAR, "star_wipe|star" },
+            { RasterEffectType::TRANSITION_BOOK_FLIP, "book_flip|book_turn" },
+            { RasterEffectType::TRANSITION_GRID_FLIP, "grid_flip|tile_flip" },
+            { RasterEffectType::TRANSITION_PUZZLE, "puzzle|puzzle_slide" },
+            { RasterEffectType::TRANSITION_CUBE, "cube|cube_rotate" },
+            { RasterEffectType::TRANSITION_FRAGMENT, "fragment|shatter_in|fragments" }
         };
 
         QString normalizeEffectName(const QString &name)

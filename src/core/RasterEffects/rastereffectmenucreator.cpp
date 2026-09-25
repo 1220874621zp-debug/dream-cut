@@ -168,6 +168,40 @@ void RasterEffectMenuCreator::forEveryEffectCore(const EffectAdder &add)
         []() { return enve::make_shared<FilmGrainTransitionEffect>(); });
     add(QObject::tr("翻页"), QObject::tr("Transitions"),
         []() { return enve::make_shared<PageFlipEffect>(); });
+    // fourth wave: gl-transitions ports - light/atmosphere, shape
+    // masks, fragment/3D geometry
+    add(QObject::tr("交叉变焦"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<CrossZoomTransitionEffect>(); });
+    add(QObject::tr("梦幻变焦"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<DreamyZoomTransitionEffect>(); });
+    add(QObject::tr("胶片燃烧"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<FilmBurnTransitionEffect>(); });
+    add(QObject::tr("过曝"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<OverexposureTransitionEffect>(); });
+    add(QObject::tr("失焦合焦"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<DefocusTransitionEffect>(); });
+    add(QObject::tr("蜂窝溶解"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<HexDissolveEffect>(); });
+    add(QObject::tr("随机方块"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<SquaresDissolveEffect>(); });
+    add(QObject::tr("棋盘格"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<ChessboardTransitionEffect>(); });
+    add(QObject::tr("波点帘幕"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<PolkaDotsEffect>(); });
+    add(QObject::tr("心形扩散"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<HeartWipeEffect>(); });
+    add(QObject::tr("星形扩散"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<StarWipeEffect>(); });
+    add(QObject::tr("翻书"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<BookFlipEffect>(); });
+    add(QObject::tr("网格翻转"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<GridFlipEffect>(); });
+    add(QObject::tr("拼图滑入"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<PuzzleEffect>(); });
+    add(QObject::tr("立方体"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<CubeEffect>(); });
+    add(QObject::tr("碎片聚合"), QObject::tr("Transitions"),
+        []() { return enve::make_shared<FragmentEffect>(); });
     add(QObject::tr("卷页 (Page Curl)"), QObject::tr("Distort"),
         []() { return enve::make_shared<PageCurlEffect>(); });
     add(QObject::tr("晶格变形"), QObject::tr("Distort"),

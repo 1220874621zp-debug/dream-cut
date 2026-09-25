@@ -164,7 +164,26 @@ enum class RasterEffectType : short {
     TRANSITION_VIGNETTE,
     TRANSITION_LIGHT_SWEEP,
     TRANSITION_FILM_GRAIN,
-    TRANSITION_PAGE_FLIP
+    TRANSITION_PAGE_FLIP,
+    // fourth wave (gl-transitions ports): light/atmosphere, shape
+    // mask reveals and fragment/3D geometry - appended last, never
+    // reorder, serialized ids must stay stable
+    TRANSITION_CROSS_ZOOM,
+    TRANSITION_DREAMY_ZOOM,
+    TRANSITION_FILM_BURN,
+    TRANSITION_OVEREXPOSE,
+    TRANSITION_DEFOCUS,
+    TRANSITION_HEX_DISSOLVE,
+    TRANSITION_SQUARES,
+    TRANSITION_CHESSBOARD,
+    TRANSITION_POLKA_DOTS,
+    TRANSITION_HEART,
+    TRANSITION_STAR,
+    TRANSITION_BOOK_FLIP,
+    TRANSITION_GRID_FLIP,
+    TRANSITION_PUZZLE,
+    TRANSITION_CUBE,
+    TRANSITION_FRAGMENT
 };
 
 struct BoxRenderData;
@@ -202,6 +221,22 @@ inline bool isTransitionEffectType(const RasterEffectType t)
     case RasterEffectType::TRANSITION_LIGHT_SWEEP:
     case RasterEffectType::TRANSITION_FILM_GRAIN:
     case RasterEffectType::TRANSITION_PAGE_FLIP:
+    case RasterEffectType::TRANSITION_CROSS_ZOOM:
+    case RasterEffectType::TRANSITION_DREAMY_ZOOM:
+    case RasterEffectType::TRANSITION_FILM_BURN:
+    case RasterEffectType::TRANSITION_OVEREXPOSE:
+    case RasterEffectType::TRANSITION_DEFOCUS:
+    case RasterEffectType::TRANSITION_HEX_DISSOLVE:
+    case RasterEffectType::TRANSITION_SQUARES:
+    case RasterEffectType::TRANSITION_CHESSBOARD:
+    case RasterEffectType::TRANSITION_POLKA_DOTS:
+    case RasterEffectType::TRANSITION_HEART:
+    case RasterEffectType::TRANSITION_STAR:
+    case RasterEffectType::TRANSITION_BOOK_FLIP:
+    case RasterEffectType::TRANSITION_GRID_FLIP:
+    case RasterEffectType::TRANSITION_PUZZLE:
+    case RasterEffectType::TRANSITION_CUBE:
+    case RasterEffectType::TRANSITION_FRAGMENT:
         return true;
     default:
         return false;

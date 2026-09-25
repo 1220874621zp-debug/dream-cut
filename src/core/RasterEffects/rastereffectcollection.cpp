@@ -354,6 +354,38 @@ qsptr<RasterEffect> createRasterEffectForNonCustomType(const RasterEffectType ty
             return enve::make_shared<FilmGrainTransitionEffect>();
         case(RasterEffectType::TRANSITION_PAGE_FLIP):
             return enve::make_shared<PageFlipEffect>();
+        case(RasterEffectType::TRANSITION_CROSS_ZOOM):
+            return enve::make_shared<CrossZoomTransitionEffect>();
+        case(RasterEffectType::TRANSITION_DREAMY_ZOOM):
+            return enve::make_shared<DreamyZoomTransitionEffect>();
+        case(RasterEffectType::TRANSITION_FILM_BURN):
+            return enve::make_shared<FilmBurnTransitionEffect>();
+        case(RasterEffectType::TRANSITION_OVEREXPOSE):
+            return enve::make_shared<OverexposureTransitionEffect>();
+        case(RasterEffectType::TRANSITION_DEFOCUS):
+            return enve::make_shared<DefocusTransitionEffect>();
+        case(RasterEffectType::TRANSITION_HEX_DISSOLVE):
+            return enve::make_shared<HexDissolveEffect>();
+        case(RasterEffectType::TRANSITION_SQUARES):
+            return enve::make_shared<SquaresDissolveEffect>();
+        case(RasterEffectType::TRANSITION_CHESSBOARD):
+            return enve::make_shared<ChessboardTransitionEffect>();
+        case(RasterEffectType::TRANSITION_POLKA_DOTS):
+            return enve::make_shared<PolkaDotsEffect>();
+        case(RasterEffectType::TRANSITION_HEART):
+            return enve::make_shared<HeartWipeEffect>();
+        case(RasterEffectType::TRANSITION_STAR):
+            return enve::make_shared<StarWipeEffect>();
+        case(RasterEffectType::TRANSITION_BOOK_FLIP):
+            return enve::make_shared<BookFlipEffect>();
+        case(RasterEffectType::TRANSITION_GRID_FLIP):
+            return enve::make_shared<GridFlipEffect>();
+        case(RasterEffectType::TRANSITION_PUZZLE):
+            return enve::make_shared<PuzzleEffect>();
+        case(RasterEffectType::TRANSITION_CUBE):
+            return enve::make_shared<CubeEffect>();
+        case(RasterEffectType::TRANSITION_FRAGMENT):
+            return enve::make_shared<FragmentEffect>();
         default: return nullptr;
     }
 }

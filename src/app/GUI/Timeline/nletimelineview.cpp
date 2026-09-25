@@ -2984,7 +2984,23 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
             { int(RasterEffectType::TRANSITION_VIGNETTE), "暗角" },
             { int(RasterEffectType::TRANSITION_LIGHT_SWEEP), "扫光" },
             { int(RasterEffectType::TRANSITION_FILM_GRAIN), "胶片颗粒" },
-            { int(RasterEffectType::TRANSITION_PAGE_FLIP), "翻页" }
+            { int(RasterEffectType::TRANSITION_PAGE_FLIP), "翻页" },
+            { int(RasterEffectType::TRANSITION_CROSS_ZOOM), "交叉变焦" },
+            { int(RasterEffectType::TRANSITION_DREAMY_ZOOM), "梦幻变焦" },
+            { int(RasterEffectType::TRANSITION_FILM_BURN), "胶片燃烧" },
+            { int(RasterEffectType::TRANSITION_OVEREXPOSE), "过曝" },
+            { int(RasterEffectType::TRANSITION_DEFOCUS), "失焦合焦" },
+            { int(RasterEffectType::TRANSITION_HEX_DISSOLVE), "蜂窝溶解" },
+            { int(RasterEffectType::TRANSITION_SQUARES), "随机方块" },
+            { int(RasterEffectType::TRANSITION_CHESSBOARD), "棋盘格" },
+            { int(RasterEffectType::TRANSITION_POLKA_DOTS), "波点帘幕" },
+            { int(RasterEffectType::TRANSITION_HEART), "心形扩散" },
+            { int(RasterEffectType::TRANSITION_STAR), "星形扩散" },
+            { int(RasterEffectType::TRANSITION_BOOK_FLIP), "翻书" },
+            { int(RasterEffectType::TRANSITION_GRID_FLIP), "网格翻转" },
+            { int(RasterEffectType::TRANSITION_PUZZLE), "拼图滑入" },
+            { int(RasterEffectType::TRANSITION_CUBE), "立方体" },
+            { int(RasterEffectType::TRANSITION_FRAGMENT), "碎片聚合" }
         };
         const int nTypes = int(sizeof(kTransTypes) / sizeof(kTransTypes[0]));
         QVector<QAction*> typeAct(nTypes);

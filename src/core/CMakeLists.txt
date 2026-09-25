@@ -293,6 +293,22 @@ set(
     RasterEffects/lightsweeptransitioneffect.cpp
     RasterEffects/filmgraintransitioneffect.cpp
     RasterEffects/pageflipeffect.cpp
+    RasterEffects/crosszoomtransitioneffect.cpp
+    RasterEffects/dreamyzoomtransitioneffect.cpp
+    RasterEffects/filmburntransitioneffect.cpp
+    RasterEffects/overexposuretransitioneffect.cpp
+    RasterEffects/defocustransitioneffect.cpp
+    RasterEffects/hexdissolveeffect.cpp
+    RasterEffects/squaresdissolveeffect.cpp
+    RasterEffects/chessboardtransitioneffect.cpp
+    RasterEffects/polkadotseffect.cpp
+    RasterEffects/heartwipeeffect.cpp
+    RasterEffects/starwipeeffect.cpp
+    RasterEffects/bookflipeffect.cpp
+    RasterEffects/gridflipeffect.cpp
+    RasterEffects/puzzleeffect.cpp
+    RasterEffects/cubeeffect.cpp
+    RasterEffects/fragmenteffect.cpp
     RasterEffects/transitionanchor.cpp
     ReadWrite/ereadstream.cpp
     ReadWrite/evtail.cpp
