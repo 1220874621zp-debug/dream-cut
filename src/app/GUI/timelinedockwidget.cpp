@@ -47,6 +47,7 @@
 #include <functional>
 
 #include "Private/document.h"
+#include "Private/esettings.h"
 #include "GUI/global.h"
 #include "GUI/BoxesList/boxscrollwidget.h"
 #include "GUI/BoxesList/boxsinglewidget.h"
@@ -1657,4 +1658,5 @@ void TimelineDockWidget::setupPropertyShortcuts()
     makeShortcut("showRotation", [this]() { showTransformProperty(3); });
     makeShortcut("showOpacity",  [this]() { showTransformProperty(4); });
     makeShortcut("showAnimated", [this]() { showAnimatedProperties(); });
+
 }

@@ -274,11 +274,16 @@ QVector<NleTimelineModel::Move> NleTimelineModel::compactGapsPlan() const
         int cursor = 0; // CapCut rule: the chain head always sits at
                         // frame 1 (time 00) - the fallback compaction
                         // pulls a strayed head back too
+        int prevEndOld = 0; // 旧布局前一块出点+1（运行值）
         for (const auto &p : order) {
             const auto c = clip(p.second);
             if (!c) { continue; }
-            // 转场右块允许沉入游标左侧的转场重叠窗口
-            const int res = transitionWindowOf(*c);
+            // 转场右块允许沉入游标左侧的转场重叠窗口——但预留量
+            // 不得超过旧布局里实际存在的重叠：挂特效却与左块无重
+            // 叠（休眠特效：分割剥特效前的原件、左伴已删的右块）
+            // 被按 fadeIn 拉进幻影窗口=切后块重叠的根因
+            const int sunk = qMax(0, prevEndOld - c->start);
+            const int res = qMin(transitionWindowOf(*c), sunk);
             int newStart = c->start;
             const int lim = qMax(0, cursor - res);
             if (c->start > lim) { newStart = lim; }
@@ -286,6 +291,7 @@ QVector<NleTimelineModel::Move> NleTimelineModel::compactGapsPlan() const
                 moves.append({c->clipId, c->trackId, newStart, c->duration});
             }
             cursor = qMax(cursor, newStart + c->duration);
+            prevEndOld = qMax(prevEndOld, c->start + c->duration);
         }
     }
     return moves;
@@ -457,10 +463,15 @@ bool NleTimelineModel::commitMoves(const QVector<Move> &moves,
                           return a.second->clipId < b.second->clipId;
                       });
             int cursor = -1;
+            int prevEndOld = -1; // 旧布局前一块出点+1（运行值）
             for (const auto &p : order) {
                 const Clip *c = p.second;
-                // 转场右块允许沉入游标左侧的转场重叠窗口
-                const int res = transitionWindowOf(*c);
+                // 转场右块允许沉入游标左侧的转场重叠窗口（预留量
+                // 以旧布局实际重叠为上限，防休眠特效幻影窗口——
+                // 同 compactGapsPlan 的修法）
+                const int sunk = cursor >= 0
+                        ? qMax(0, prevEndOld - c->start) : 0;
+                const int res = qMin(transitionWindowOf(*c), sunk);
                 int newStart = c->start;
                 const int lim = cursor >= 0 ? qMax(0, cursor - res)
                                             : c->start;
@@ -471,6 +482,7 @@ bool NleTimelineModel::commitMoves(const QVector<Move> &moves,
                     applyToWork(m);
                 }
                 cursor = qMax(cursor, newStart + c->duration);
+                prevEndOld = qMax(prevEndOld, c->start + c->duration);
             }
         }
     }
@@ -1003,11 +1015,15 @@ bool NleTimelineModel::requestDelete(const QSet<int> &clipIds,
             if (!order.isEmpty()) {
                 std::sort(order.begin(), order.end());
                 int cursor = 0;
+                int prevEndOld = 0; // 旧布局前一块出点+1（幸存者序）
                 for (const auto &p : order) {
                     const auto c = clip(p.second);
                     if (!c) { continue; }
-                    // 转场右块允许沉入游标左侧的转场重叠窗口
-                    const int res = transitionWindowOf(*c);
+                    // 转场右块允许沉入游标左侧的转场重叠窗口（预留
+                    // 量以旧布局实际重叠为上限，防休眠特效幻影窗口；
+                    // 左伴被删的右块 sunk=0 自然贴邻不叠）
+                    const int sunk = qMax(0, prevEndOld - c->start);
+                    const int res = qMin(transitionWindowOf(*c), sunk);
                     int newStart = c->start;
                     const int lim = qMax(0, cursor - res);
                     if (c->start > lim) { newStart = lim; }
@@ -1016,6 +1032,7 @@ bool NleTimelineModel::requestDelete(const QSet<int> &clipIds,
                                         newStart, c->duration});
                     }
                     cursor = qMax(cursor, newStart + c->duration);
+                    prevEndOld = qMax(prevEndOld, c->start + c->duration);
                 }
                 if (mFollowLinked && !closure.isEmpty()) {
                     QHash<int, int> deltas;
@@ -2041,23 +2058,33 @@ QVector<NleTimelineModel::Move> NleTimelineModel::magneticRearrangePlan(
     // frame 1 (time 00) - 用户规则主轨首块恒靠左对齐时间起点，左
     // 包从 0 起压收拢内部间隙
     int cursor = 0;
+    int prevEndOld = 0; // 旧布局前一块出点+1（左包序）
     for (const Clip *c : left) {
-        // 转场右块允许沉入游标左侧的转场重叠窗口
-        const int target = qMax(0, cursor - transitionWindowOf(*c));
+        // 转场右块允许沉入游标左侧的转场重叠窗口（预留量以旧布局
+        // 实际重叠为上限，防休眠特效幻影窗口——同 compactGapsPlan）
+        const int sunk = qMax(0, prevEndOld - c->start);
+        const int target = qMax(0, cursor - qMin(transitionWindowOf(*c),
+                                                 sunk));
         if (target != c->start) {
             moves.append({c->clipId, trackId, target, c->duration});
         }
         cursor = target + c->duration;
+        prevEndOld = qMax(prevEndOld, c->start + c->duration);
     }
     moves.append({draggedId, trackId, drop, dur});
     cursor = drop + dur;
+    // 右链首块的旧前伴=被拖块自身：沉入量按被拖块旧出点算
+    prevEndOld = dragged->start + dur;
     for (const Clip *c : right) {
-        // 被拖块让开后的紧链：转场右块同样沉入重叠窗口
-        const int target = qMax(0, cursor - transitionWindowOf(*c));
+        // 被拖块让开后的紧链：转场右块同样沉入重叠窗口（上限同上）
+        const int sunk = qMax(0, prevEndOld - c->start);
+        const int target = qMax(0, cursor - qMin(transitionWindowOf(*c),
+                                                 sunk));
         if (target != c->start) {
             moves.append({c->clipId, trackId, target, c->duration});
         }
         cursor = target + c->duration; // tight chain: no gaps
+        prevEndOld = qMax(prevEndOld, c->start + c->duration);
     }
     return moves;
 }
