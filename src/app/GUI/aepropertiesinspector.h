@@ -34,11 +34,13 @@
 #include <QToolButton>
 #include <QPushButton>
 #include <QFrame>
+#include <QPointer>
 #include <functional>
 
 class Document;
 class Canvas;
 class BoundingBox;
+class ComplexAnimator;
 class PathBox;
 class Animator;
 class QrealAnimator;
@@ -133,6 +135,7 @@ private:
     Document &mDoc;
     Canvas *mScene = nullptr;
     BoundingBox *mCurrentBox = nullptr;
+    QPointer<ComplexAnimator> mEffectsConnTarget;
     QWidget *mContainer = nullptr;
     QVBoxLayout *mMainLayout = nullptr;
     QList<QWidget*> mStatefulWidgets;

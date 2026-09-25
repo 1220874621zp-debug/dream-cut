@@ -305,6 +305,13 @@ void AEPropertiesInspector::refreshSelection()
     if (!mMainLayout) { return; }
     mStatefulWidgets.clear();
 
+    // stop listening to the previously selected box's effect
+    // collection before switching targets
+    if (mEffectsConnTarget) {
+        disconnect(mEffectsConnTarget, nullptr, this, nullptr);
+        mEffectsConnTarget.clear();
+    }
+
     QLayoutItem *item;
     while ((item = mMainLayout->takeAt(0)) != nullptr) {
         if (item->widget()) {
@@ -322,6 +329,20 @@ void AEPropertiesInspector::refreshSelection()
     } else {
         mCurrentBox = selected.last();
         buildBoxProperties(mCurrentBox);
+        // rebuild the panel the moment effects are added or removed
+        // by ANY path - the effects panel apply button, double-click,
+        // drag&drop onto a clip, transition type swaps, undo/redo all
+        // funnel through the collection's childAdded/Removed signals
+        // (the in-panel add/delete buttons ride along; their manual
+        // refresh calls were removed as redundant)
+        const auto coll = mCurrentBox->rasterEffectsCollection();
+        if (coll) {
+            mEffectsConnTarget = coll;
+            connect(coll, &ComplexAnimator::ca_childAdded,
+                    this, &AEPropertiesInspector::refreshSelection);
+            connect(coll, &ComplexAnimator::ca_childRemoved,
+                    this, &AEPropertiesInspector::refreshSelection);
+        }
     }
     mMainLayout->addStretch(1);
 }
@@ -1090,7 +1111,6 @@ void AEPropertiesInspector::setupEffectsControls(QVBoxLayout *layout, BoundingBo
             connect(act, &QAction::triggered, [box, creator, this]() {
                 box->addRasterEffect(creator());
                 if (mScene) { mScene->requestUpdate(); }
-                refreshSelection();
             });
         };
 
@@ -1215,7 +1235,6 @@ void AEPropertiesInspector::setupEffectsControls(QVBoxLayout *layout, BoundingBo
                     this, [box, effect, this]() {
                 box->removeRasterEffect(effect->ref<RasterEffect>());
                 if (mScene) { mScene->requestUpdate(); }
-                refreshSelection();
             });
             menu.exec(effectWidget->mapToGlobal(pos));
         });
@@ -1228,7 +1247,6 @@ void AEPropertiesInspector::setupEffectsControls(QVBoxLayout *layout, BoundingBo
         connect(delBtn, &QToolButton::clicked, [box, effect, this]() {
             box->removeRasterEffect(effect->ref<RasterEffect>());
             if (mScene) { mScene->requestUpdate(); }
-            refreshSelection();
         });
         ehLayout->addWidget(delBtn);
 
