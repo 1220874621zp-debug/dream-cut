@@ -1452,7 +1452,7 @@ void NleTimelineView::razorCutAt(const QPoint &pos, const int clipId,
     // selection-neutral: drop the selection so the refresh after the
     // cut does not resurrect both halves by name
     mModel->clearSelection();
-    mModel->requestRazorCut(ids, frame);
+    const bool cutRet = mModel->requestRazorCut(ids, frame);
     QList<int> sorted = ids.values();
     std::sort(sorted.begin(), sorted.end());
     QString idStr;
@@ -1460,8 +1460,8 @@ void NleTimelineView::razorCutAt(const QPoint &pos, const int clipId,
         idStr += (idStr.isEmpty() ? QString() : QStringLiteral(","))
                  + QString::number(id);
     }
-    qInfo("[NLE] razor cut frame=%d all=%d ids=%s", frame, int(allTracks),
-          qUtf8Printable(idStr));
+    qInfo("[NLE] razor cut frame=%d all=%d ids=%s ret=%d", frame,
+          int(allTracks), qUtf8Printable(idStr), int(cutRet));
 }
 
 // PR track select: click collects the clicked clip plus every clip on

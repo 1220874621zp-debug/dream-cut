@@ -650,9 +650,17 @@ bool NleTimelineModel::splitBoxes(const QList<BoundingBox*> &boxes,
 {
     const auto scene = mPanelScene.data();
     if (!scene || boxes.isEmpty()) { return false; }
+    // 分割=粘贴+两侧 durRect 修剪的多步写入：中途每一次写入都会经
+    // minRelFrameChanged 同步触发 refreshFromDocument，而 refresh 尾
+    // 部的磁吸兜底/孤儿回贴会在“写了一半”的表上做布局写入（原件或
+    // 拷贝被兜底 shift 拉走、又被下一笔修剪拉回），终态随事件交错
+    // 随机——连切几刀后块长漂移、边界处掉出 1 帧碎屑串的根因。写回
+    // 守卫抑制全部中途刷新，finishAction 收尾一次性重建终态
+    mInWriteback = true;
     scene->clearBoxesSelection();
     for (auto *b : boxes) { scene->addBoxToSelection(b); }
     scene->splitBoxesAtFrame(frame);
+    mInWriteback = false;
     finishAction();
     return true;
 }
@@ -675,9 +683,19 @@ bool NleTimelineModel::requestSplitAtFrame(const int frame)
 
     QList<BoundingBox*> boxes;
     QList<eIndependentSound*> sounds;
+    int skippedEdges = 0;
+    // 切点须严格落在块内部（两侧各留至少一帧）：与剪刀路径同款守卫。
+    // 旧条件 start <= frame 允许在块头/块尾切——块尾切会把原件写成
+    // [end+1..end] 的非法倒置矩形（钳回后成 1 帧重复块），块头切出
+    // 1 帧碎片；这些退化半块不渲染缩略图（IMGDRAW 空图黑块）且把
+    // 主轨拆得支离破碎
+    const auto insideCut = [](const Clip * const c, const int f) {
+        return c->start < f && f < c->start + c->duration - 1;
+    };
     for (const int id : mSelected) {
         const auto c = clip(id);
         if (!c || !c->layer) { continue; }
+        if (!insideCut(c, frame)) { ++skippedEdges; continue; }
         const auto snd = enve_cast<eIndependentSound*>(c->layer.data());
         if (snd) { sounds << snd; continue; }
         const auto box = enve_cast<BoundingBox*>(c->layer.data());
@@ -687,7 +705,7 @@ bool NleTimelineModel::requestSplitAtFrame(const int frame)
     // clip under the frame in one press (sounds included)
     if (boxes.isEmpty() && sounds.isEmpty()) {
         for (const auto &c : mClips) {
-            if (!(c.start <= frame && frame < c.start + c.duration)) { continue; }
+            if (!insideCut(&c, frame)) { continue; }
             if (trackLocked(c.trackId)) { continue; }
             if (!c.layer) { continue; }
             const auto snd = enve_cast<eIndependentSound*>(c.layer.data());
@@ -696,7 +714,15 @@ bool NleTimelineModel::requestSplitAtFrame(const int frame)
             if (box) { boxes << box; }
         }
     }
-    if (boxes.isEmpty() && sounds.isEmpty()) { return false; }
+    if (skippedEdges > 0) {
+        emit logMessage(QStringLiteral("%1 块在切点边缘，无需分割")
+                                .arg(skippedEdges));
+    }
+    if (boxes.isEmpty() && sounds.isEmpty()) {
+        qInfo("[NLE] split frame=%d refused edge/empty sel=%d",
+              frame, int(mSelected.size()));
+        return false;
+    }
     // 转场窗口内禁分割：窗口帧同时是左块尾与右块头（CapCut 同款禁区）
     for (const auto &t : transitions()) {
         if (frame >= t.start && frame <= t.end) {
@@ -717,9 +743,15 @@ bool NleTimelineModel::requestSplitAtFrame(const int frame)
     if (!boxes.isEmpty()) { did = splitBoxes(boxes, frame) || did; }
     for (const auto l : stripAfter) { stripTransitionEffect(l); }
     if (!sounds.isEmpty()) {
+        // 声音分割同款多步写入，同款守卫（理由同 splitBoxes）
+        mInWriteback = true;
         scene->splitSoundsAtFrame(sounds, frame);
+        mInWriteback = false;
         did = true;
     }
+    qInfo("[NLE] split frame=%d boxes=%d sounds=%d edgeSkip=%d did=%d",
+          frame, int(boxes.count()), int(sounds.count()),
+          skippedEdges, int(did));
     return did;
 }
 
@@ -775,7 +807,10 @@ bool NleTimelineModel::requestRazorCut(const QSet<int> &clipIds,
     if (!boxes.isEmpty()) { did = splitBoxes(boxes, frame) || did; }
     for (const auto l : stripAfter) { stripTransitionEffect(l); }
     if (!sounds.isEmpty()) {
+        // 声音分割同款多步写入，同款守卫（理由同 splitBoxes）
+        mInWriteback = true;
         scene->splitSoundsAtFrame(sounds, frame);
+        mInWriteback = false;
         did = true;
     }
     return did;
