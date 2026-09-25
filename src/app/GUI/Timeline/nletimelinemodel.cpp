@@ -2523,6 +2523,63 @@ void NleTimelineModel::refreshFromDocument()
             mInWriteback = false;
         }
     }
+    // ---- 转场孤儿重叠回贴：剥特效不经模型的路径（属性面板"删除
+    // 特效"、撤销半步回放等）会把转场右块留在左移位——主轨相邻对
+    // 重叠而右块已无转场特效 = 布局残缺（磁吸压实只闭隙不拆叠，
+    // 重叠永续；之后一切命中/拖拽/磁吸规划都在坏布局上进行）。
+    // 发现即回贴右块恢复贴邻：按起始序扫描，无特效却沉入前块出点
+    // 的右移差额；有特效（活转场）容忍重叠（窗口语义）。一次性写
+    // 入不进撤销栈，装载中跳过（同锚治愈）
+    if (scene && !loadingProject) {
+        const int orphanMainId = mainTrackId();
+        if (orphanMainId >= 0) {
+            QList<const Clip*> order;
+            for (const auto &c : mClips) {
+                if (c.trackId != orphanMainId || c.audio) { continue; }
+                order.append(&c);
+            }
+            std::sort(order.begin(), order.end(),
+                      [](const Clip *a, const Clip *b) {
+                          if (a->start != b->start) {
+                              return a->start < b->start;
+                          }
+                          return a->clipId < b->clipId;
+                      });
+            QList<QPair<eBoxOrSound*, int>> orphanFixes;
+            int prevEnd = -1; // 前块出点（含已回贴修正的运行值）
+            for (const Clip *c : order) {
+                int start = c->start;
+                if (prevEnd > start) {
+                    const auto box = enve_cast<BoundingBox*>(
+                                c->layer.data());
+                    if (!transitionEffectOn(box)) {
+                        orphanFixes.append({c->layer.data(),
+                                            prevEnd - start});
+                        start = prevEnd;
+                    }
+                }
+                prevEnd = qMax(prevEnd, start + c->duration);
+            }
+            if (!orphanFixes.isEmpty()) {
+                mInWriteback = true;
+                const auto undoBlock = scene->blockUndoRedo();
+                for (const auto &f : orphanFixes) {
+                    shiftLayer(f.first, f.second);
+                }
+                mInWriteback = false;
+                // 模型表同步到终态（本分支无后续重建，同步防
+                // modelChanged 画旧位——磁吸兜底同款收尾）
+                for (const auto &f : orphanFixes) {
+                    for (auto &row : mClips) {
+                        if (row.layer.data() == f.first) {
+                            row.start += f.second;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
     // ---- solo 压制：同类任一轨独奏时未独奏轨的成员层隐藏。
     // 压制即层可见性（声音可听性=可见性，与静音同一机制），恢复恒
     // visible=true（剪映语义：取消独奏该回来的都回来）。快照仅内存，
