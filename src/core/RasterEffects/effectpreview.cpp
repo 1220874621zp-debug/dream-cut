@@ -36,6 +36,8 @@
 #include "effectpreviewlogo.h"
 
 #include <QtMath>
+#include <QPainter>
+#include <QPolygonF>
 #include <cstring>
 
 namespace {
@@ -352,7 +354,7 @@ NamedScan namedScanFor(const RasterEffectType type) {
     case RasterEffectType::TRANSITION_FLASH:
         return { "淡入时长", nullptr, 12., 12. };
     case RasterEffectType::TRANSITION_SLIDE:
-        return { "滑入时长", nullptr, 12., 12. };
+        return { "滑入时长", nullptr, 24., 24. };
     case RasterEffectType::TRANSITION_WIPE_CIRCLE:
     case RasterEffectType::TRANSITION_WIPE_LINEAR:
     case RasterEffectType::TRANSITION_BLINDS:
@@ -376,7 +378,10 @@ NamedScan namedScanFor(const RasterEffectType type) {
     case RasterEffectType::TRANSITION_LIGHT_SWEEP:
     case RasterEffectType::TRANSITION_FILM_GRAIN:
     case RasterEffectType::TRANSITION_PAGE_FLIP:
-        return { "淡入时长", nullptr, 12., 12. };
+        // 24-frame ramps on the 96-frame preview loop: the motion
+        // phase runs 1s in / 2s hold / 1s out so direction reads
+        // clearly instead of flashing by in half a second
+        return { "淡入时长", nullptr, 24., 24. };
     case RasterEffectType::WIPE:
         return { "time", nullptr, 0., 1. };
     case RasterEffectType::NOISE_FADE:
@@ -541,6 +546,145 @@ void setupDefaults(RasterEffect* const eff, const RasterEffectType type) {
 
 } // namespace
 
+namespace {
+
+// storyboard-style motion cue overlaid on transition preview cards:
+// a dark outline pass under a bright core keeps the arrow readable
+// over any content
+void previewDrawArrow(QPainter &p, const QPointF &from,
+                      const QPointF &to, const qreal thickness)
+{
+    const QPointF d = to - from;
+    const qreal len = qMax(1., std::hypot(d.x(), d.y()));
+    const QPointF u(d.x() / len, d.y() / len);
+    const QPointF n(-u.y(), u.x());
+    const qreal head = qMax(thickness * 2.6, 7.);
+    const QPointF tip = to;
+    QPolygonF tri;
+    tri << tip
+        << tip - u * head + n * head * 0.55
+        << tip - u * head - n * head * 0.55;
+    for (int pass = 0; pass < 2; pass++) {
+        const QColor col(pass == 0 ? QColor(0, 0, 0, 170)
+                                   : QColor(255, 255, 255, 215));
+        QPen pen(col, pass == 0 ? thickness + 2.5 : thickness,
+                 Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        p.setPen(pen);
+        p.setBrush(pass == 0 ? col : col);
+        p.drawLine(from, to - u * head * 0.7);
+        p.setPen(pass == 0 ? QPen(col, 1.5) : Qt::NoPen);
+        p.drawPolygon(tri);
+    }
+}
+
+// directional transitions carry a persistent arrow cue (like camera
+// move arrows on a storyboard): slide = one arrow along the travel,
+// zoom = four corner arrows converging or expanding, spin = two
+// opposing tangent arrows, mirror flip = two arrows meeting on the
+// flip axis. Drawn identically on every frame, so the per-frame
+// diff-based convergence tests cancel it out.
+void overlayTransitionCues(QImage &img, RasterEffect * const eff)
+{
+    if (!eff) { return; }
+    const auto type = eff->getEffectType();
+    const char *comboName = nullptr;
+    switch (type) {
+    case RasterEffectType::TRANSITION_SLIDE:
+    case RasterEffectType::TRANSITION_SPIN:
+        comboName = "方向"; break;
+    case RasterEffectType::TRANSITION_ZOOM:
+        comboName = "模式"; break;          // 0 shrink-in 1 grow-in
+    case RasterEffectType::TRANSITION_MIRROR_FLIP:
+        comboName = "翻转轴"; break;        // 0 vertical 1 horizontal
+    default:
+        return; // non-directional transitions get no cue
+    }
+    int comboVal = 0;
+    const auto combo = findComboByName(eff, QString::fromUtf8(comboName));
+    if (combo) { comboVal = combo->getCurrentValue(); }
+
+    QPainter p(&img);
+    p.setRenderHint(QPainter::Antialiasing);
+    const qreal w = img.width();
+    const qreal h = img.height();
+    const qreal th = qMax(2.5, w / 30.);
+    const QPointF c(w / 2., h / 2.);
+    const qreal m = qMin(w, h);
+
+    switch (type) {
+    case RasterEffectType::TRANSITION_SLIDE: {
+        // the clip travels INTO place: the cue follows the motion
+        // (from-right = moving leftwards, etc., matching the labels)
+        static const QPointF dirs[4] = {
+            QPointF(-1, 0), QPointF(1, 0),
+            QPointF(0, -1), QPointF(0, 1)
+        };
+        const QPointF d = dirs[comboVal & 3];
+        previewDrawArrow(p, c - d * m * 0.30, c + d * m * 0.30, th);
+        break;
+    }
+    case RasterEffectType::TRANSITION_ZOOM: {
+        // four corner arrows along the diagonals: shrink-in points
+        // at the centre, grow-in points away from it
+        const bool inward = comboVal == 0;
+        const qreal inset = m * 0.15;
+        const QPointF corners[4] = {
+            QPointF(inset, inset), QPointF(w - inset, inset),
+            QPointF(w - inset, h - inset), QPointF(inset, h - inset)
+        };
+        for (const auto &corner : corners) {
+            QPointF u = inward ? (c - corner) : (corner - c);
+            const qreal l = qMax(1., std::hypot(u.x(), u.y()));
+            u = QPointF(u.x() / l, u.y() / l);
+            const QPointF a = corner + u * m * 0.06;
+            const QPointF b = a + u * m * 0.15;
+            previewDrawArrow(p, a, b, th * 0.62);
+        }
+        break;
+    }
+    case RasterEffectType::TRANSITION_SPIN: {
+        // two tangent arrows on opposite sides of the centre:
+        // clockwise = top arrow pointing right, bottom pointing left
+        const bool cw = comboVal == 0;
+        const qreal r = m * 0.26;
+        const qreal arm = m * 0.16;
+        const QPointF top(c.x(), c.y() - r);
+        const QPointF bot(c.x(), c.y() + r);
+        const QPointF rightDir(c.x() + arm, c.y() - r);
+        const QPointF leftDir(c.x() - arm, c.y() - r);
+        const QPointF rightDirB(c.x() + arm, c.y() + r);
+        const QPointF leftDirB(c.x() - arm, c.y() + r);
+        if (cw) {
+            previewDrawArrow(p, top - QPointF(arm, 0), rightDir, th * 0.62);
+            previewDrawArrow(p, bot + QPointF(arm, 0), leftDirB, th * 0.62);
+        } else {
+            previewDrawArrow(p, top + QPointF(arm, 0), leftDir, th * 0.62);
+            previewDrawArrow(p, bot - QPointF(arm, 0), rightDirB, th * 0.62);
+        }
+        break;
+    }
+    case RasterEffectType::TRANSITION_MIRROR_FLIP: {
+        // two arrows meeting head-on at the flip axis
+        if (comboVal == 0) { // vertical axis: arrows press in from sides
+            previewDrawArrow(p, QPointF(c.x() - m * 0.36, c.y()),
+                             QPointF(c.x() - m * 0.10, c.y()), th * 0.62);
+            previewDrawArrow(p, QPointF(c.x() + m * 0.36, c.y()),
+                             QPointF(c.x() + m * 0.10, c.y()), th * 0.62);
+        } else { // horizontal axis: arrows press in from top/bottom
+            previewDrawArrow(p, QPointF(c.x(), c.y() - m * 0.36),
+                             QPointF(c.x(), c.y() - m * 0.10), th * 0.62);
+            previewDrawArrow(p, QPointF(c.x(), c.y() + m * 0.36),
+                             QPointF(c.x(), c.y() + m * 0.10), th * 0.62);
+        }
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+} // namespace
+
 namespace EffectPreview {
 
 bool canPreview(const RasterEffectType type) {
@@ -616,7 +760,11 @@ QList<QImage> renderEffectFrames(const RasterEffectType type,
         const qreal targetVal = scanParam ? scanParam->clamped(baseVal * 2.5) : 0.;
 
         const SkBitmap src = makeSample(type, imgSize);
-        const int loopSceneFrames = qMax(2, qRound(gPreviewLoopSec * gPreviewFps));
+        // transitions play on a doubled loop (4s): with the fade
+        // ramps pinned at 24 frames the motion phase lasts a full
+        // second each way instead of flashing by in half one
+        const int loopSceneFrames = qMax(2, qRound(gPreviewLoopSec * gPreviewFps)) *
+                (isTransitionEffectType(type) ? 2 : 1);
 
         // position/axis-type parameters get a gentle oscillation
         // around the default instead of the wide 2.5x sweep: a wide
@@ -666,6 +814,8 @@ QList<QImage> renderEffectFrames(const RasterEffectType type,
                 data.fHeight = static_cast<uint>(imgSize.height());
                 caller->processCpu(tools, data);
             }
+            // storyboard motion cue on directional transitions
+            overlayTransitionCues(img, eff.get());
             result << img;
         }
         // restore the factory default so a cached instance is not

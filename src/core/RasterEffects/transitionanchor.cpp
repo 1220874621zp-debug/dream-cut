@@ -52,5 +52,9 @@ qreal nleTransitionTotalFrames(const BoxRenderData * const data)
             }
         }
     }
-    return 48.;
+    // preview fallback: the effect-preview loop plays transitions on
+    // a 4-second cycle (gPreviewLoopSec * gPreviewFps * 2) so the
+    // in/hold/out phases read clearly; the real pipeline never hits
+    // this branch (data is always present there)
+    return 96.;
 }
