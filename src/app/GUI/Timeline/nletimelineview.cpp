@@ -620,10 +620,10 @@ void NleTimelineView::drawTransitions(QPainter &p)
         }
         const bool sel = mSelTransition == t.rightId;
         p.setRenderHint(QPainter::Antialiasing);
-        // 纯色转场条（用户指定 #F5FF43，无渐变）：不透明纯色本身
-        // 就压住了底下块的缩略图；选中态用深棕描边+把手区分
+        // 半透明纯色转场条（用户指定 #F5FF43 降不透明度露出视频块）：
+        // 无打底深色，透出交界两侧块的缩略图；选中态深棕描边+把手
         p.setPen(sel ? QPen(QColor(0x40, 0x30, 0x06), 2) : Qt::NoPen);
-        p.setBrush(QColor(0xF5, 0xFF, 0x43));
+        p.setBrush(QColor(0xF5, 0xFF, 0x43, sel ? 150 : 115));
         p.drawRoundedRect(r, 4, 4);
         // 选中态两侧把手（全高竖条）
         if (sel) {
