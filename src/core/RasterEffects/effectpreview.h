@@ -42,9 +42,12 @@ bool canPreview(const RasterEffectType type);
 
 // 渲染 nFrames 帧循环演示动画；失败时返回空列表（调用方显示
 // 占位图）。imgSize 建议 160x160 上下。
+// onlyFrame >= 0 时只渲染该下标的一帧（静态海报：面板卡片默认
+// 静态展示、悬停才播动画的懒加载模式），返回单元素列表。
 QList<QImage> renderEffectFrames(const RasterEffectType type,
                                  const int nFrames,
-                                 const QSize& imgSize);
+                                 const QSize& imgSize,
+                                 const int onlyFrame = -1);
 
 }
 

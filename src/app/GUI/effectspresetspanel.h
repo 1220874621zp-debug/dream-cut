@@ -30,6 +30,7 @@
 #include <QByteArray>
 #include <QImage>
 #include <QMap>
+#include <QPointer>
 #include <functional>
 #include "RasterEffects/rastereffect.h"
 
@@ -66,7 +67,8 @@ using EffectApplyFn = std::function<void(BoundingBox*)>;
 class EffectsPresetsPanel;
 
 // animated preview painter with a rounded dark frame; plays back the
-// offscreen-rendered frame sequence of one effect
+// offscreen-rendered frame sequence of one effect. Cards sit on the
+// poster frame (a mid-motion still) and only animate while hovered
 class EffectPreviewArea : public QWidget {
     Q_OBJECT
 public:
@@ -79,10 +81,18 @@ public:
     // effects get a light backdrop instead
     void setLightBase(const bool light);
 
+    int frameCount() const { return mFrames.count(); }
+    // representative still while not hovered: the mid-motion frame
+    // (openness ~0.5) tells more than the closed frame 0
+    void showPosterFrame();
+    // replay from the head window when a hover starts
+    void restartPlayback();
+
 protected:
     void paintEvent(QPaintEvent* const e) override;
 
 private:
+    int posterIndex() const { return mFrames.count() > 3 ? 2 : 0; }
     QList<QImage> mFrames;
     int mFrame = 0;
     QString mPlaceholder;
@@ -108,8 +118,17 @@ public:
     void setPreviewSize(const int size);
     void setLightPreview()
     { if (mPreviewArea) { mPreviewArea->setLightBase(true); } }
-    void setTileFrames(const QList<QImage>& frames)
-    { if (mPreviewArea) { mPreviewArea->setFrames(frames); } }
+    // hover-to-play: the full frame sequence loads lazily on the
+    // first hover; until then the tile carries only the poster
+    void setTileFrames(const QList<QImage>& frames);
+    bool hasAnimation() const
+    { return mPreviewArea && mPreviewArea->frameCount() > 1; }
+    bool isAnimationLoading() const { return mAnimLoading; }
+    void setAnimationLoading() { mAnimLoading = true; }
+    void restartAnimation()
+    { if (mPreviewArea) { mPreviewArea->restartPlayback(); } }
+    void showPosterFrame()
+    { if (mPreviewArea) { mPreviewArea->showPosterFrame(); } }
     void setUnavailable()
     {
         if (mPreviewArea) {
@@ -145,6 +164,7 @@ private:
     QLabel* mTagLabel = nullptr;
     QPushButton* mApplyBtn = nullptr;
     bool mChecked = false;
+    bool mAnimLoading = false;
     QPoint mDragStart;
     bool mDragging = false;
 };
@@ -208,6 +228,9 @@ private:
     QWidget* buildGridView();
     void buildTiles();
     void queueTileRender();
+    // lazy hover loading: render the full 16-frame loop of one tile
+    // offscreen on first hover (the initial pass only made posters)
+    void queueTileAnimation(EffectPreviewTile* tile);
     void filterTiles();
     void updatePlayTimer();
     QString categoryTag(const QString& category) const;
@@ -241,6 +264,11 @@ private:
     // bumped by every refresh / rebuild; in-flight render batches
     // started with an older generation discard their results
     int mTileGeneration = 0;
+    // the single tile under the mouse: only this one animates (hover
+    // polled from the play timer via underMouse(), which stays true
+    // while the cursor is over any child widget - enter/leave events
+    // would misfire when crossing the name label or apply button)
+    QPointer<EffectPreviewTile> mHoveredTile;
 
     static quint64 sDragGeneration;
     static EffectApplyFn sDragCallback;

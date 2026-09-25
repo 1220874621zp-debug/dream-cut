@@ -52,6 +52,7 @@
 #include <QButtonGroup>
 #include <QPainter>
 #include <QtConcurrent/QtConcurrentMap>
+#include <QtConcurrent/QtConcurrentRun>
 
 #include "Boxes/boundingbox.h"
 #include "RasterEffects/rastereffectmenucreator.h"
@@ -111,18 +112,22 @@ QByteArray readUserPresetStream(const QString& path)
     return QByteArray::fromBase64(data.toLatin1());
 }
 
-// worker-thread render input: pure data, no widget pointers
+// worker-thread render input: pure data, no widget pointers.
+// onlyFrame >= 0 requests a single static poster frame instead of
+// the whole loop (lazy hover loading: cards start as posters)
 struct TileRenderParams {
     RasterEffectType type = RasterEffectType::BLUR;
     int nFrames = 16;
     QSize size = QSize(160, 160);
+    int onlyFrame = -1;
 };
 
 // runs on a QtConcurrent worker thread: CPU-only offscreen effect
 // evaluation (see core EffectPreview), safe without GL or a scene
 QList<QImage> renderTilePreview(const TileRenderParams& p)
 {
-    return EffectPreview::renderEffectFrames(p.type, p.nFrames, p.size);
+    return EffectPreview::renderEffectFrames(p.type, p.nFrames, p.size,
+                                             p.onlyFrame);
 }
 }
 
@@ -160,6 +165,22 @@ void EffectPreviewArea::setLightBase(const bool light)
 {
     mLightBase = light;
     update();
+}
+
+void EffectPreviewArea::showPosterFrame()
+{
+    if (mFrames.count() > 1) {
+        mFrame = posterIndex();
+        update();
+    }
+}
+
+void EffectPreviewArea::restartPlayback()
+{
+    if (mFrames.count() > 1) {
+        mFrame = 0;
+        update();
+    }
 }
 
 void EffectPreviewArea::paintEvent(QPaintEvent* const e)
@@ -266,6 +287,12 @@ void EffectPreviewTile::setLoading()
     if (mPreviewArea) {
         mPreviewArea->setPlaceholder(QString::fromUtf8("渲染中..."));
     }
+}
+
+void EffectPreviewTile::setTileFrames(const QList<QImage>& frames)
+{
+    mAnimLoading = false;
+    if (mPreviewArea) { mPreviewArea->setFrames(frames); }
 }
 
 void EffectPreviewTile::setPreviewSize(const int size)
@@ -538,13 +565,38 @@ EffectsPresetsPanel::EffectsPresetsPanel(MainWindow * const mainWindow,
     });
     mainLayout->addLayout(btnLayout);
 
-    // gallery playback: advances every visible tile's preview
+    // gallery playback: hover-to-play. Cards sit on a static poster
+    // by default; the poll advances only the tile under the cursor
+    // and lazy-loads its frame loop on first hover (previously every
+    // visible tile animated together - a wall of 40+ moving cards)
     mPlayTimer = new QTimer(this);
     mPlayTimer->setInterval(40);
     connect(mPlayTimer, &QTimer::timeout, this, [this]() {
         if (mStack->currentIndex() != 1) { return; }
+        // underMouse() is rect-based, so the hover survives crossing
+        // the tile's child widgets (enter/leave events would misfire)
+        EffectPreviewTile* hovered = nullptr;
         for (const auto tile : mTiles) {
-            if (tile && tile->isVisible()) { tile->advance(); }
+            if (tile && tile->isVisible() && tile->underMouse()) {
+                hovered = tile;
+                break;
+            }
+        }
+        const auto prev = mHoveredTile.data();
+        if (prev && prev != hovered) {
+            prev->showPosterFrame();
+            mHoveredTile = nullptr;
+        }
+        if (hovered) {
+            if (mHoveredTile != hovered) {
+                mHoveredTile = hovered;
+                if (hovered->hasAnimation()) {
+                    hovered->restartAnimation();
+                } else {
+                    queueTileAnimation(hovered);
+                }
+            }
+            hovered->advance();
         }
     });
 
@@ -885,6 +937,8 @@ void EffectsPresetsPanel::queueTileRender()
         return;
     }
 
+    // poster pass: one mid-motion still per tile (1/16 the cost of
+    // the full loops); the animation frames load lazily on hover
     QVector<TileRenderParams> params;
     QVector<QPointer<EffectPreviewTile>> targets;
     for (const auto tile : mTiles) {
@@ -893,6 +947,7 @@ void EffectsPresetsPanel::queueTileRender()
         p.type = tile->effectType();
         p.nFrames = 16;
         p.size = QSize(160, 160);
+        p.onlyFrame = 2;
         params << p;
         targets << tile;
         tile->setLoading();
@@ -922,6 +977,43 @@ void EffectsPresetsPanel::queueTileRender()
         }
     });
     watcher->setFuture(QtConcurrent::mapped(params, &renderTilePreview));
+}
+
+void EffectsPresetsPanel::queueTileAnimation(EffectPreviewTile* const tile)
+{
+    if (!tile || !EffectPreview::canPreview(tile->effectType())) { return; }
+    // already looping or a render already in flight for this tile
+    if (tile->hasAnimation() || tile->isAnimationLoading()) { return; }
+    tile->setAnimationLoading();
+
+    TileRenderParams p;
+    p.type = tile->effectType();
+    p.nFrames = 16;
+    p.size = QSize(160, 160);
+
+    const int gen = mTileGeneration;
+    const QPointer<EffectPreviewTile> target = tile;
+    const auto watcher = new QFutureWatcher<QList<QImage>>(this);
+    connect(watcher, &QFutureWatcher<QList<QImage>>::finished,
+            this, [this, watcher, target, gen]() {
+        watcher->deleteLater();
+        if (gen != mTileGeneration) { return; }
+        if (!target) { return; }
+        const auto results = watcher->future().results();
+        if (results.isEmpty() || results.first().isEmpty()) {
+            target->setUnavailable();
+        } else {
+            target->setTileFrames(results.first());
+            // play only if the cursor is still on this tile: quick
+            // mouse-overs arrive after the hover already moved on
+            if (mHoveredTile == target) {
+                target->restartAnimation();
+            } else {
+                target->showPosterFrame();
+            }
+        }
+    });
+    watcher->setFuture(QtConcurrent::run(&renderTilePreview, p));
 }
 
 void EffectsPresetsPanel::filterTiles()

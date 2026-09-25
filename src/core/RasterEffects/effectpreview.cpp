@@ -719,13 +719,15 @@ bool canPreview(const RasterEffectType type) {
 
 QList<QImage> renderEffectFrames(const RasterEffectType type,
                                  const int nFrames,
-                                 const QSize& imgSize)
+                                 const QSize& imgSize,
+                                 const int onlyFrame)
 {
     QList<QImage> result;
     if (!canPreview(type)) { return result; }
     if (nFrames < 1 || imgSize.width() < 2 || imgSize.height() < 2) {
         return result;
     }
+    const int frameIdx = qBound(0, onlyFrame, nFrames - 1);
     try {
         // purpose-built sample paths (their callers cannot produce
         // the look offscreen): liquid glass needs the composite below
@@ -735,8 +737,10 @@ QList<QImage> renderEffectFrames(const RasterEffectType type,
         // their effects)
         if (type == RasterEffectType::LIQUID_GLASS ||
             type == RasterEffectType::LATTICE_WARP) {
-            for (int i = 0; i < nFrames; i++) {
-                const qreal t = i / static_cast<qreal>(nFrames);
+            const int n = onlyFrame >= 0 ? 1 : nFrames;
+            for (int i = 0; i < n; i++) {
+                const qreal t = (onlyFrame >= 0 ? frameIdx : i)
+                        / static_cast<qreal>(nFrames);
                 const SkBitmap frame =
                         type == RasterEffectType::LIQUID_GLASS
                         ? makeLiquidSample(imgSize.width(),
@@ -808,6 +812,9 @@ QList<QImage> renderEffectFrames(const RasterEffectType type,
         const bool gentleScan = (type == RasterEffectType::MIRROR);
 
         for (int i = 0; i < nFrames; i++) {
+            // poster mode: skip every other index entirely (no param
+            // sweep, no caller, no raster) - 1/nFrames the cost
+            if (onlyFrame >= 0 && i != frameIdx) { continue; }
             const qreal t = i / static_cast<qreal>(nFrames);
             const int relFrame = qRound(i * loopSceneFrames / static_cast<qreal>(nFrames));
 
