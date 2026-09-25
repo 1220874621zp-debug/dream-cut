@@ -2706,6 +2706,13 @@ void NleTimelineView::freezeAtPlayhead()
     mModel->requestFreeze(sel, mPlayheadFrame);
 }
 
+void NleTimelineView::reverseSelected()
+{
+    const auto sel = mModel->selection();
+    if (sel.isEmpty()) { return; }
+    mModel->requestReverse(sel);
+}
+
 void NleTimelineView::requestDelete(const bool ripple)
 {
     // 转场选中优先（与 KFT Del 同语义）：删的是转场特效——选中桥

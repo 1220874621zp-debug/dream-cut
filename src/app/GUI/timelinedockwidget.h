@@ -192,6 +192,7 @@ private:
     QToolButton *mNleAddBtn = nullptr;
     QAction *mNleSplitAtAct = nullptr;
     QAction *mNleFreezeAct = nullptr;
+    QAction *mNleReverseAct = nullptr;
     QAction *mNleUndoAct = nullptr;
     QAction *mNleRedoAct = nullptr;
     QAction *mMagneticAct = nullptr;

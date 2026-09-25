@@ -79,6 +79,12 @@ public:
     // (the "freeze did nothing, still a playing video" bug)
     void freezeToAnimFrame(const int animFrame);
 
+    // CapCut 倒放 (reverse playback): a descending linear remapping
+    // key pair flips the source order; toggling off restores the
+    // identity mapping. No duration/layout change - pure remapping
+    void reverseAction();
+    bool isReversed();
+
     qreal getStretch() const { return mStretch; }
 
     void reload();

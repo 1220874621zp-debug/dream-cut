@@ -227,6 +227,12 @@ const char* kNleFreezeSvg =
         "<path fill=\"none\" stroke=\"%1\" stroke-width=\"1.9\""
         " stroke-linecap=\"round\" d=\"M9.8 9.2 V14.8 M14.2 9.2 V14.8\"/>"
         "</svg>";
+// reverse (倒放): two rewind triangles pointing left
+const char* kNleReverseSvg =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
+        "<path fill=\"none\" stroke=\"%1\" stroke-width=\"1.9\""
+        " stroke-linejoin=\"round\" d=\"M11.5 12 L19.5 6.4 V17.6 Z"
+        " M3.5 12 L11.5 6.4 V17.6 Z\"/></svg>";
 // split at playhead: two half blocks cut by a dashed line
 const char* kNleSplitSvg =
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
@@ -803,6 +809,19 @@ void TimelineDockWidget::setupNleActions()
             &NleTimelineView::freezeAtPlayhead);
     insertAct(mNleFreezeAct);
     mMainWindow->cmdAddAction(mNleFreezeAct);
+
+    // reverse the selection (CapCut 倒放): descending remapping keys
+    // play the clip backwards; clicking again restores forward play
+    mNleReverseAct = new QAction(
+                QIcon(nleGlyphPixmap(kNleReverseSvg, QColor(0xc8, 0xc8, 0xc8))),
+                tr("倒放"), this);
+    mNleReverseAct->setToolTip(
+                tr("倒放选中块：画面反向播放；再次点击恢复正向（倒放段音频静音）"));
+    mNleReverseAct->setData(mNleReverseAct->toolTip());
+    connect(mNleReverseAct, &QAction::triggered, mNleView,
+            &NleTimelineView::reverseSelected);
+    insertAct(mNleReverseAct);
+    mMainWindow->cmdAddAction(mNleReverseAct);
 
     // undo / redo right on the timeline toolbar (CapCut layout); the
     // model refreshes itself after the scene undo

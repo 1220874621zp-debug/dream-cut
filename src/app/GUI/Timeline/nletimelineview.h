@@ -83,6 +83,8 @@ public slots:
     void splitAtPlayhead();
     // CapCut 定格: freeze the selection at the playhead
     void freezeAtPlayhead();
+    // CapCut 倒放: reverse the selected clips (toggle)
+    void reverseSelected();
     void requestDelete(const bool ripple = false);
 
 signals:

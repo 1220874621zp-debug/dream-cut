@@ -905,6 +905,51 @@ bool NleTimelineModel::requestFreeze(const QSet<int> &clipIds,
     return did;
 }
 
+// CapCut 倒放：反向线性重映射键对（画面源序倒转，块长/布局不变）；
+// 再点一次恢复正向。倒放段内嵌音频静音（反向音频需采样级处理，
+// 暂不实现），恢复正向时解除静音
+bool NleTimelineModel::requestReverse(const QSet<int> &clipIds)
+{
+    if (mInWriteback || mGestureActive) { return false; }
+    const auto scene = mPanelScene.data();
+    if (!scene) { return false; }
+    bool did = false;
+    bool anyReversed = false;
+    for (const int id : clipIds) {
+        const auto c = clip(id);
+        if (!c || !c->layer) { continue; }
+        const auto box = enve_cast<BoundingBox*>(c->layer.data());
+        const auto animBox = box ? dynamic_cast<AnimationBox*>(box) : nullptr;
+        if (!animBox) { continue; }
+        const bool wasReversed = animBox->isReversed();
+        animBox->reverseAction();
+        anyReversed = animBox->isReversed();
+        // 内嵌音频随倒放态静音/恢复
+        const auto vBox = dynamic_cast<VideoBox*>(box);
+        if (vBox && vBox->sound()) {
+            vBox->sound()->setVisible(!animBox->isReversed());
+        }
+        if (!wasReversed) {
+            box->prp_setName(QStringLiteral("倒放 %1").arg(box->prp_getName()));
+        } else {
+            auto name = box->prp_getName();
+            if (name.startsWith(QStringLiteral("倒放 "))) {
+                box->prp_setName(name.mid(3));
+            }
+        }
+        did = true;
+    }
+    if (!did) {
+        emit logMessage(QStringLiteral("倒放仅支持视频/序列类块"));
+        return false;
+    }
+    finishAction();
+    emit logMessage(anyReversed
+                        ? QStringLiteral("已倒放：画面反向播放（音频静音）")
+                        : QStringLiteral("已恢复正向播放"));
+    return true;
+}
+
 bool NleTimelineModel::requestSpeed(const int clipId, const qreal rate)
 {
     if (mInWriteback || mGestureActive) { return false; }

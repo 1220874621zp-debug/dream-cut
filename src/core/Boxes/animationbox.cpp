@@ -187,6 +187,51 @@ void AnimationBox::freezeToAnimFrame(const int animFrame) {
     prp_afterWholeInfluenceRangeChanged();
 }
 
+bool AnimationBox::isReversed() {
+    if(!mFrameRemapping->enabled()) return false;
+    const auto durRect = getAnimationDurationRect();
+    if(!durRect) return false;
+    return getAnimationFrameForRelFrame(durRect->getMinRelFrame()) >
+           getAnimationFrameForRelFrame(durRect->getMaxRelFrame());
+}
+
+void AnimationBox::reverseAction() {
+    if(!mSrcFramesCache) return;
+    const auto durRect = getAnimationDurationRect();
+    if(!durRect) return;
+    prp_pushUndoRedoName(tr("倒放"));
+    if(isReversed()) {
+        // already reversed: restoring the identity mapping plays
+        // forward again
+        disableFrameRemappingAction();
+        prp_afterWholeInfluenceRangeChanged();
+        return;
+    }
+    const int minRel = durRect->getMinRelFrame();
+    const int maxRel = durRect->getMaxRelFrame();
+    const int srcFirst = getAnimationFrameForRelFrame(minRel);
+    const int srcLast = getAnimationFrameForRelFrame(maxRel);
+    if(!mFrameRemapping->enabled()) enableFrameRemappingAction();
+
+    QList<stdsptr<QrealKey>> oldKeys;
+    for(auto *key : mFrameRemapping->anim_getKeys()) {
+        if(key) oldKeys << key->ref<QrealKey>();
+    }
+    for(const auto& key : oldKeys) {
+        mFrameRemapping->anim_removeKeyAction(key);
+    }
+    // descending pair: linear interpolation between the keys walks
+    // the source backwards across the window
+    const auto keyStart = enve::make_shared<QrealKey>(
+                qreal(srcLast), minRel, mFrameRemapping.get());
+    const auto keyEnd = enve::make_shared<QrealKey>(
+                qreal(srcFirst), maxRel, mFrameRemapping.get());
+    mFrameRemapping->anim_appendKeyAction(keyStart);
+    mFrameRemapping->anim_appendKeyAction(keyEnd);
+    updateAnimationRange();
+    prp_afterWholeInfluenceRangeChanged();
+}
+
 void AnimationBox::reload() {
     if(mSrcFramesCache) mSrcFramesCache->reload();
 }

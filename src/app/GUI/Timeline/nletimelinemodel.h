@@ -188,6 +188,9 @@ public:
     bool requestFreeze(const QSet<int> &clipIds, const int frame);
     // playback rate (1 = original) -> layer stretch
     bool requestSpeed(const int clipId, const qreal rate);
+    // CapCut 倒放: descending remapping keys reverse the source order,
+    // toggling again restores forward playback
+    bool requestReverse(const QSet<int> &clipIds);
     // ripple = false: plain remove; ripple = true: later clips on the
     // same track slide left to close the gap
     bool requestDelete(const QSet<int> &clipIds, const bool ripple);
