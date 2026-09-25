@@ -1615,8 +1615,8 @@ void NleTimelineView::mousePressEvent(QMouseEvent *e)
                 mDragClipId = trId;
                 mTransDragFrames = t.frames;
                 mTransDragX = e->pos().x();
-                // 按住交界左半往左拖 = 加长，右半往右拖 = 加长
-                mTransDragDir = e->pos().x() <= frameToX(t.end + 1) ? -1 : 1;
+                // 按住交界左半往左拖 = 加长，右半（含正中）往右拖 = 加长
+                mTransDragDir = e->pos().x() < frameToX(t.end + 1) ? -1 : 1;
                 break;
             }
             update();
@@ -2325,13 +2325,17 @@ void NleTimelineView::mouseReleaseEvent(QMouseEvent *e)
         return;
     }
 
-    // 转场窗口拖拽提交：预览帧数落模型（夹制在模型侧）
+    // 转场窗口拖拽提交：预览帧数落模型（夹制在模型侧）。
+    // 手势复位必须先于提交——requestTransitionDuration 的守卫拒绝
+    // 手势活跃期的模型写（旧版提前 return 漏了复位 = 拖拽调窗
+    // 从未真正生效，且手势残留会拒绝其后的删除等全部模型操作）
     if (mDrag == DragMode::TransitionSize) {
         mDrag = DragMode::None;
         const int id = mDragClipId;
         mDragClipId = -1;
         const int n = mTransPreviewN;
         mTransPreviewN = -1;
+        mModel->setGestureActive(false);
         if (id >= 0 && n > 0) {
             mModel->requestTransitionDuration(id, n);
         }
@@ -2711,6 +2715,14 @@ void NleTimelineView::freezeAtPlayhead()
 
 void NleTimelineView::requestDelete(const bool ripple)
 {
+    // 转场选中优先（与 KFT Del 同语义）：删的是转场特效——选中桥
+    // 已把模型选择指到右块，绝不能顺着选择集把整个视频块删掉
+    if (mSelTransition >= 0) {
+        mModel->requestRemoveTransition(mSelTransition);
+        mSelTransition = -1;
+        update();
+        return;
+    }
     const auto sel = mModel->selection();
     if (sel.isEmpty()) { return; }
     mModel->requestDelete(sel, ripple);
