@@ -116,18 +116,24 @@ void SlideEffectCaller::processCpu(CpuRenderTools& renderTools,
     // zero offset must still copy src into dst: the pipeline hands the
     // caller an uninitialized dst bitmap and replaces the rendered
     // image with it, so an early return here draws garbage/black
+    // Sampling is from the OPPOSITE side (xi - dx): dx > 0 shifts the
+    // content toward +x, so the image enters the frame from the
+    // labeled edge (从右侧: k=1 -> dx=w -> fully beyond the right
+    // edge; k=0.5 -> left half of the source fills the right half of
+    // the frame). Sampling xi + dx instead inverted all four
+    // directions (the slide entered from the edge opposite the label)
     const int dx = qRound(mDx * w);
     const int dy = qRound(mDy * h);
 
     for (int yi = yMin; yi <= yMax; yi++) {
         auto dst = static_cast<uchar*>(
                     renderTools.fDstBtmp.getAddr(0, yi - yMin));
-        const int sy = yi + dy;
+        const int sy = yi - dy;
         const bool rowIn = sy >= 0 && sy < h;
         auto src = rowIn ? static_cast<uchar*>(
                      renderTools.fSrcBtmp.getAddr(xMin, sy)) : nullptr;
         for (int xi = xMin; xi <= xMax; xi++) {
-            const int sx = xi + dx;
+            const int sx = xi - dx;
             if (src && sx >= 0 && sx < w) {
                 const uchar* s = src + 4 * (sx - xMin);
                 for (int c = 0; c < 4; c++) { *dst++ = *s++; }

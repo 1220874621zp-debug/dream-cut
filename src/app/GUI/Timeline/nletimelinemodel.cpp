@@ -379,6 +379,21 @@ void NleTimelineModel::setLayerRange(eBoxOrSound * const layer,
     };
     if (newMin > oldMin || newMax > oldMax) { moveMax(); moveMin(); }
     else { moveMin(); moveMax(); }
+    // 纯移动（时长不变）携动 FixedLen 的源映射锚。只挪 min/max 而
+    // animMin 不动，块内 relFrame 会整段落在 anim 范围外：
+    // getAnimationFrameForRelFrame 恒被钳到尾帧（画面冻结在最后一源
+    // 帧），且 AnimationBox::prp_getIdenticalRelRange 走范围外分支返
+    // 回整条剪辑——渲染数据跨帧复用（转场特效的位移烘焙在渲染数据
+    // 里，随重渲时机乱跳=画面闪烁）。块首恒显源帧 in 的不变量 =
+    // animMin == minRel - in：平移时两侧同加 δ 即保；修剪（时长变
+    // 化）不动锚=CapCut 左修剪跳过源头的语义
+    if (newMin != oldMin && newMax - newMin == oldMax - oldMin) {
+        const auto flar = dur->ref<FixedLenAnimationRect>();
+        if (flar) {
+            flar->setFirstAnimationFrame(
+                        flar->getMinAnimRelFrame() + (newMin - oldMin));
+        }
+    }
 }
 
 void NleTimelineModel::shiftLayer(eBoxOrSound * const layer,
@@ -1191,6 +1206,14 @@ bool NleTimelineModel::requestInsertMedia(const QString &path,
             if (flar) { flar->setFirstAnimationFrame(-inFrame); }
             dur->setMinAbsFrame(S);
             dur->setMaxAbsFrame(S + len - 1);
+            // 源映射锚跟最终落位走：块首恒显源帧 in 要求
+            // animMin == minRel - in（锚留在 0 时 S>0 的插入整块
+            // 落在 anim 范围外=源帧恒钳尾帧+渲染 identical 整条冻结）；
+            // 异步解码若再把 minRel 漂 ±1，由 refresh 的锚治愈兜底
+            if (flar) {
+                flar->setFirstAnimationFrame(
+                            dur->getMinRelFrame() - inFrame);
+            }
         }
         box->setTrackId(trackId);
     }
@@ -2445,6 +2468,57 @@ void NleTimelineModel::refreshFromDocument()
                 // QSharedPointer<FixedLen> converts to
                 // QSharedPointer<DurationRectangle> implicitly
                 layer->setDurationRectangle(dur);
+            }
+            mInWriteback = false;
+        }
+    }
+    // ---- FixedLen 源映射锚治愈：视频块的健康不变量 = 可见窗 ⊆ 源
+    // anim 窗（源长 ≥ 可见长 + 跳过的头）。历史写回（拖拽落位/监视
+    // 插入/装载前的旧工程）只挪 min/max 不携动 animMin，块整段落在
+    // anim 范围外——pixId 恒钳尾帧（画面冻在一帧）且 identical 范围
+    // 整条剪辑（渲染数据跨帧复用，挂上去的转场特效位移随重渲时机
+    // 乱跳 = 画面闪烁）。发现脱钩即重锚到 minRel（按 in=0 语义从源
+    // 头播放；健康剪辑此判定恒假零开销）——一次性写入不进撤销栈，
+    // 装载中跳过（表未到，同收编）
+    if (scene && !loadingProject) {
+        bool anyAnchorBroken = false;
+        for (int i = 0; i < items.size(); ++i) {
+            const auto layer = items[i].first;
+            if (items[i].second) { continue; }
+            const auto ab = enve_cast<AnimationBox*>(layer);
+            if (!ab || !layer->getDurationRectangle()) { continue; }
+            const auto flar = layer->getDurationRectangle()->
+                    ref<FixedLenAnimationRect>();
+            if (!flar) { continue; }
+            const int aMin = flar->getMinAnimRelFrame();
+            const int aMax = flar->getMaxAnimRelFrame();
+            if (aMax - aMin < 1) { continue; }
+            const auto vis = layer->getDurationRectangle()->getRelFrameRange();
+            if (vis.fMin >= aMin && vis.fMax <= aMax) { continue; }
+            anyAnchorBroken = true;
+            break;
+        }
+        if (anyAnchorBroken) {
+            mInWriteback = true;
+            const auto undoBlock = scene->blockUndoRedo();
+            for (int i = 0; i < items.size(); ++i) {
+                const auto layer = items[i].first;
+                if (items[i].second) { continue; }
+                const auto ab = enve_cast<AnimationBox*>(layer);
+                if (!ab || !layer->getDurationRectangle()) { continue; }
+                const auto flar = layer->getDurationRectangle()->
+                        ref<FixedLenAnimationRect>();
+                if (!flar) { continue; }
+                const int aMin = flar->getMinAnimRelFrame();
+                const int aMax = flar->getMaxAnimRelFrame();
+                if (aMax - aMin < 1) { continue; }
+                const auto vis = layer->getDurationRectangle()->
+                        getRelFrameRange();
+                if (vis.fMin >= aMin && vis.fMax <= aMax) { continue; }
+                flar->setFirstAnimationFrame(vis.fMin);
+                // 锚是静默字段：内容变了必须显式失效（userChange 推
+                // 状态版本号+作废渲染缓存，与编辑同款语义）
+                ab->planUpdate(UpdateReason::userChange);
             }
             mInWriteback = false;
         }
