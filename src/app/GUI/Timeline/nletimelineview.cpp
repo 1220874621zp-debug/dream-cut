@@ -620,27 +620,27 @@ void NleTimelineView::drawTransitions(QPainter &p)
         }
         const bool sel = mSelTransition == t.rightId;
         p.setRenderHint(QPainter::Antialiasing);
-        // 半透明纯色转场条（用户指定 #F5FF43 降不透明度露出视频块）：
-        // 无打底深色，透出交界两侧块的缩略图；选中态深棕描边+把手
-        p.setPen(sel ? QPen(QColor(0x40, 0x30, 0x06), 2) : Qt::NoPen);
-        p.setBrush(QColor(0xF5, 0xFF, 0x43, sel ? 150 : 115));
+        // 半透明纯色转场条（天蓝 #87CEEB，用户指定）透出交界两侧
+        // 块的缩略图；选中态深藏青描边+把手，标签同色保蓝底可读
+        p.setPen(sel ? QPen(QColor(0x0a, 0x2a, 0x45), 2) : Qt::NoPen);
+        p.setBrush(QColor(0x87, 0xCE, 0xEB, sel ? 150 : 115));
         p.drawRoundedRect(r, 4, 4);
         // 选中态两侧把手（全高竖条）
         if (sel) {
-            p.setBrush(QColor(0x40, 0x30, 0x06));
+            p.setBrush(QColor(0x0a, 0x2a, 0x45));
             p.setPen(Qt::NoPen);
             p.drawRoundedRect(r.adjusted(1, 6, -r.width() + 4, -6), 1.5, 1.5);
             p.drawRoundedRect(r.adjusted(r.width() - 4, 6, -1, -6), 1.5, 1.5);
         }
         p.setFont(f);
-        p.setPen(QColor(0x40, 0x30, 0x06));
+        p.setPen(QColor(0x0a, 0x2a, 0x45));
         const QString label = t.typeName.isEmpty()
                 ? QStringLiteral("转场") : t.typeName;
         if (r.width() >= 54) {
             p.drawText(r, Qt::AlignCenter, label);
         } else if (r.width() >= 12) {
             // 窄块只画一枚菱形点
-            p.setBrush(QColor(0x40, 0x30, 0x06));
+            p.setBrush(QColor(0x0a, 0x2a, 0x45));
             p.setPen(Qt::NoPen);
             const QPointF c = r.center();
             QPolygonF dia;
