@@ -845,8 +845,30 @@ bool NleTimelineModel::requestFreeze(const QSet<int> &clipIds,
         if (animBox) { animBoxes << animBox; }
     }
     if (animBoxes.isEmpty()) {
-        emit logMessage(QStringLiteral("定格仅支持视频/序列类块"));
+        // CapCut 动线：定格作用于"指针所在的块"——选中集为空或全部
+        // 不适用时回退到播放头下的未锁轨视频块（此前空选静默无反馈
+        // = 用户感知"点了没反应"）
+        for (const auto &c : mClips) {
+            if (c.audio || !c.layer) { continue; }
+            if (!(c.start < frame && frame < c.start + c.duration - 1)) { continue; }
+            if (trackLocked(c.trackId)) { continue; }
+            const auto box = enve_cast<BoundingBox*>(c.layer.data());
+            const auto animBox = box ? dynamic_cast<AnimationBox*>(box) : nullptr;
+            if (animBox) { animBoxes << animBox; }
+        }
+    }
+    if (animBoxes.isEmpty()) {
+        emit logMessage(QStringLiteral(
+                    "定格需要播放头落在视频块内（当前指针处没有可定格的视频）"));
         return false;
+    }
+    // 转场窗口内禁分割（同 requestSplitAtFrame）：窗口帧同时是左块
+    // 尾与右块头，切开产生无主半块
+    for (const auto &t : transitions()) {
+        if (frame >= t.start && frame <= t.end) {
+            emit logMessage(QStringLiteral("转场区域内不能定格，先删除或移开转场"));
+            return false;
+        }
     }
 
     // 冻结的源帧 = 播放头帧经原块的源映射（两刀分割不动锚，前后
@@ -895,6 +917,11 @@ bool NleTimelineModel::requestFreeze(const QSet<int> &clipIds,
         // 定格段静音（CapCut：固定画面无声）
         const auto vBox = dynamic_cast<VideoBox*>(piece);
         if (vBox && vBox->sound()) { vBox->sound()->setVisible(false); }
+        // 剥掉克隆携带的休眠转场特效：定格段必须是纯画面，否则段头
+        // 按转场入窗口渐入（半透明淡入=看着像还在播）；尾部同剥
+        // （requestSplitAtFrame 的 stripAfter 同款语义——右半剥特效）
+        stripTransitionEffect(piece);
+        stripTransitionEffect(b);
         did = true;
     }
     finishAction();

@@ -2701,9 +2701,9 @@ void NleTimelineView::splitAtPlayhead()
 
 void NleTimelineView::freezeAtPlayhead()
 {
-    const auto sel = mModel->selection();
-    if (sel.isEmpty()) { return; }
-    mModel->requestFreeze(sel, mPlayheadFrame);
+    // empty selection is fine: the model falls back to the unlocked
+    // video clip under the playhead (CapCut acts on the pointer clip)
+    mModel->requestFreeze(mModel->selection(), mPlayheadFrame);
 }
 
 void NleTimelineView::reverseSelected()

@@ -803,7 +803,7 @@ void TimelineDockWidget::setupNleActions()
                 QIcon(nleGlyphPixmap(kNleFreezeSvg, QColor(0xc8, 0xc8, 0xc8))),
                 tr("定格"), this);
     mNleFreezeAct->setToolTip(
-                tr("定格：播放头起插入 2 秒固定画面（当前帧），之后视频继续"));
+                tr("定格：播放头起插入 2 秒固定画面（选中块或指针所在的块），之后视频继续"));
     mNleFreezeAct->setData(mNleFreezeAct->toolTip());
     connect(mNleFreezeAct, &QAction::triggered, mNleView,
             &NleTimelineView::freezeAtPlayhead);
