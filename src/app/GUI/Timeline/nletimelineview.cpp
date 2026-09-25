@@ -622,32 +622,33 @@ void NleTimelineView::drawTransitions(QPainter &p)
         p.setRenderHint(QPainter::Antialiasing);
         // 实心底色打底（块体同款深底）再叠渐变高光：转场条压在两块
         // 交界上，不能透出底下块的缩略图，否则像贴在某块的头上
+        // （CapCut 式金黄转场条，标签用深棕字保证黄底可读）
         QPainterPath base;
         base.addRoundedRect(r, 4, 4);
-        p.fillPath(base, QColor(0x14, 0x1c, 0x22));
+        p.fillPath(base, QColor(0x20, 0x19, 0x08));
         QRadialGradient grad(r.center(), r.width() / 2. + 1);
-        grad.setColorAt(0., QColor(0x18, 0x8a, 0x74, sel ? 235 : 185));
-        grad.setColorAt(1., QColor(0x0c, 0x60, 0x52, sel ? 225 : 165));
+        grad.setColorAt(0., QColor(0xf7, 0xc5, 0x3c, sel ? 240 : 190));
+        grad.setColorAt(1., QColor(0xcf, 0x92, 0x14, sel ? 230 : 170));
         p.setBrush(grad);
-        p.setPen(QPen(sel ? QColor(0xd8, 0xff, 0xf2)
-                         : QColor(0x2a, 0xb0, 0x98, 200), sel ? 2 : 1));
+        p.setPen(QPen(sel ? QColor(0xff, 0xf0, 0xbe)
+                         : QColor(0xe6, 0xae, 0x2e, 200), sel ? 2 : 1));
         p.drawRoundedRect(r, 4, 4);
         // 选中态两侧把手（全高竖条）
         if (sel) {
-            p.setBrush(QColor(0xd8, 0xff, 0xf2));
+            p.setBrush(QColor(0xff, 0xf0, 0xbe));
             p.setPen(Qt::NoPen);
             p.drawRoundedRect(r.adjusted(1, 6, -r.width() + 4, -6), 1.5, 1.5);
             p.drawRoundedRect(r.adjusted(r.width() - 4, 6, -1, -6), 1.5, 1.5);
         }
         p.setFont(f);
-        p.setPen(QColor(0xea, 0xff, 0xf8));
+        p.setPen(QColor(0x40, 0x30, 0x06));
         const QString label = t.typeName.isEmpty()
                 ? QStringLiteral("转场") : t.typeName;
         if (r.width() >= 54) {
             p.drawText(r, Qt::AlignCenter, label);
         } else if (r.width() >= 12) {
             // 窄块只画一枚菱形点
-            p.setBrush(QColor(0xea, 0xff, 0xf8));
+            p.setBrush(QColor(0x40, 0x30, 0x06));
             p.setPen(Qt::NoPen);
             const QPointF c = r.center();
             QPolygonF dia;
