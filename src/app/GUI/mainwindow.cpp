@@ -2259,7 +2259,10 @@ void MainWindow::importLinkedProject()
                 QDir::homePath() : mDocument.fEvFile;
     const auto path = AppSupport::getOpenFile(
                 this, title, defPath,
-                tr("工程 %1").arg("(*.friction *.dreamcut *.ev)"));
+                tr("支持的工程 (*.friction *.dreamcut *.ev);;"
+                   "friction 工程 (*.friction);;"
+                   "DreamCut 工程 (*.dreamcut *.ev);;"
+                   "所有文件 (*)"));
     enableEventFilter();
     if (path.isEmpty()) { return; }
 
