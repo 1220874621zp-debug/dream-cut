@@ -2705,11 +2705,18 @@ void NleTimelineView::dropEvent(QDropEvent *e)
 
     const QPointF p = e->position();
     // 纯音频文件（音效库/监视器拖入）：CapCut 音效语义——路由最近
-    // 音频轨，落 eIndependentSound 块；时长秒由 mime 携带（视图按
-    // 场景 fps 换算在模型侧），video 分支的帧出入点对音频无意义
+    // 音频轨，落 eIndependentSound 块；出入点秒数由 mime 携带
+    // （clip-iosec，监视器 zone 换算），块长按场景 fps 在模型侧换算
     if (SoundBrowserPanel::isSoundFile(path)) {
         const qreal sec = QString::fromUtf8(mime->data(QStringLiteral(
                     "application/x-dreamcut-clip-sec"))).toDouble();
+        qreal inSec = 0., outSec = -1.;
+        const auto ioSec = QString::fromUtf8(mime->data(QStringLiteral(
+                    "application/x-dreamcut-clip-iosec"))).split(',');
+        if (ioSec.size() == 2) {
+            inSec = ioSec.at(0).toDouble();
+            outSec = ioSec.at(1).toDouble();
+        }
         int aIdx = p.y() > rulerHeight() ? trackAtY(int(p.y())) : -1;
         if (aIdx < 0 || !mModel->tracks().value(aIdx).audio) {
             aIdx = nearestTrackOfType(int(p.y()), true);
@@ -2721,7 +2728,8 @@ void NleTimelineView::dropEvent(QDropEvent *e)
             return;
         }
         const int frame = qMax(0, xToFrame(int(p.x())));
-        if (mModel->requestInsertSound(path, tr.id, frame, sec)) {
+        if (mModel->requestInsertSound(path, tr.id, frame, sec,
+                                       inSec, outSec)) {
             e->acceptProposedAction();
         }
         return;

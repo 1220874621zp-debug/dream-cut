@@ -1,4 +1,5 @@
 #include "clipmonitorwidget.h"
+#include "soundbrowserpanel.h"
 
 #include <QAudioOutput>
 #include <QDrag>
@@ -202,6 +203,22 @@ protected:
         mime->setData(QStringLiteral("application/x-dreamcut-clip-inout"),
                       QStringLiteral("%1,%2").arg(in).arg(out)
                               .toUtf8());
+        // 纯音频额外携带秒数出入点：音频块长度按场景 fps 换算
+        // （监视器帧基准取媒体帧率/30 默认，与场景 fps 不保证一致）
+        if (SoundBrowserPanel::isSoundFile(mMon->path())) {
+            const qreal fpsM = mMon->mFps > 1. ? mMon->mFps : 30.;
+            const qreal inSec = mMon->hasZone()
+                                        ? mMon->zoneIn() / fpsM : 0.;
+            const qreal outSec = mMon->hasZone()
+                                         ? mMon->zoneOut() / fpsM
+                                         : mMon->mDurationMs / 1000.;
+            mime->setData(QStringLiteral(
+                              "application/x-dreamcut-clip-iosec"),
+                          QStringLiteral("%1,%2")
+                                  .arg(QString::number(inSec, 'f', 3),
+                                       QString::number(outSec, 'f', 3))
+                                  .toUtf8());
+        }
         drag->setMimeData(mime);
         if (!mFrame.isNull()) {
             drag->setPixmap(QPixmap::fromImage(

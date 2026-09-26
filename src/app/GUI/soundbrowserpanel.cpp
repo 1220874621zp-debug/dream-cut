@@ -74,6 +74,43 @@ QStringList soundExtensions()
             << QStringLiteral("aac") << QStringLiteral("wma");
     return exts;
 }
+
+// 收藏星标（特效面板 EffectFavButton 同款：自绘五角星，不依赖
+// 主题图标）——半透明圆盘衬底，未选灰星、选中金星
+class SoundFavButton : public QToolButton {
+public:
+    explicit SoundFavButton(QWidget* const parent)
+        : QToolButton(parent) {}
+
+protected:
+    void paintEvent(QPaintEvent* const e) override {
+        Q_UNUSED(e)
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(0, 0, 0,
+                          underMouse() || isChecked() ? 175 : 115));
+        p.drawEllipse(rect().adjusted(1, 1, -1, -1));
+        QPolygonF star;
+        const QPointF c(width() / 2., height() / 2.);
+        const qreal rO = qMin(width(), height()) * 0.36;
+        const qreal rI = rO * 0.45;
+        for (int i = 0; i < 10; i++) {
+            const qreal ang = -M_PI / 2. + i * M_PI / 5.;
+            const qreal r = (i % 2 == 0) ? rO : rI;
+            star << QPointF(c.x() + r * std::cos(ang),
+                            c.y() + r * std::sin(ang));
+        }
+        if (isChecked()) {
+            p.setBrush(QColor(245, 197, 24));
+            p.setPen(QPen(QColor(120, 90, 0), 1));
+        } else {
+            p.setBrush(QColor(235, 235, 235, underMouse() ? 255 : 205));
+            p.setPen(QPen(QColor(150, 150, 150), 1));
+        }
+        p.drawPolygon(star);
+    }
+};
 } // namespace
 
 SoundCardWidget::SoundCardWidget(const QString& path, const QString& title,
@@ -86,8 +123,8 @@ SoundCardWidget::SoundCardWidget(const QString& path, const QString& title,
     setCursor(Qt::PointingHandCursor);
     setMouseTracking(true);
 
-    // 收藏星标（特效面板 EffectFavButton 同款：自绘星，不依赖主题图标）
-    mStarBtn = new QToolButton(this);
+    // 收藏星标（自绘五角星按钮）
+    mStarBtn = new SoundFavButton(this);
     mStarBtn->setCheckable(true);
     mStarBtn->setCursor(Qt::PointingHandCursor);
     mStarBtn->setToolTip(QString::fromUtf8("收藏"));
@@ -653,9 +690,12 @@ void SoundBrowserPanel::rebuildGrid()
                 [this](SoundCardWidget* c) {
             emit monitorRequested(c->path());
         });
-        // 单击 = 播放/暂停切换；右键 = 音效管理菜单
+        // 单击 = 装载到片段监视器（kdenlive/项目面板同语义：预览
+        // 窗口内 I/O 精确选段后拖入时间轴）；右键 = 音效管理菜单
         connect(card, &SoundCardWidget::clicked, this, [this](
-                    SoundCardWidget* c) { togglePreview(c); });
+                    SoundCardWidget* c) {
+            emit monitorRequested(c->path());
+        });
         connect(card, &SoundCardWidget::contextRequested, this,
                 [this](SoundCardWidget* c, const QPoint& gp) {
             showCardMenu(c, gp);

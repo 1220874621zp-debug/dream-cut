@@ -367,12 +367,22 @@ void NleTimelineModel::setLayerRange(eBoxOrSound * const layer,
     const int newMax = start + duration - 1;
     const int oldMin = dur->getMinAbsFrame();
     const int oldMax = dur->getMaxAbsFrame();
-    // rel/abs shift is constant, so abs deltas are valid rel moves.
-    // Order by direction (shiftLayer's rule): moving min first on a
-    // right shift crosses min past max and the illegal-state clamp
-    // pins it back to the OLD max - the clip then spans the wrong
-    // range with an inflated duration (drag release looked like the
-    // clip vanished into a wrong span)
+    if (newMin != oldMin && newMax - newMin == oldMax - oldMin) {
+        // 纯移动（时长不变）：整移 relShift（shiftLayer 同机制）。
+        // 旧双边 moveMin/moveMax 版本 relShift 不动——画面靠 anim 锚
+        // heal 保住，但声音链 absSecondToRelSeconds 只认 relShift，
+        // 拖拽后的声音块读的是源文件第 δ/fps 秒之后的段（短音效整
+        // 段静音）。整移对画面等价（pixId = relFrame - animMinRel，
+        // relFrame = abs - relShift 两项相消恒不变），relFrame 恒在
+        // anim 窗内，连锚 heal 都不再需要
+        dur->startPosTransform();
+        dur->changeFramePosBy(newMin - oldMin);
+        dur->finishPosTransform();
+        return;
+    }
+    // 修剪（时长变化）：rel 空间 = 源空间，单边移动即 CapCut 裁源
+    // 语义。方向序（shiftLayer 规则）：右移先动 max，否则 min 越过
+    // max 被非法态钳回旧 max，块跨错误区间（拖拽释放块凭空变跨度的旧案）
     const auto moveMin = [&dur, newMin, oldMin]() {
         if (newMin == oldMin) { return; }
         dur->startMinFramePosTransform();
@@ -387,21 +397,6 @@ void NleTimelineModel::setLayerRange(eBoxOrSound * const layer,
     };
     if (newMin > oldMin || newMax > oldMax) { moveMax(); moveMin(); }
     else { moveMin(); moveMax(); }
-    // 纯移动（时长不变）携动 FixedLen 的源映射锚。只挪 min/max 而
-    // animMin 不动，块内 relFrame 会整段落在 anim 范围外：
-    // getAnimationFrameForRelFrame 恒被钳到尾帧（画面冻结在最后一源
-    // 帧），且 AnimationBox::prp_getIdenticalRelRange 走范围外分支返
-    // 回整条剪辑——渲染数据跨帧复用（转场特效的位移烘焙在渲染数据
-    // 里，随重渲时机乱跳=画面闪烁）。块首恒显源帧 in 的不变量 =
-    // animMin == minRel - in：平移时两侧同加 δ 即保；修剪（时长变
-    // 化）不动锚=CapCut 左修剪跳过源头的语义
-    if (newMin != oldMin && newMax - newMin == oldMax - oldMin) {
-        const auto flar = dur->ref<FixedLenAnimationRect>();
-        if (flar) {
-            flar->setFirstAnimationFrame(
-                        flar->getMinAnimRelFrame() + (newMin - oldMin));
-        }
-    }
 }
 
 void NleTimelineModel::shiftLayer(eBoxOrSound * const layer,
@@ -1392,10 +1387,18 @@ bool NleTimelineModel::requestInsertMedia(const QString &path,
 // 所以单独成入口。让位+落块同一 mInWriteback 事务（中途 refresh 短
 // 路），最后一次 finishAction 让兜底压实对插入终态生效，与
 // requestInsertMedia 同款铁律
+//
+// 源映射铁律（探针实证）：声音链 absSecondToRelSeconds 只认
+// relShift（整块搬移值），源秒 = (abs - relShift)/fps——双边 abs
+// 设置 relShift 恒 0，非零落点的块读的是源文件第 S/fps 秒（短音效
+// =整段静音）。正确姿势：durRect rel 区间 = 源段 [inF..outF]，
+// changeFramePosBy 整移 relShift 落位（shiftLayer 同机制）
 bool NleTimelineModel::requestInsertSound(const QString &path,
                                           const int trackId,
                                           const int startFrame,
-                                          const qreal secHint)
+                                          const qreal secHint,
+                                          const qreal inSec,
+                                          const qreal outSec)
 {
     if (mInWriteback || mGestureActive) { return false; }
     const auto scene = mPanelScene.data();
@@ -1435,7 +1438,12 @@ bool NleTimelineModel::requestInsertSound(const QString &path,
         emit logMessage(QStringLiteral("音频时长未知，无法插入"));
         return false;
     }
-    const int len = qMax(1, qCeil(sec * scene->getFps()));
+    const qreal fps = scene->getFps();
+    const int totalF = qMax(1, qCeil(sec * fps));
+    const int inF = qBound(0, qRound(inSec * fps), totalF - 1);
+    int outF = outSec < 0 ? totalF - 1 : qRound(outSec * fps);
+    outF = qBound(inF, outF, totalF - 1);
+    const int len = outF - inF + 1;
     const int S = qMax(0, startFrame);
 
     const auto pushes = insertShiftPlan(trackId, S, len, {});
@@ -1454,26 +1462,39 @@ bool NleTimelineModel::requestInsertSound(const QString &path,
         scene->addContained(snd);
         const auto dur = snd->getDurationRectangle();
         if (dur) {
-            // 声音块的 durRect 绑定在动画窗内（bound=true）：异步
-            // handler 就绪时 updateDurationRectLength 首调会把块尾
-            // 覆写进 [0..dur-1] 并把越界窗钳回（S=300 落点实测被钳成
-            // [47..47]）。同步把动画窗整体搬到 [S..S+len-1]（与
-            // requestInsertMedia 的 setFirstAnimationFrame 同语义），
-            // 之后异步重算与 bind 都稳定于此窗
+            // 动画窗同步站住 [0..totalF-1]：既触发 mSetMaxFrameAt-
+            // LeastOnce（防异步 handler 首调把块尾覆写到源尾），
+            // 又让 bound 钳不裁段；异步重算同值恒稳定
             const auto flar = dur->ref<FixedLenAnimationRect>();
             if (flar) {
-                flar->setFirstAnimationFrame(S);
-                flar->setAnimationFrameDuration(len);
+                flar->setFirstAnimationFrame(0);
+                flar->setAnimationFrameDuration(totalF);
             }
-            dur->setMinAbsFrame(S);
-            dur->setMaxAbsFrame(S + len - 1);
+            // rel 空间 = 源段（relShift 尚 0，abs 设即 rel 设）
+            dur->setMinAbsFrame(inF);
+            dur->setMaxAbsFrame(outF);
+            // 整移落位：只动 relShift（声音源映射随动，min/max 不动）
+            const int delta = S - inF;
+            if (delta != 0) {
+                dur->startPosTransform();
+                dur->changeFramePosBy(delta);
+                dur->finishPosTransform();
+            }
         }
         snd->setTrackId(trackId);
     }
     mInWriteback = false;
     finishAction();
-    emit logMessage(QStringLiteral("已插入音效（%1 秒）")
-                            .arg(QString::number(sec, 'f', 1)));
+    if (inF > 0 || outF < totalF - 1) {
+        emit logMessage(QStringLiteral("已插入音效片段 %1–%2 秒（共 %3 秒）")
+                                .arg(QString::number(inSec, 'f', 1),
+                                     QString::number(
+                                         outSec < 0 ? sec : outSec, 'f', 1),
+                                     QString::number(sec, 'f', 1)));
+    } else {
+        emit logMessage(QStringLiteral("已插入音效（%1 秒）")
+                                .arg(QString::number(sec, 'f', 1)));
+    }
     return true;
 }
 

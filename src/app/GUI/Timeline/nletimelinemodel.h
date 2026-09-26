@@ -203,11 +203,15 @@ public:
                             const int outFrame, const int trackId,
                             const int startFrame);
     // 音效库/纯音频拖入：落音频轨的 eIndependentSound 块（CapCut
-    // 音效语义）；secHint = 源时长秒（音效库 mime 携带），<=0 时
-    // 临时激活 SoundHandler 现测时长；目标轨让位插入
+    // 音效语义）；secHint = 源总时长秒（音效库 mime 携带），<=0 时
+    // 临时激活 SoundHandler 现测时长；[inSec..outSec] = 源段出入点
+    // 秒（监视器 zone 换算，outSec<0 = 全片段），块长按场景 fps 换
+    // 算；目标轨让位插入
     bool requestInsertSound(const QString &path, const int trackId,
                             const int startFrame,
-                            const qreal secHint = -1.0);
+                            const qreal secHint = -1.0,
+                            const qreal inSec = 0.0,
+                            const qreal outSec = -1.0);
     // 项目面板链接场景拖入：在 trackId 的 startFrame 落外部工程场
     // 景的动态链接块（让位插入，requestInsertMedia 同款事务语义）
     bool requestInsertSceneLink(const QString &path, const int sceneDocId,
