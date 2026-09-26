@@ -156,6 +156,12 @@ void SoundCardWidget::setDurationSec(const qreal sec)
     update();
 }
 
+void SoundCardWidget::setCardSize(const int w, const int h)
+{
+    mWaveH = qMax(16, h - 40); // 底部名称/时长行占 40
+    setFixedSize(w, h);
+}
+
 void SoundCardWidget::setTotalCols(const int totalCols)
 {
     mTotalCols = qMax(0, totalCols);
@@ -228,8 +234,8 @@ void SoundCardWidget::paintEvent(QPaintEvent* e)
     p.setPen(QPen(border, 1));
     p.drawPath(framePath);
 
-    // 波形包络区
-    const QRectF waveRect(6, 6, width() - 12, WAVE_H);
+    // 波形包络区（高度随卡片缩放）
+    const QRectF waveRect(6, 6, width() - 12, mWaveH);
     if (mError) {
         p.setPen(QPen(ThemeSupport::getThemeColorTextDisabled(), 1));
         p.drawText(rect(), Qt::AlignCenter,
@@ -357,9 +363,9 @@ void SoundCardWidget::startDrag()
     mime->setUrls({QUrl::fromLocalFile(mPath)});
     QDrag drag(this);
     drag.setMimeData(mime);
-    const QPixmap pm = grab(QRect(0, 0, width(), WAVE_H + 4));
+    const QPixmap pm = grab(QRect(0, 0, width(), mWaveH + 4));
     if (!pm.isNull()) {
-        drag.setPixmap(pm.scaled(width() / 2, (WAVE_H + 4) / 2,
+        drag.setPixmap(pm.scaled(width() / 2, (mWaveH + 4) / 2,
                                  Qt::KeepAspectRatio,
                                  Qt::SmoothTransformation));
         drag.setHotSpot(QPoint(pm.width() / 4, pm.height() / 4));
@@ -457,12 +463,43 @@ void SoundBrowserPanel::setupUi()
     });
     dirLayout->addWidget(mSearchEdit, 0);
 
+    // 音量图标（滑杆左侧）
+    const auto volIcon = new QLabel(dirRow);
+    const auto vi = QIcon::fromTheme(QStringLiteral("audio-volume-high"));
+    if (!vi.isNull()) {
+        volIcon->setPixmap(vi.pixmap(16, 16));
+    }
+    volIcon->setFixedWidth(18);
+    volIcon->setAlignment(Qt::AlignCenter);
+    dirLayout->addWidget(volIcon, 0);
+
     mVolSlider = new QSlider(Qt::Horizontal, dirRow);
+    mVolSlider->setObjectName(QStringLiteral("sbVolSlider"));
     mVolSlider->setRange(0, 100);
     mVolSlider->setValue(80);
     mVolSlider->setFixedWidth(80);
     mVolSlider->setToolTip(QString::fromUtf8("试听音量"));
     dirLayout->addWidget(mVolSlider, 0);
+
+    // 缩放滑杆：60%–220% 缩放卡片，网格几何随动重排（持久化）
+    mZoomSlider = new QSlider(Qt::Horizontal, dirRow);
+    mZoomSlider->setObjectName(QStringLiteral("sbZoomSlider"));
+    mZoomSlider->setRange(60, 220);
+    mZoomSlider->setValue(qBound(60, AppSupport::getSettings(
+                QStringLiteral("SoundBrowser"),
+                QStringLiteral("cardScale"), 100).toInt(), 220));
+    mZoomSlider->setFixedWidth(90);
+    mZoomSlider->setToolTip(QString::fromUtf8("缩放卡片"));
+    dirLayout->addWidget(mZoomSlider, 0);
+    mCardScale = mZoomSlider->value() / 100.;
+    connect(mZoomSlider, &QSlider::valueChanged, this, [this](
+                const int v) {
+        mCardScale = v / 100.;
+        AppSupport::setSettings(QStringLiteral("SoundBrowser"),
+                                QStringLiteral("cardScale"), v);
+        clearGridCards();
+        updateVirtualGrid();
+    });
     rootLayout->addWidget(dirRow, 0);
 
     // 分类 pill 行
@@ -725,24 +762,30 @@ SoundCardWidget* SoundBrowserPanel::createCard(const int index)
 void SoundBrowserPanel::updateVirtualGrid()
 {
     if (!mGridHost) { return; }
+    const int cardW = qRound(CARD_W * mCardScale);
+    const int cardH = qRound(CARD_H * mCardScale);
+    const int pitchW = cardW + GRID_GAP;
+    const int pitchH = cardH + GRID_GAP;
     const int availW = mGridScroll->viewport()->width()
             - 2 * GRID_MARGIN;
-    const int cols = qMax(1, (availW + GRID_GAP) / CARD_PITCH_W);
+    const int cols = qMax(1, (availW + GRID_GAP) / pitchW);
     if (cols != mCols) {
-        // 列数变了：全部几何作废，重建
+        // 列数变了（面板宽/缩放变）：全部几何作废，重建换行
         clearGridCards();
         mCols = cols;
+        qInfo() << "[SOUNDBROWSER] grid cols" << mCols
+                << "card" << cardW << "x" << cardH;
     }
     const int n = mShown.size();
     const int rows = (n + mCols - 1) / mCols;
-    mGridHost->setMinimumHeight(rows * CARD_PITCH_H + 2 * GRID_MARGIN
+    mGridHost->setMinimumHeight(rows * pitchH + 2 * GRID_MARGIN
                                         - GRID_GAP);
     if (n == 0) { return; }
 
     const int vy = mGridScroll->verticalScrollBar()->value();
     const int vh = mGridScroll->viewport()->height();
-    const int firstRow = qMax(0, (vy - GRID_MARGIN) / CARD_PITCH_H);
-    const int lastRow = (vy + vh) / CARD_PITCH_H;
+    const int firstRow = qMax(0, (vy - GRID_MARGIN) / pitchH);
+    const int lastRow = (vy + vh) / pitchH;
     const int firstIdx = qMax(0, (firstRow - 1) * mCols);
     const int lastIdx = qMin(n - 1, (lastRow + 2) * mCols);
 
@@ -751,8 +794,9 @@ void SoundBrowserPanel::updateVirtualGrid()
         auto card = mIndexCards.value(i);
         if (!card) {
             card = createCard(i);
-            card->move(GRID_MARGIN + (i % mCols) * CARD_PITCH_W,
-                       GRID_MARGIN + (i / mCols) * CARD_PITCH_H);
+            card->setCardSize(cardW, cardH);
+            card->move(GRID_MARGIN + (i % mCols) * pitchW,
+                       GRID_MARGIN + (i / mCols) * pitchH);
             card->setVisible(true);
             requestDecode(card);
         }

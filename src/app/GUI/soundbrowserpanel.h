@@ -139,6 +139,7 @@ protected:
     QToolButton* mDirButton = nullptr;
     QLineEdit* mSearchEdit = nullptr;
     QSlider* mVolSlider = nullptr;
+    QSlider* mZoomSlider = nullptr;
     QWidget* mCategoryHost = nullptr;
     FlowLayout* mCategoryLayout = nullptr;
     QScrollArea* mGridScroll = nullptr;
@@ -159,6 +160,7 @@ protected:
     // ---- 视口虚拟网格
     QHash<int, SoundCardWidget*> mIndexCards; // 条目索引 -> 卡片
     int mCols = 0;                            // 当前网格列数
+    qreal mCardScale = 1.0;                   // 卡片缩放（缩放滑杆）
 
     // ---- 悬停试听
     QMediaPlayer* mPlayer = nullptr;
@@ -193,6 +195,8 @@ public:
     QString title() const { return mTitle; }
 
     void setDurationSec(const qreal sec); // <=0 = 无法解码
+    // 缩放（面板缩放滑杆驱动）：w/h 为整卡尺寸，波形区高度随比例
+    void setCardSize(const int w, const int h);
     // 包络槽位制：预分配 totalCols 列（-1=未填），各秒结果按位回填
     void setTotalCols(const int totalCols);
     void putPeaks(const int baseCol, const QVector<qreal>& cols);
@@ -243,6 +247,7 @@ private:
     qreal mPlayFrac = -1;   // 试听进度（已播占比），<0 = 无
     int mTotalCols = 0;
     int mFilled = 0;
+    int mWaveH = 64; // 波形区高度（随卡片缩放）
     QVector<qreal> mCols; // 0..1 峰值列，-1 = 未填
     QPoint mPressPos;
     QToolButton* mStarBtn = nullptr;
