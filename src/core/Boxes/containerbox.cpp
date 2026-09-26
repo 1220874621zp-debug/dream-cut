@@ -1982,6 +1982,33 @@ qsptr<BoundingBox> readIdCreateBox(eReadStream& src) {
     eBoxType type;
     src.read(&type, sizeof(eBoxType));
 
+    // 上游(<52)文件的枚举表与本 fork 分叉：fork 裁剪掉了 svgLink，
+    // video 之后的类型值全部前移一位；psdImage/bone/boneLayer/
+    // cameraLayer/kraImage/lottie 等 fork 无对应类。按上游表把值映
+    // 射回 fork 槽位，fork 没有的类型指向 count 交由 switch 抛
+    // Invalid box type（上层 readAllContained 会 seek 恢复跳过该盒）
+    if(src.evFileVersion() < EvFormat::nleTrackSpecs) {
+        const int t = int(type);
+        switch(t) {
+        case 10: type = eBoxType::count; break; // svgLink：fork 无
+        case 11: type = eBoxType::video; break;
+        case 12: type = eBoxType::imageSequence; break;
+        case 13: type = eBoxType::paint; break;
+        case 14: type = eBoxType::group; break;
+        case 15: type = eBoxType::custom; break;
+        case 16: type = eBoxType::deprecated0; break;
+        case 17: type = eBoxType::nullObject; break;
+        case 18: type = eBoxType::count; break; // psdImage：fork 无
+        case 19: type = eBoxType::adjustmentLayer; break;
+        case 20: case 21: // bone/boneLayer：fork 无
+            type = eBoxType::count; break;
+        case 22: type = eBoxType::solid; break;
+        default: break; // 0..9 两侧对齐；23..25 fork 无类，落
+                        // switch 后仍走 createBoxOfNonCustomType
+                        // 的 default 返回空→Invalid box type
+        }
+    }
+
     const auto result = createBoxOfNonCustomType(type, src.evFileVersion());
     if(result) return result;
     if(type == eBoxType::custom) {

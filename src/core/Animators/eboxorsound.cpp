@@ -258,6 +258,11 @@ void eBoxOrSound::prp_readProperty_impl(eReadStream& src) {
             if(src.evFileVersion() < EvFormat::nleTrackSpecs) {
                 createDurationRectangle();
                 mDurationRectangle->readDurationRectangle(src);
+                // 已读一份：不置 true 会落到末尾的兜底读再吞 12 字
+                // 节，上游普通层带时长条时后续 name 读错、整盒错位
+                // 直至把余下全部内容吞进一个盒（文件打开/链接导入即
+                // 卡死崩溃）
+                readDone = true;
             } else {
                 const qint64 durStart = src.pos();
                 const auto fla = enve::make_shared<FixedLenAnimationRect>(*this);
