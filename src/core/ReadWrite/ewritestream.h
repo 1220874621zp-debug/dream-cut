@@ -61,6 +61,8 @@ public:
 
     qint64 writeFile(QFile* const file);
 
+    inline qint64 pos() const { return mDst->pos(); }
+
     inline qint64 write(const void* const data, const qint64 len) {
         return mDst->write(reinterpret_cast<const char*>(data), len);
     }

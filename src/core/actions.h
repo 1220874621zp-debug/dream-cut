@@ -107,6 +107,12 @@ public:
                             const int insertId = 0,
                             const QPointF &relDropPos = QPointF(0, 0),
                             const int frame = 0);
+    // 动态链接导入：外部工程（.friction/.dreamcut）的场景以活链
+    // 接块落进时间轴（路径三元组持久化，源文件保存后自动刷新）
+    eBoxOrSound* importLinkedProject(const QString &path,
+                                     const int sceneDocId,
+                                     const QString &sceneName,
+                                     const int frame = 0);
 //
     void setMovePathMode();
     void setMovePointMode();

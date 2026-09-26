@@ -20,6 +20,10 @@
 #include <QDateTime>
 #include <QWidgetAction>
 #include <QPointer>
+#include <QProcess>
+#include <QDir>
+#include <QMessageBox>
+#include "appsupport.h"
 #include <functional>
 #include <algorithm>
 #include <climits>
@@ -28,6 +32,7 @@
 #include <QSvgRenderer>
 #include <QHash>
 #include "Boxes/videobox.h"
+#include "Boxes/internallinkcanvasbox.h"
 #include "Boxes/pathbox.h"
 #include "RasterEffects/rastereffect.h"
 #include "Sound/evideosound.h"
@@ -3124,6 +3129,16 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
     disableAct->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_E));
     menu.addSeparator();
 
+    // 动态链接块专属：重载源工程 / 在 friction 中打开
+    const auto linkBox = enve_cast<InternalLinkCanvasBox*>(c->layer.data());
+    QAction *linkReload = nullptr;
+    QAction *linkOpenExt = nullptr;
+    if (linkBox) {
+        menu.addSeparator();
+        linkReload = menu.addAction(tr("重新加载链接"));
+        linkOpenExt = menu.addAction(tr("在 friction 中打开"));
+    }
+
     QAction *up = nullptr;
     QAction *down = nullptr;
     if (upOk || downOk) {
@@ -3161,6 +3176,23 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
                     this, tr("变速"), tr("播放速率（倍速，1=原速）"),
                     1.0, 0.1, 10.0, 2, &ok);
         if (ok && rate > 0.01) { mModel->requestSpeed(clipId, rate); }
+    } else if (act == linkReload && linkBox) {
+        linkBox->reloadFromSource();
+    } else if (act == linkOpenExt && linkBox) {
+        // 默认从 PATH 找 friction，找不到让用户指定一次并记住
+        QString bin = AppSupport::getSettings(
+                    "editor", "frictionPath", "friction").toString();
+        if (!QProcess::startDetached(bin, { linkBox->sourcePath() })) {
+            const auto chosen = AppSupport::getOpenFile(
+                        this, tr("选择 friction 可执行文件"),
+                        QDir::homePath(), tr("可执行文件 (*)"));
+            if (chosen.isEmpty()) return;
+            AppSupport::setSettings("editor", "frictionPath", chosen);
+            if (!QProcess::startDetached(chosen, { linkBox->sourcePath() })) {
+                QMessageBox::warning(this, tr("在 friction 中打开"),
+                                     tr("无法启动 %1").arg(chosen));
+            }
+        }
     } else if (act == up && upOk) {
         mModel->requestMoveClipToTrack(
                     clipId, mModel->tracks().at(srcIdx - 1).id);

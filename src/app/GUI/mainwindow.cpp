@@ -115,6 +115,7 @@
 #include "dialogs/commandpalette.h"
 #include "wizards/installpresets.h"
 #include "Boxes/videobox.h"
+#include "Boxes/internallinkcanvasbox.h"
 #include "Boxes/imagebox.h"
 #include <QProcess>
 #include <QFileInfo>
@@ -895,6 +896,7 @@ void MainWindow::updateSettingsForCurrentCanvas(Canvas* const scene)
     if (mRenderVideoAct) { mRenderVideoAct->setEnabled(scene); }
     if (mCloseProjectAct) { mCloseProjectAct->setEnabled(scene); }
     if (mImportAct) { mImportAct->setEnabled(scene); }
+    if (mImportLinkAct) { mImportLinkAct->setEnabled(scene); }
     if (mImportSeqAct) { mImportSeqAct->setEnabled(scene); }
     if (mRevertAct) { mRevertAct->setEnabled(scene); }
     if (mSelectAllAct) { mSelectAllAct->setEnabled(scene); }
@@ -2248,6 +2250,49 @@ void MainWindow::importFile()
     }
 }
 
+
+void MainWindow::importLinkedProject()
+{
+    disableEventFilter();
+    const QString title = tr("导入链接工程");
+    const QString defPath = mDocument.fEvFile.isEmpty() ?
+                QDir::homePath() : mDocument.fEvFile;
+    const auto path = AppSupport::getOpenFile(
+                this, title, defPath,
+                tr("工程 %1").arg("(*.friction *.dreamcut *.ev)"));
+    enableEventFilter();
+    if (path.isEmpty()) { return; }
+
+    QString err;
+    const auto loaded = ExternalProjectCache::instance()->load(
+                path, false, &err);
+    if (!loaded || loaded->scenes.isEmpty()) {
+        QMessageBox::warning(this, title,
+                             tr("无法解析工程文件：\n%1").arg(err));
+        return;
+    }
+
+    int docId = -1;
+    QString sceneName;
+    if (loaded->scenes.count() > 1) {
+        const auto names = ExternalProjectCache::sceneNames(loaded.data());
+        bool ok = false;
+        const auto chosen = QInputDialog::getItem(
+                    this, title, tr("选择要链接的场景"),
+                    names, 0, false, &ok);
+        if (!ok || chosen.isEmpty()) { return; }
+        const int idx = names.indexOf(chosen);
+        if (idx < 0 || !loaded->scenes.at(idx)) { return; }
+        docId = loaded->scenes.at(idx)->getDocumentId();
+        sceneName = chosen;
+    } else if (loaded->scenes.first()) {
+        docId = loaded->scenes.first()->getDocumentId();
+        sceneName = loaded->scenes.first()->prp_getName();
+    } else {
+        return;
+    }
+    mActions.importLinkedProject(path, docId, sceneName);
+}
 
 void MainWindow::importImageSequence()
 {

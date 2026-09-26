@@ -83,6 +83,12 @@ void MainWindow::setupMenuBar()
     mImportAct->setObjectName("ImportFileAct");
     cmdAddAction(mImportAct);
 
+    mImportLinkAct = mFileMenu->addAction(
+                QIcon::fromTheme("file_import"),
+                tr("导入链接工程…"), this, &MainWindow::importLinkedProject);
+    mImportLinkAct->setEnabled(false);
+    cmdAddAction(mImportLinkAct);
+
     mImportSeqAct = mFileMenu->addAction(QIcon::fromTheme("renderlayers"),
                                          tr("Import Image Sequence", "MenuBar_File"),
                                          this, &MainWindow::importImageSequence);

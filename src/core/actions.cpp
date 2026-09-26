@@ -30,6 +30,7 @@
 #include "paintsettingsapplier.h"
 #include "Sound/eindependentsound.h"
 #include "Boxes/externallinkboxt.h"
+#include "Boxes/internallinkcanvasbox.h"
 #include "GUI/dialogsinterface.h"
 
 #include <QMessageBox>
@@ -843,6 +844,39 @@ eBoxOrSound *Actions::importFile(const QString &path,
     return result.get();
 }
 
+
+eBoxOrSound *Actions::importLinkedProject(const QString &path,
+                                          const int sceneDocId,
+                                          const QString &sceneName,
+                                          const int frame)
+{
+    if (!mActiveScene) return nullptr;
+    const auto scene = mActiveScene->getParentScene();
+    auto block = scene ? scene->blockUndoRedo() :
+                         UndoRedoStack::StackBlock();
+    qsptr<eBoxOrSound> result;
+    try {
+        const auto linkBox = enve::make_shared<InternalLinkCanvasBox>();
+        linkBox->setSourceProject(path, sceneDocId, sceneName);
+        result = linkBox;
+    } catch(const std::exception& e) {
+        gPrintExceptionCritical(e);
+    }
+    if (result) {
+        if (frame) { result->shiftAll(frame); }
+        block.reset();
+        mActiveScene->prp_pushUndoRedoName(tr("导入链接工程"));
+        mActiveScene->insertContained(0, result);
+        const auto importedBox = enve_cast<BoundingBox*>(result);
+        if (importedBox) {
+            importedBox->planCenterPivotPosition();
+            importedBox->startPosTransform();
+            importedBox->finishTransform();
+        }
+    }
+    afterAction();
+    return result.get();
+}
 
 void Actions::setMovePathMode() {
     mDocument.setCanvasMode(CanvasMode::boxTransform);

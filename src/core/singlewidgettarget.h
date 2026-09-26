@@ -53,6 +53,7 @@ class BoundingBox;
 class ContainerBox;
 class Canvas;
 class InternalLinkBox;
+class InternalLinkCanvasBox;
 class PathBox;
 //class PaintBox;
 class SmartVectorPath;
@@ -154,6 +155,8 @@ public:
 
     // new virtuals appended at the end, AFTER all pre-existing ones
     // (see the vtable slot order note above)
+
+    e_DECLARE_TYPE_FUNCTION(InternalLinkCanvasBox)
 
     void SWT_addChild(SingleWidgetTarget * const child);
     void SWT_addChildAt(SingleWidgetTarget * const child, const int id);

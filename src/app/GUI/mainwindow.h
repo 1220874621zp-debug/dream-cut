@@ -213,6 +213,7 @@ public:
     bool closeProject();
     void importImageSequence();
     void importFile();
+    void importLinkedProject();
     void openSammieRoto();
     void traceSelectedImage();
     void revert();
@@ -314,6 +315,7 @@ private:
     QAction *mRenderVideoAct;
     QAction *mCloseProjectAct;
     QAction *mImportAct;
+    QAction *mImportLinkAct = nullptr;
     QAction *mImportSeqAct;
     QAction *mRevertAct;
     QAction *mSelectAllAct;
