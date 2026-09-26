@@ -32,6 +32,7 @@
 class QLabel;
 class QLineEdit;
 class QScrollArea;
+class QSlider;
 class QToolButton;
 class QMediaPlayer;
 class QAudioOutput;
@@ -58,11 +59,20 @@ public:
 
     // 设置音效库根目录（持久化 + 重扫）
     void setRootDir(const QString& dir);
+    // 音效管理（右键菜单与单击复用的薄封装；文件操作后自动重扫）
+    void togglePreview(SoundCardWidget* card);
+    bool isPreviewPlaying() const;
+    void renameCard(SoundCardWidget* card, const QString& newName);
+    void moveCardTo(SoundCardWidget* card, const QString& dir);
+    void trashCard(SoundCardWidget* card);
+    void showCardMenu(SoundCardWidget* card, const QPoint& globalPos);
     // 自测/调试只读访问
     int cardCount() const { return mCards.size(); }
     int decodedCardCount() const;
     int categoryCount() const { return mCategories.size(); }
     const QStringList& favorites() const { return mFavorites; }
+    SoundCardWidget* cardFor(const QString& path) const
+    { return mCards.value(path); }
 
     // DataHandler 注册表只持裸指针不保活，必须与 SoundHandler
     // 成对强持；成员序 dh 在前 = 析构时 SoundHandler 先亡
@@ -112,12 +122,15 @@ protected:
     void loadFavorites();
     void saveFavorites();
     void toggleFavorite(SoundCardWidget* card, bool on);
+    // 文件重命名/移动后同步收藏表路径
+    void refileFavorite(const QString& oldPath, const QString& newPath);
 
     static QString durationLabel(const qreal sec);
 
     // ---- UI
     QToolButton* mDirButton = nullptr;
     QLineEdit* mSearchEdit = nullptr;
+    QSlider* mVolSlider = nullptr;
     QWidget* mCategoryHost = nullptr;
     FlowLayout* mCategoryLayout = nullptr;
     QScrollArea* mGridScroll = nullptr;
@@ -171,6 +184,8 @@ public:
     void setDecodeError();
     void setPlaying(const bool on);
     bool isPlaying() const { return mPlaying; }
+    // 试听进度高亮：0..1 已播占比；<0 清除
+    void setPlayProgress(const qreal frac);
     void setFavorite(const bool on);
     bool isFavorite() const { return mFavorite; }
     bool hasEnvelope() const { return !mCols.isEmpty(); }
@@ -183,6 +198,9 @@ signals:
     void hoverLeft(SoundCardWidget* card);
     void favoriteToggled(SoundCardWidget* card, bool on);
     void doubleClicked(SoundCardWidget* card);
+    // 单击（未成拖拽的按下-释放）= 播放/暂停切换
+    void clicked(SoundCardWidget* card);
+    void contextRequested(SoundCardWidget* card, const QPoint& globalPos);
 
 protected:
     void paintEvent(QPaintEvent* e) override;
@@ -191,7 +209,9 @@ protected:
     void leaveEvent(QEvent* e) override;
     void mousePressEvent(QMouseEvent* e) override;
     void mouseMoveEvent(QMouseEvent* e) override;
+    void mouseReleaseEvent(QMouseEvent* e) override;
     void mouseDoubleClickEvent(QMouseEvent* e) override;
+    void contextMenuEvent(QContextMenuEvent* e) override;
 
 private:
     void startDrag();
@@ -202,8 +222,10 @@ private:
     qreal mDurationSec = 0;
     bool mError = false;
     bool mPlaying = false;
+    bool mDragging = false;
     bool mFavorite = false;
     bool mDecodable = true; // 尚未判定失败
+    qreal mPlayFrac = -1;   // 试听进度（已播占比），<0 = 无
     int mTotalCols = 0;
     QVector<qreal> mCols; // 0..1 峰值列（累计）
     QPoint mPressPos;

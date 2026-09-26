@@ -31,21 +31,25 @@
 
 #include <QAudioOutput>
 #include <QApplication>
+#include <QDesktopServices>
 #include <QDir>
 #include <QDrag>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFileSystemWatcher>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMediaPlayer>
+#include <QMenu>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QScrollBar>
 #include <QScrollArea>
+#include <QSlider>
 #include <QTimer>
 #include <QToolButton>
 #include <QUrl>
@@ -139,6 +143,13 @@ void SoundCardWidget::setPlaying(const bool on)
 {
     if (mPlaying == on) { return; }
     mPlaying = on;
+    if (!on) { mPlayFrac = -1; }
+    update();
+}
+
+void SoundCardWidget::setPlayProgress(const qreal frac)
+{
+    mPlayFrac = qBound(0., frac, 1.);
     update();
 }
 
@@ -176,12 +187,14 @@ void SoundCardWidget::paintEvent(QPaintEvent* e)
     }
     if (!mCols.isEmpty() && mTotalCols > 0) {
         // 已解列按解码进度占比铺左侧，右侧余量提示省略号
-        // （每秒到达重绘一次，渐进填充）
+        // （每秒到达重绘一次，渐进填充）；波形基色=白（用户指定），
+        // 试听已播部分叠主题强调色显示进度
         const qreal frac = qMin(1., qreal(mCols.size()) / mTotalCols);
         const qreal drawW = qMax(1., waveRect.width() * frac);
         const qreal midY = waveRect.center().y();
         const qreal halfH = waveRect.height() / 2 - 2;
-        p.setPen(QPen(ThemeSupport::getThemeHighlightColor(), 1));
+        const QColor baseCol(255, 255, 255);
+        const QColor playedCol = ThemeSupport::getThemeHighlightColor();
         const int n = mCols.size();
         int prevX = -1;
         for (int x = 0; x < int(drawW); x++) {
@@ -190,6 +203,9 @@ void SoundCardWidget::paintEvent(QPaintEvent* e)
             const int xi = qRound(waveRect.left()) + x;
             if (xi == prevX) { continue; }
             prevX = xi;
+            const bool played = mPlayFrac >= 0. &&
+                    qreal(idx) / n <= mPlayFrac;
+            p.setPen(QPen(played ? playedCol : baseCol, 1));
             p.drawLine(xi, qRound(midY - a * halfH),
                        xi, qRound(midY + a * halfH));
         }
@@ -236,27 +252,45 @@ void SoundCardWidget::mousePressEvent(QMouseEvent* e)
 {
     if (e->button() == Qt::LeftButton) {
         mPressPos = e->position().toPoint();
-        // 按下即停试听（拖拽/选择时不残声）
-        emit hoverLeft(this);
+        mDragging = false;
     }
     QFrame::mousePressEvent(e);
 }
 
 void SoundCardWidget::mouseMoveEvent(QMouseEvent* e)
 {
-    if ((e->buttons() & Qt::LeftButton) &&
+    if (!mDragging && (e->buttons() & Qt::LeftButton) &&
         (e->position().toPoint() - mPressPos).manhattanLength() >
             QApplication::startDragDistance()) {
+        mDragging = true;
+        // 拖拽前停掉试听（不残声）
+        emit hoverLeft(this);
         startDrag();
         return;
     }
     QFrame::mouseMoveEvent(e);
 }
 
+void SoundCardWidget::mouseReleaseEvent(QMouseEvent* e)
+{
+    QFrame::mouseReleaseEvent(e);
+    if (e->button() == Qt::LeftButton && !mDragging) {
+        // 未成拖拽的按下-释放 = 播放/暂停切换
+        emit clicked(this);
+    }
+    mDragging = false;
+}
+
 void SoundCardWidget::mouseDoubleClickEvent(QMouseEvent* e)
 {
     QFrame::mouseDoubleClickEvent(e);
     if (e->button() == Qt::LeftButton) { emit doubleClicked(this); }
+}
+
+void SoundCardWidget::contextMenuEvent(QContextMenuEvent* e)
+{
+    QFrame::contextMenuEvent(e);
+    emit contextRequested(this, e->globalPos());
 }
 
 void SoundCardWidget::startDrag()
@@ -371,6 +405,13 @@ void SoundBrowserPanel::setupUi()
         applyFilter();
     });
     dirLayout->addWidget(mSearchEdit, 0);
+
+    mVolSlider = new QSlider(Qt::Horizontal, dirRow);
+    mVolSlider->setRange(0, 100);
+    mVolSlider->setValue(80);
+    mVolSlider->setFixedWidth(80);
+    mVolSlider->setToolTip(QString::fromUtf8("试听音量"));
+    dirLayout->addWidget(mVolSlider, 0);
     rootLayout->addWidget(dirRow, 0);
 
     // 分类 pill 行
@@ -406,12 +447,30 @@ void SoundBrowserPanel::setupPlayback()
     mAudioOut = new QAudioOutput(this);
     mPlayer->setAudioOutput(mAudioOut);
     mAudioOut->setVolume(0.8f);
+    if (mVolSlider) {
+        connect(mVolSlider, &QSlider::valueChanged, this, [this](
+                    const int v) { mAudioOut->setVolume(v / 100.f); });
+    }
 
     mHoverTimer = new QTimer(this);
     mHoverTimer->setSingleShot(true);
     mHoverTimer->setInterval(350);
     connect(mHoverTimer, &QTimer::timeout, this,
             &SoundBrowserPanel::playHovered);
+
+    // 试听进度联动：卡片波形已播部分叠强调色
+    connect(mPlayer, &QMediaPlayer::positionChanged, this,
+            [this](const qint64 pos) {
+        if (!mPlayingCard) { return; }
+        const qint64 dur = mPlayer->duration();
+        if (dur > 0) {
+            mPlayingCard->setPlayProgress(qreal(pos) / qreal(dur));
+        }
+    });
+    connect(mPlayer, &QMediaPlayer::mediaStatusChanged, this,
+            [this](const QMediaPlayer::MediaStatus status) {
+        if (status == QMediaPlayer::EndOfMedia) { stopPreview(); }
+    });
 
     // 与工程播放互斥：工程播放期间悬停试听不起播，
     // 播放开始时掐掉已在放的试听（防两路叠音）
@@ -593,6 +652,13 @@ void SoundBrowserPanel::rebuildGrid()
         connect(card, &SoundCardWidget::doubleClicked, this,
                 [this](SoundCardWidget* c) {
             emit monitorRequested(c->path());
+        });
+        // 单击 = 播放/暂停切换；右键 = 音效管理菜单
+        connect(card, &SoundCardWidget::clicked, this, [this](
+                    SoundCardWidget* c) { togglePreview(c); });
+        connect(card, &SoundCardWidget::contextRequested, this,
+                [this](SoundCardWidget* c, const QPoint& gp) {
+            showCardMenu(c, gp);
         });
         mCards.insert(e.path, card);
         mGridLayout->addWidget(card);
@@ -813,4 +879,152 @@ void SoundBrowserPanel::toggleFavorite(SoundCardWidget* card, const bool on)
     }
     saveFavorites();
     if (mCategory == QStringLiteral("\x01fav")) { applyFilter(); }
+}
+
+// ---------------------------------------------------------------
+// 音效管理（第二阶段）：单击试听切换 + 右键文件管理
+// ---------------------------------------------------------------
+
+void SoundBrowserPanel::togglePreview(SoundCardWidget* card)
+{
+    if (!card) { return; }
+    if (mPlayingCard == card) { stopPreview(); return; }
+    stopPreview();
+    if (mPlaybackSuppressed) {
+        emit logMessage(QString::fromUtf8("工程播放中，暂停后可试听"));
+        return;
+    }
+    mPlayer->setSource(QUrl::fromLocalFile(card->path()));
+    mPlayer->play();
+    mPlayingCard = card;
+    mPlayingCard->setPlaying(true);
+}
+
+bool SoundBrowserPanel::isPreviewPlaying() const
+{
+    return mPlayer &&
+           mPlayer->playbackState() == QMediaPlayer::PlayingState;
+}
+
+void SoundBrowserPanel::refileFavorite(const QString& oldPath,
+                                       const QString& newPath)
+{
+    const int i = mFavorites.indexOf(oldPath);
+    if (i < 0) { return; }
+    mFavorites[i] = newPath;
+    saveFavorites();
+}
+
+void SoundBrowserPanel::renameCard(SoundCardWidget* card,
+                                   const QString& newName)
+{
+    if (!card) { return; }
+    const QString clean = newName.trimmed();
+    if (clean.isEmpty()) { return; }
+    const QFileInfo fi(card->path());
+    // 新名不带扩展名时保留原扩展名；带扩展名则按用户所写
+    const QString fileName = clean.contains('.')
+            ? clean : clean + '.' + fi.suffix();
+    const QString newPath = fi.absolutePath() + '/' + fileName;
+    if (newPath == card->path()) { return; }
+    if (QFile::exists(newPath)) {
+        emit logMessage(QString::fromUtf8("同名文件已存在：%1").arg(fileName));
+        return;
+    }
+    if (!QFile::rename(card->path(), newPath)) {
+        emit logMessage(QString::fromUtf8("重命名失败"));
+        return;
+    }
+    refileFavorite(card->path(), newPath);
+    emit logMessage(QString::fromUtf8("已重命名为 %1").arg(fileName));
+    rescan();
+}
+
+void SoundBrowserPanel::moveCardTo(SoundCardWidget* card, const QString& dir)
+{
+    if (!card || dir.isEmpty()) { return; }
+    const QFileInfo fi(card->path());
+    const QString newPath = dir + '/' + fi.fileName();
+    if (newPath == card->path()) { return; }
+    if (QFile::exists(newPath)) {
+        emit logMessage(QString::fromUtf8("目标分类已存在同名文件"));
+        return;
+    }
+    if (!QFile::rename(card->path(), newPath)) {
+        emit logMessage(QString::fromUtf8("移动失败"));
+        return;
+    }
+    refileFavorite(card->path(), newPath);
+    emit logMessage(QString::fromUtf8("已移动到分类「%1」")
+                            .arg(QFileInfo(dir).fileName()));
+    rescan();
+}
+
+void SoundBrowserPanel::trashCard(SoundCardWidget* card)
+{
+    if (!card) { return; }
+    const QString path = card->path();
+    if (!QFile::moveToTrash(path)) {
+        emit logMessage(QString::fromUtf8("移入回收站失败"));
+        return;
+    }
+    mFavorites.removeAll(path);
+    saveFavorites();
+    emit logMessage(QString::fromUtf8("已移入回收站：%1")
+                            .arg(QFileInfo(path).fileName()));
+    rescan();
+}
+
+void SoundBrowserPanel::showCardMenu(SoundCardWidget* card,
+                                     const QPoint& globalPos)
+{
+    if (!card) { return; }
+    const QString path = card->path();
+    const QFileInfo fi(path);
+    QMenu menu(this);
+    menu.addAction(QString::fromUtf8(card->isPlaying()
+                                             ? "停止试听" : "播放试听"),
+                   this, [this, card]() { togglePreview(card); });
+    menu.addAction(QString::fromUtf8("打开所在文件夹"), this, [fi]() {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(fi.absolutePath()));
+    });
+    menu.addAction(QString::fromUtf8("重命名…"), this,
+                   [this, card, fi]() {
+        bool ok = false;
+        const QString name = QInputDialog::getText(
+                    this, QString::fromUtf8("重命名音效"),
+                    QString::fromUtf8("新名称"), QLineEdit::Normal,
+                    fi.completeBaseName(), &ok);
+        if (ok) { renameCard(card, name); }
+    });
+    auto* const mov = menu.addMenu(QString::fromUtf8("移动到分类"));
+    const QString curDir = fi.absolutePath();
+    for (const auto& cat : mCategories) {
+        const QString dir = mRootDir + '/' + cat;
+        if (dir == curDir) { continue; }
+        mov->addAction(cat, this, [this, card, dir]() {
+            moveCardTo(card, dir);
+        });
+    }
+    mov->addSeparator();
+    mov->addAction(QString::fromUtf8("新建分类…"), this, [this, card]() {
+        bool ok = false;
+        const QString name = QInputDialog::getText(
+                    this, QString::fromUtf8("新建分类"),
+                    QString::fromUtf8("分类名"), QLineEdit::Normal,
+                    QString(), &ok);
+        if (!ok) { return; }
+        const QString clean = name.trimmed();
+        if (clean.isEmpty()) { return; }
+        const QString dir = mRootDir + '/' + clean;
+        if (!QDir().mkpath(dir)) {
+            emit logMessage(QString::fromUtf8("创建分类目录失败"));
+            return;
+        }
+        moveCardTo(card, dir);
+    });
+    menu.addSeparator();
+    menu.addAction(QString::fromUtf8("删除（移入回收站）"), this,
+                   [this, card]() { trashCard(card); });
+    menu.exec(globalPos);
 }
