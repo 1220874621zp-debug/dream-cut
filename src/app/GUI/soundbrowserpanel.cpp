@@ -50,6 +50,7 @@
 #include <QScrollBar>
 #include <QScrollArea>
 #include <QSlider>
+#include <QThreadPool>
 #include <QTimer>
 #include <QToolButton>
 #include <QUrl>
@@ -65,6 +66,10 @@ namespace {
 constexpr int CARD_W = 190;
 constexpr int CARD_H = 104;
 constexpr int WAVE_H = 64;
+constexpr int GRID_MARGIN = 6;
+constexpr int GRID_GAP = 6;
+constexpr int CARD_PITCH_W = CARD_W + GRID_GAP;
+constexpr int CARD_PITCH_H = CARD_H + GRID_GAP;
 
 // 音效库扩展白名单 = 工程声音扩展 + 常见流式格式
 QStringList soundExtensions()
@@ -151,15 +156,24 @@ void SoundCardWidget::setDurationSec(const qreal sec)
     update();
 }
 
-void SoundCardWidget::setExpectedCols(const int totalCols)
+void SoundCardWidget::setTotalCols(const int totalCols)
 {
     mTotalCols = qMax(0, totalCols);
+    mCols.assign(size_t(mTotalCols), -1.);
+    mFilled = 0;
+    update();
 }
 
-void SoundCardWidget::appendPeaks(const QVector<qreal>& cols)
+void SoundCardWidget::putPeaks(const int baseCol,
+                               const QVector<qreal>& cols)
 {
-    if (cols.isEmpty()) { return; }
-    mCols += cols;
+    if (mTotalCols <= 0 || cols.isEmpty()) { return; }
+    for (int i = 0; i < cols.size(); i++) {
+        const int idx = baseCol + i;
+        if (idx < 0 || idx >= mTotalCols) { continue; }
+        if (mCols.at(size_t(idx)) < 0.) { mFilled++; }
+        mCols[size_t(idx)] = qBound(0., cols.at(i), 1.);
+    }
     update();
 }
 
@@ -222,29 +236,29 @@ void SoundCardWidget::paintEvent(QPaintEvent* e)
                    QString::fromUtf8("无法解码"));
         return;
     }
-    if (!mCols.isEmpty() && mTotalCols > 0) {
-        // 已解列按解码进度占比铺左侧，右侧余量提示省略号
-        // （每秒到达重绘一次，渐进填充）；波形基色=白（用户指定），
-        // 试听已播部分叠主题强调色显示进度
-        const qreal frac = qMin(1., qreal(mCols.size()) / mTotalCols);
+    if (!mCols.empty() && mTotalCols > 0) {
+        // 槽位制：-1 = 该秒未回（留空隙），已填列按解码进度占比
+        // 铺左侧；波形基色=白（用户指定），试听已播部分叠强调色
+        const qreal frac = qMin(1., qreal(mFilled) / mTotalCols);
         const qreal drawW = qMax(1., waveRect.width() * frac);
         const qreal midY = waveRect.center().y();
         const qreal halfH = waveRect.height() / 2 - 2;
         const QColor baseCol(255, 255, 255);
         const QColor playedCol = ThemeSupport::getThemeHighlightColor();
-        const int n = mCols.size();
         int prevX = -1;
         for (int x = 0; x < int(drawW); x++) {
-            const int idx = qBound(0, int(qreal(x) / drawW * n), n - 1);
-            const qreal a = qBound(0., mCols.at(idx), 1.);
+            const int idx = qBound(0, int(qreal(x) / drawW * mTotalCols),
+                                   mTotalCols - 1);
+            const qreal v = mCols.at(size_t(idx));
             const int xi = qRound(waveRect.left()) + x;
             if (xi == prevX) { continue; }
             prevX = xi;
+            if (v < 0.) { continue; } // 未回秒：留空隙
             const bool played = mPlayFrac >= 0. &&
-                    qreal(idx) / n <= mPlayFrac;
+                    qreal(idx) / mTotalCols <= mPlayFrac;
             p.setPen(QPen(played ? playedCol : baseCol, 1));
-            p.drawLine(xi, qRound(midY - a * halfH),
-                       xi, qRound(midY + a * halfH));
+            p.drawLine(xi, qRound(midY - v * halfH),
+                       xi, qRound(midY + v * halfH));
         }
         if (frac < 1.) {
             p.setPen(QPen(ThemeSupport::getThemeColorTextDisabled(), 1));
@@ -312,7 +326,7 @@ void SoundCardWidget::mouseReleaseEvent(QMouseEvent* e)
 {
     QFrame::mouseReleaseEvent(e);
     if (e->button() == Qt::LeftButton && !mDragging) {
-        // 未成拖拽的按下-释放 = 播放/暂停切换
+        // 未成拖拽的按下-释放 = 装载到片段监视器
         emit clicked(this);
     }
     mDragging = false;
@@ -392,7 +406,7 @@ SoundBrowserPanel::SoundBrowserPanel(QWidget* const parent)
         mHintLabel->setVisible(true);
     }
 
-    // 布局落定后再判可视集（首帧 + 视口尺寸变化都可能改几何）
+    // 布局落定后再刷可视集（首帧 + 视口尺寸变化都可能改几何）
     mGridScroll->viewport()->installEventFilter(this);
 }
 
@@ -401,7 +415,7 @@ bool SoundBrowserPanel::eventFilter(QObject* watched, QEvent* event)
     if (watched == mGridScroll->viewport() &&
         (event->type() == QEvent::Resize ||
          event->type() == QEvent::Paint)) {
-        updateVisibleSet();
+        updateVirtualGrid();
     }
     return QWidget::eventFilter(watched, event);
 }
@@ -456,20 +470,18 @@ void SoundBrowserPanel::setupUi()
     mCategoryLayout = new FlowLayout(mCategoryHost, 0, 4, 4);
     rootLayout->addWidget(mCategoryHost, 0);
 
-    // 卡片网格
+    // 虚拟网格：固定尺寸卡片手动定位（无布局器），宿主高度按
+    // 行数设置，只创建可视行 ± 缓冲的卡片
     mGridScroll = new QScrollArea(this);
     mGridScroll->setWidgetResizable(true);
     mGridScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     mGridScroll->setFrameShape(QFrame::NoFrame);
     mGridHost = new QWidget();
-    mGridLayout = new FlowLayout(mGridHost, 6, 6, 6);
     mGridScroll->setWidget(mGridHost);
     rootLayout->addWidget(mGridScroll, 1);
 
     connect(mGridScroll->verticalScrollBar(), &QScrollBar::valueChanged,
-            this, [this]() { updateVisibleSet(); });
-    connect(mGridScroll->horizontalScrollBar(), &QScrollBar::valueChanged,
-            this, [this]() { updateVisibleSet(); });
+            this, [this]() { updateVirtualGrid(); });
 
     mHintLabel = new QLabel(this);
     mHintLabel->setWordWrap(true);
@@ -539,15 +551,6 @@ void SoundBrowserPanel::setRootDir(const QString& dir)
     mDirButton->setToolTip(mRootDir);
     mCategory.clear();
     rescan();
-}
-
-int SoundBrowserPanel::decodedCardCount() const
-{
-    int n = 0;
-    for (auto it = mCards.constBegin(); it != mCards.constEnd(); ++it) {
-        if (it.value() && it.value()->hasEnvelope()) { n++; }
-    }
-    return n;
 }
 
 void SoundBrowserPanel::rebuildWatcher()
@@ -655,54 +658,8 @@ void SoundBrowserPanel::applyFilter()
         }
         mShown.append(e);
     }
-    rebuildGrid();
-}
-
-void SoundBrowserPanel::rebuildGrid()
-{
-    stopPreview();
-    mCards.clear();
-    mDecodeStarted.clear();
-    while (mGridLayout->count() > 0) {
-        const auto it = mGridLayout->takeAt(0);
-        if (auto w = it->widget()) { w->deleteLater(); }
-        delete it;
-    }
-    for (const auto& e : mShown) {
-        const auto card = new SoundCardWidget(e.path, e.title, mGridHost);
-        card->setFavorite(mFavorites.contains(e.path));
-        connect(card, &SoundCardWidget::hoverEntered, this,
-                [this](SoundCardWidget* c) {
-            mHoverCard = c;
-            mHoverTimer->start();
-        });
-        connect(card, &SoundCardWidget::hoverLeft, this,
-                [this](SoundCardWidget* c) {
-            if (mHoverCard == c) {
-                mHoverCard.clear();
-                mHoverTimer->stop();
-            }
-            stopPreview();
-        });
-        connect(card, &SoundCardWidget::favoriteToggled, this,
-                &SoundBrowserPanel::toggleFavorite);
-        connect(card, &SoundCardWidget::doubleClicked, this,
-                [this](SoundCardWidget* c) {
-            emit monitorRequested(c->path());
-        });
-        // 单击 = 装载到片段监视器（kdenlive/项目面板同语义：预览
-        // 窗口内 I/O 精确选段后拖入时间轴）；右键 = 音效管理菜单
-        connect(card, &SoundCardWidget::clicked, this, [this](
-                    SoundCardWidget* c) {
-            emit monitorRequested(c->path());
-        });
-        connect(card, &SoundCardWidget::contextRequested, this,
-                [this](SoundCardWidget* c, const QPoint& gp) {
-            showCardMenu(c, gp);
-        });
-        mCards.insert(e.path, card);
-        mGridLayout->addWidget(card);
-    }
+    clearGridCards();
+    updateVirtualGrid();
     if (mShown.isEmpty()) {
         mHintLabel->setText(QString::fromUtf8(
                 mRootDir.isEmpty()
@@ -712,55 +669,216 @@ void SoundBrowserPanel::rebuildGrid()
     } else {
         mHintLabel->setVisible(false);
     }
-    QTimer::singleShot(0, this, [this]() { updateVisibleSet(); });
 }
 
 // ---------------------------------------------------------------
-// 波形解码（LRU 激活池 + 逐秒异步链）
+// 视口虚拟网格
 // ---------------------------------------------------------------
 
-SoundBrowserPanel::HandlerPair SoundBrowserPanel::acquireHandler(const QString& path)
+void SoundBrowserPanel::clearGridCards()
+{
+    for (auto card : mIndexCards) {
+        if (card) { card->deleteLater(); }
+    }
+    mIndexCards.clear();
+    mGridHost->setMinimumHeight(0);
+}
+
+SoundCardWidget* SoundBrowserPanel::createCard(const int index)
+{
+    const Entry& e = mShown.at(index);
+    const auto card = new SoundCardWidget(e.path, e.title, mGridHost);
+    card->setFavorite(mFavorites.contains(e.path));
+    connect(card, &SoundCardWidget::hoverEntered, this,
+            [this](SoundCardWidget* c) {
+        mHoverCard = c;
+        mHoverTimer->start();
+    });
+    connect(card, &SoundCardWidget::hoverLeft, this,
+            [this](SoundCardWidget* c) {
+        if (mHoverCard == c) {
+            mHoverCard.clear();
+            mHoverTimer->stop();
+        }
+        stopPreview();
+    });
+    connect(card, &SoundCardWidget::favoriteToggled, this,
+            &SoundBrowserPanel::toggleFavorite);
+    // 单击/双击 = 装载到片段监视器（kdenlive 同语义：预览窗口
+    // I/O 精确选段后拖入时间轴）；右键 = 音效管理菜单
+    connect(card, &SoundCardWidget::clicked, this, [this](
+                SoundCardWidget* c) {
+        emit monitorRequested(c->path());
+    });
+    connect(card, &SoundCardWidget::doubleClicked, this, [this](
+                SoundCardWidget* c) {
+        emit monitorRequested(c->path());
+    });
+    connect(card, &SoundCardWidget::contextRequested, this,
+            [this](SoundCardWidget* c, const QPoint& gp) {
+        showCardMenu(c, gp);
+    });
+    mIndexCards.insert(index, card);
+    return card;
+}
+
+void SoundBrowserPanel::updateVirtualGrid()
+{
+    if (!mGridHost) { return; }
+    const int availW = mGridScroll->viewport()->width()
+            - 2 * GRID_MARGIN;
+    const int cols = qMax(1, (availW + GRID_GAP) / CARD_PITCH_W);
+    if (cols != mCols) {
+        // 列数变了：全部几何作废，重建
+        clearGridCards();
+        mCols = cols;
+    }
+    const int n = mShown.size();
+    const int rows = (n + mCols - 1) / mCols;
+    mGridHost->setMinimumHeight(rows * CARD_PITCH_H + 2 * GRID_MARGIN
+                                        - GRID_GAP);
+    if (n == 0) { return; }
+
+    const int vy = mGridScroll->verticalScrollBar()->value();
+    const int vh = mGridScroll->viewport()->height();
+    const int firstRow = qMax(0, (vy - GRID_MARGIN) / CARD_PITCH_H);
+    const int lastRow = (vy + vh) / CARD_PITCH_H;
+    const int firstIdx = qMax(0, (firstRow - 1) * mCols);
+    const int lastIdx = qMin(n - 1, (lastRow + 2) * mCols);
+
+    // 创建 + 定位 + 激活
+    for (int i = firstIdx; i <= lastIdx; i++) {
+        auto card = mIndexCards.value(i);
+        if (!card) {
+            card = createCard(i);
+            card->move(GRID_MARGIN + (i % mCols) * CARD_PITCH_W,
+                       GRID_MARGIN + (i / mCols) * CARD_PITCH_H);
+            card->setVisible(true);
+            requestDecode(card);
+        }
+    }
+    // 毁掉远端卡片（缓冲 2 行，防抖动反复建毁）
+    for (auto it = mIndexCards.begin(); it != mIndexCards.end();) {
+        const int idx = it.key();
+        if (idx < firstIdx - 2 * mCols || idx > lastIdx + 2 * mCols) {
+            it.value()->deleteLater();
+            it = mIndexCards.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+// ---------------------------------------------------------------
+// 波形解码（异步开流 + LRU 池 + 逐秒并行）
+// ---------------------------------------------------------------
+
+SoundCardWidget* SoundBrowserPanel::cardFor(const QString& path) const
+{
+    for (auto card : mIndexCards) {
+        if (card && card->path() == path) { return card; }
+    }
+    return nullptr;
+}
+
+int SoundBrowserPanel::decodedCardCount() const
+{
+    int n = 0;
+    for (auto card : mIndexCards) {
+        if (card && card->hasEnvelope()) { n++; }
+    }
+    return n;
+}
+
+void SoundBrowserPanel::insertActive(const QString& path,
+                                     const HandlerPair& hp)
 {
     if (mActive.contains(path)) {
         mActiveOrder.removeAll(path);
         mActiveOrder.prepend(path);
-        return mActive.value(path);
+        return;
     }
-    HandlerPair hp;
-    try {
-        // DataHandler 注册表只持裸指针不保活（裸指针仅用于查重），
-        // 必须与 SoundHandler 成对强持在 LRU 条目里，否则出作用域
-        // 即析构、SoundHandler::mDataHandler 悬垂（secondReaderFinished
-        // 段错误实证）
-        hp.dh = SoundDataHandler::sGetCreateDataHandler<SoundDataHandler>(path);
-        if (hp.dh) { hp.sh = enve::make_shared<SoundHandler>(hp.dh.get()); }
-    } catch (const std::exception& e) {
-        gPrintExceptionCritical(e);
-    } catch (...) {}
-    if (hp.sh) {
-        mActive.insert(path, hp);
-        mActiveOrder.prepend(path);
-        while (mActiveOrder.size() > kMaxActive) {
-            const auto evict = mActiveOrder.takeLast();
-            mActive.remove(evict);
-            if (auto c = mCards.value(evict)) { c->detachHandler(); }
-        }
+    mActive.insert(path, hp);
+    mActiveOrder.prepend(path);
+    while (mActiveOrder.size() > kMaxActive) {
+        const auto evict = mActiveOrder.takeLast();
+        mActive.remove(evict);
+        if (auto c = cardFor(evict)) { c->detachHandler(); }
     }
-    return hp;
 }
 
-void SoundBrowserPanel::activateDecode(SoundCardWidget* card)
+void SoundBrowserPanel::requestDecode(SoundCardWidget* card)
 {
+    if (!card) { return; }
     const QString path = card->path();
-    if (mDecodeStarted.contains(path) || mDecoding.contains(path)) {
+    // 在途开流/解码：递送按路径找卡，卡片滚毁重建也能续上
+    if (mOpening.contains(path) || mDecoding.contains(path)) { return; }
+    if (mActive.contains(path)) {
+        // 已激活（含解码完后的卡片重建）：秒缓存命中即时回填
+        startDecodeWith(path, mActive.value(path));
         return;
     }
-    mDecodeStarted.insert(path);
-    const auto hp = acquireHandler(path);
-    if (!hp.sh) {
-        card->setDecodeError();
-        return;
+    mOpening.insert(path);
+    mOpenQueue.append(path);
+    pumpOpens();
+}
+
+void SoundBrowserPanel::pumpOpens()
+{
+    while (mOpensInFlight < kMaxOpens && !mOpenQueue.isEmpty()) {
+        const QString path = mOpenQueue.takeFirst();
+        if (!mOpening.contains(path)) { continue; }
+        // 注册表查 DataHandler（UI 线程，便宜且须持强引用）
+        qsptr<SoundDataHandler> dh;
+        try {
+            dh = SoundDataHandler::sGetCreateDataHandler<SoundDataHandler>(path);
+        } catch (const std::exception& e) {
+            gPrintExceptionCritical(e);
+        } catch (...) {}
+        if (!dh) {
+            mOpening.remove(path);
+            if (auto card = cardFor(path)) { card->setDecodeError(); }
+            continue;
+        }
+        // ffmpeg 开源移出 UI 线程（SoundHandler 构造同步开流，
+        // 大库快速滚动时这是 UI 卡顿主源）
+        mOpensInFlight++;
+        const QPointer<SoundBrowserPanel> selfQ = this;
+        QThreadPool::globalInstance()->start([selfQ, dh, path]() {
+            stdsptr<SoundHandler> sh;
+            try {
+                sh = enve::make_shared<SoundHandler>(dh.get());
+            } catch (...) {}
+            if (!selfQ) { return; }
+            QMetaObject::invokeMethod(selfQ.data(), [selfQ, dh, path,
+                                                      sh]() {
+                if (selfQ) { selfQ->finishOpen(path, dh, sh); }
+            }, Qt::QueuedConnection);
+        });
     }
+}
+
+void SoundBrowserPanel::finishOpen(const QString& path,
+                                   const qsptr<SoundDataHandler>& dh,
+                                   const stdsptr<SoundHandler>& sh)
+{
+    mOpensInFlight--;
+    mOpening.remove(path);
+    if (sh) {
+        const HandlerPair hp{dh, sh};
+        insertActive(path, hp);
+        if (cardFor(path)) { startDecodeWith(path, hp); }
+    } else {
+        if (auto card = cardFor(path)) { card->setDecodeError(); }
+    }
+    pumpOpens();
+}
+
+void SoundBrowserPanel::startDecodeWith(const QString& path,
+                                        const HandlerPair& hp)
+{
+    auto* card = cardFor(path);
+    if (!card || !hp.sh) { return; } // 卡片不在视口：池里留着即可
     const qreal dur = hp.sh->durationSec();
     card->setDurationSec(dur);
     if (dur <= 0) {
@@ -768,97 +886,64 @@ void SoundBrowserPanel::activateDecode(SoundCardWidget* card)
         return;
     }
     const int totalSecs = qMin(qCeil(dur), kDecodeBudgetSecs);
-    card->setExpectedCols(totalSecs * kColsPerSec);
+    card->setTotalCols(totalSecs * kColsPerSec);
+    mPendingSeconds.insert(path, totalSecs);
     mDecoding.insert(path);
-    requestNextSecond(card, hp, path, 0, totalSecs);
+    // 预算内全部秒一次性入池并行解码（旧版逐秒串行链一秒一跳）
+    for (int s2 = 0; s2 < totalSecs; s2++) { queueSecond(hp, path, s2); }
 }
 
-void SoundBrowserPanel::requestNextSecond(SoundCardWidget* card,
-                                          const HandlerPair& hp,
-                                          const QString& path,
-                                          int second,
-                                          const int totalSecs)
+void SoundBrowserPanel::queueSecond(const HandlerPair& hp,
+                                    const QString& path,
+                                    const int second)
 {
-    // dh 与 sh 一起进捕获链：在途解码回写 DataHandler 缓存，
-    // 捕获保活防 LRU 淘汰后悬垂
-    const auto dh = hp.dh;
-    const auto sh = hp.sh;
-    while (second < totalSecs) {
-        // 已解码秒（缓存命中）直接出列
-        if (const auto samples = sh->getSamplesForSecond(second)) {
-            card->appendPeaks(
-                    SoundPeaks::peaksForSecond(samples, kColsPerSec));
-            second++;
-            continue;
-        }
-        auto reader = sh->getSecondReader(second);
-        if (!reader) { reader = sh->addSecondReader(second); }
-        if (!reader) {
-            mDecoding.remove(path);
-            card->setDecodeError();
-            return;
-        }
-        const QPointer<SoundCardWidget> cardQ = card;
-        const QPointer<SoundBrowserPanel> selfQ = this;
-        reader->addDependent(
-            {[selfQ, cardQ, dh, sh, path, second, totalSecs]() {
-                 // 任务线程 → 回 UI 线程续链
-                 if (!selfQ) { return; }
-                 QMetaObject::invokeMethod(
-                         selfQ.data(),
-                         [selfQ, cardQ, dh, sh, path, second, totalSecs]() {
-                             if (!selfQ ||
-                                 !selfQ->mDecoding.contains(path)) {
-                                 return;
-                             }
-                             if (!cardQ) {
-                                 selfQ->mDecoding.remove(path);
-                                 return;
-                             }
-                             const auto samples =
-                                     sh ? sh->getSamplesForSecond(second)
-                                        : nullptr;
-                             if (samples) {
-                                 cardQ->appendPeaks(
-                                         SoundPeaks::peaksForSecond(
-                                                 samples, kColsPerSec));
-                             } else {
-                                 // 失败秒：跳过（包络留空隙）
-                             }
-                             selfQ->requestNextSecond(cardQ, {dh, sh},
-                                                      path, second + 1,
-                                                      totalSecs);
-                         },
-                         Qt::QueuedConnection);
-             },
-             [selfQ, path]() { // canceled
-                 if (!selfQ) { return; }
-                 QMetaObject::invokeMethod(
-                         selfQ.data(),
-                         [selfQ, path]() {
-                             if (selfQ) { selfQ->mDecoding.remove(path); }
-                         },
-                         Qt::QueuedConnection);
-             }});
-        return; // 异步在途，等回调续链
+    // 已解码秒（缓存命中）直接出列
+    if (const auto samples = hp.sh->getSamplesForSecond(second)) {
+        deliverPeaks(path, hp.sh, second);
+        return;
     }
-    mDecoding.remove(path);
-    qInfo() << "[SOUNDBROWSER] decode done" << path;
+    auto reader = hp.sh->getSecondReader(second);
+    if (!reader) { reader = hp.sh->addSecondReader(second); }
+    if (!reader) { deliverPeaks(path, hp.sh, second); return; }
+    const QPointer<SoundBrowserPanel> selfQ = this;
+    reader->addDependent(
+        {[selfQ, hp, path, second]() {
+             // 任务线程 → 回 UI 线程回填
+             if (!selfQ) { return; }
+             QMetaObject::invokeMethod(selfQ.data(), [selfQ, hp, path,
+                                                       second]() {
+                 if (selfQ) { selfQ->deliverPeaks(path, hp.sh, second); }
+             }, Qt::QueuedConnection);
+         },
+         [selfQ, path, second]() { // canceled = 该秒无数据，照常记账
+             if (!selfQ) { return; }
+             QMetaObject::invokeMethod(selfQ.data(), [selfQ, path,
+                                                       second]() {
+                 if (selfQ) { selfQ->deliverPeaks(path, nullptr, second); }
+             }, Qt::QueuedConnection);
+         }});
 }
 
-void SoundBrowserPanel::updateVisibleSet()
+void SoundBrowserPanel::deliverPeaks(const QString& path,
+                                     const stdsptr<SoundHandler>& sh,
+                                     const int second)
 {
-    if (!mGridHost || mCards.isEmpty()) { return; }
-    const auto vp = mGridScroll->viewport();
-    const QRect vpRect(mGridScroll->horizontalScrollBar()->value(),
-                       mGridScroll->verticalScrollBar()->value(),
-                       vp->width(), vp->height());
-    for (auto it = mCards.constBegin(); it != mCards.constEnd(); ++it) {
-        auto card = it.value();
-        if (!card || mDecodeStarted.contains(it.key())) { continue; }
-        if (vpRect.intersects(card->geometry())) {
-            activateDecode(card);
+    if (!mDecoding.contains(path)) { return; }
+    auto* card = cardFor(path);
+    if (card && sh) {
+        if (const auto samples = sh->getSamplesForSecond(second)) {
+            card->putPeaks(second * kColsPerSec,
+                           SoundPeaks::peaksForSecond(samples,
+                                                      kColsPerSec));
         }
+        // 失败秒：槽位留空隙（包络不撒谎）
+    }
+    auto it = mPendingSeconds.find(path);
+    if (it == mPendingSeconds.end()) { return; }
+    if (--it.value() <= 0) {
+        mPendingSeconds.erase(it);
+        mDecoding.remove(path);
+        qInfo() << "[SOUNDBROWSER] decode done" << path;
     }
 }
 
@@ -888,6 +973,27 @@ void SoundBrowserPanel::stopPreview()
         mPlayingCard->setPlaying(false);
         mPlayingCard.clear();
     }
+}
+
+bool SoundBrowserPanel::isPreviewPlaying() const
+{
+    return mPlayer &&
+           mPlayer->playbackState() == QMediaPlayer::PlayingState;
+}
+
+void SoundBrowserPanel::togglePreview(SoundCardWidget* card)
+{
+    if (!card) { return; }
+    if (mPlayingCard == card) { stopPreview(); return; }
+    stopPreview();
+    if (mPlaybackSuppressed) {
+        emit logMessage(QString::fromUtf8("工程播放中，暂停后可试听"));
+        return;
+    }
+    mPlayer->setSource(QUrl::fromLocalFile(card->path()));
+    mPlayer->play();
+    mPlayingCard = card;
+    mPlayingCard->setPlaying(true);
 }
 
 // ---------------------------------------------------------------
@@ -921,31 +1027,6 @@ void SoundBrowserPanel::toggleFavorite(SoundCardWidget* card, const bool on)
     if (mCategory == QStringLiteral("\x01fav")) { applyFilter(); }
 }
 
-// ---------------------------------------------------------------
-// 音效管理（第二阶段）：单击试听切换 + 右键文件管理
-// ---------------------------------------------------------------
-
-void SoundBrowserPanel::togglePreview(SoundCardWidget* card)
-{
-    if (!card) { return; }
-    if (mPlayingCard == card) { stopPreview(); return; }
-    stopPreview();
-    if (mPlaybackSuppressed) {
-        emit logMessage(QString::fromUtf8("工程播放中，暂停后可试听"));
-        return;
-    }
-    mPlayer->setSource(QUrl::fromLocalFile(card->path()));
-    mPlayer->play();
-    mPlayingCard = card;
-    mPlayingCard->setPlaying(true);
-}
-
-bool SoundBrowserPanel::isPreviewPlaying() const
-{
-    return mPlayer &&
-           mPlayer->playbackState() == QMediaPlayer::PlayingState;
-}
-
 void SoundBrowserPanel::refileFavorite(const QString& oldPath,
                                        const QString& newPath)
 {
@@ -954,6 +1035,10 @@ void SoundBrowserPanel::refileFavorite(const QString& oldPath,
     mFavorites[i] = newPath;
     saveFavorites();
 }
+
+// ---------------------------------------------------------------
+// 音效管理（右键菜单）：文件操作薄封装
+// ---------------------------------------------------------------
 
 void SoundBrowserPanel::renameCard(SoundCardWidget* card,
                                    const QString& newName)
