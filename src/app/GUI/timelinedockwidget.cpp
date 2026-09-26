@@ -780,7 +780,15 @@ void TimelineDockWidget::setupNleActions()
     mNleAddBtn = new QToolButton(this);
     mNleAddBtn->setAutoRaise(true);
     mNleAddBtn->setToolTip(tr("添加"));
-    mNleAddBtn->setIcon(QIcon::fromTheme("list-add"));
+    // 白色自绘加号：主题图标 "list-add" 跟随配色（暗色主题下常是
+    // 深色），与工具栏其余内联 SVG 齐观感
+    mNleAddBtn->setIcon(QIcon(nleGlyphPixmap(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\""
+                " viewBox=\"0 0 24 24\">"
+                "<path fill=\"none\" stroke=\"%1\" stroke-width=\"2.4\""
+                " stroke-linecap=\"round\" d=\"M12 5 V19 M5 12 H19\"/>"
+                "</svg>",
+                QColor(0xff, 0xff, 0xff))));
     auto *addMenu = new QMenu(mNleAddBtn);
     // rebuild on every open: actions bind to the active scene, which
     // may change between openings
