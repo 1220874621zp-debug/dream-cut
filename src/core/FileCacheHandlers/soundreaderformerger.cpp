@@ -1,4 +1,5 @@
 #include "soundreaderformerger.h"
+#include "CacheHandlers/soundcachehandler.h"
 
 #include "Sound/soundmerger.h"
 

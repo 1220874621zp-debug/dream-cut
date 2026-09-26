@@ -24,6 +24,7 @@
 // Fork of enve - Copyright (C) 2016-2020 Maurycy Liebner
 
 #include "audiostreamsdata.h"
+#include "CacheHandlers/soundcachehandler.h"
 #include "Sound/soundcomposition.h"
 
 AudioStreamsData::AudioStreamsData() {

@@ -50,6 +50,10 @@ protected:
         mCacheHandler(cacheHandler), mOpenedAudio(openedAudio),
         mSecondId(secondId), mSampleRange(sampleRange),
         mSettings(eSoundSettings::sData()) {}
+    // 声音任务的生命周期可能长于 SoundHandler（新建/清空工程时
+    // FilesHandler 先走、飞行中的解码任务还握着回调目标），持有侧
+    // 一律弱引用判活（SoundMerger 的 stdptr 同款先例），任务完成
+    // 时 handler 已亡则丢弃样本，不得悬垂回调
 
     void beforeProcessing(const Hardware);
     void afterProcessing();
@@ -63,7 +67,7 @@ protected:
 private:
     void readFrame();
 
-    SoundHandler * const mCacheHandler;
+    const StdPointer<SoundHandler> mCacheHandler;
     const stdsptr<AudioStreamsData> mOpenedAudio;
     const int mSecondId;
     const SampleRange mSampleRange;

@@ -24,6 +24,7 @@
 // Fork of enve - Copyright (C) 2016-2020 Maurycy Liebner
 
 #include "videostreamsdata.h"
+#include "CacheHandlers/soundcachehandler.h"
 #include "Private/esettings.h"
 
 stdsptr<VideoStreamsData> VideoStreamsData::sOpen(const QString &path) {

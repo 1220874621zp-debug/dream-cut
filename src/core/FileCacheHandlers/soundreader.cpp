@@ -35,10 +35,12 @@ void SoundReader::beforeProcessing(const Hardware) {
 
 void SoundReader::afterProcessing() {
     mOpenedAudio->unlock();
+    if(!mCacheHandler) return;
     mCacheHandler->secondReaderFinished(mSecondId, mSamples);
 }
 
 void SoundReader::afterCanceled() {
+    if(!mCacheHandler) return;
     mCacheHandler->secondReaderCanceled(mSecondId);
 }
 

@@ -23,6 +23,7 @@
 
 // Fork of enve - Copyright (C) 2016-2020 Maurycy Liebner
 
+#include "CacheHandlers/soundcachehandler.h"
 #include "soundcomposition.h"
 #include "esound.h"
 #include "canvas.h"
