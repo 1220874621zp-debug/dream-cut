@@ -202,6 +202,12 @@ public:
     bool requestInsertMedia(const QString &path, const int inFrame,
                             const int outFrame, const int trackId,
                             const int startFrame);
+    // 音效库/纯音频拖入：落音频轨的 eIndependentSound 块（CapCut
+    // 音效语义）；secHint = 源时长秒（音效库 mime 携带），<=0 时
+    // 临时激活 SoundHandler 现测时长；目标轨让位插入
+    bool requestInsertSound(const QString &path, const int trackId,
+                            const int startFrame,
+                            const qreal secHint = -1.0);
     // kdenlive "detach audio": pull the VideoBox's embedded sound out
     // as an independent audio clip (same file, same range, same
     // speed) parked on the first audio track; the embedded copy goes

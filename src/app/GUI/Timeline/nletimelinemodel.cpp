@@ -18,8 +18,11 @@
 #include "RasterEffects/rastereffectcollection.h"
 #include "Animators/qrealanimator.h"
 #include "smartPointers/ememory.h"
+#include "CacheHandlers/soundcachehandler.h"
+#include "exceptions.h"
 
 #include <QDebug>
+#include <QtMath>
 #include <algorithm>
 #include <climits>
 
@@ -1380,6 +1383,96 @@ bool NleTimelineModel::requestInsertMedia(const QString &path,
     finishAction();
     emit logMessage(QStringLiteral("已插入片段 入 %1 出 %2（%3 帧）")
                             .arg(inFrame).arg(outFrame).arg(len));
+    return true;
+}
+
+// 音效库/纯音频拖入（CapCut 音效语义）：音频轨上落 eIndependentSound
+// 块——requestInsertMedia 恒建 VideoBox，纯音频文件走它会得到坏块，
+// 所以单独成入口。让位+落块同一 mInWriteback 事务（中途 refresh 短
+// 路），最后一次 finishAction 让兜底压实对插入终态生效，与
+// requestInsertMedia 同款铁律
+bool NleTimelineModel::requestInsertSound(const QString &path,
+                                          const int trackId,
+                                          const int startFrame,
+                                          const qreal secHint)
+{
+    if (mInWriteback || mGestureActive) { return false; }
+    const auto scene = mPanelScene.data();
+    if (!scene || path.isEmpty()) { return false; }
+    const auto tr = track(trackId);
+    if (!tr) {
+        emit logMessage(QStringLiteral("目标轨道不存在"));
+        return false;
+    }
+    if (!tr->audio) {
+        emit logMessage(QStringLiteral("音效请拖到音频轨"));
+        return false;
+    }
+    if (tr->locked) {
+        emit logMessage(QStringLiteral("目标轨道已锁定"));
+        return false;
+    }
+    // 时长：mime 秒数优先（音效库已在波形解码时开过源），
+    // 无提示则临时激活 SoundHandler 现测（同步开源头，毫秒级）
+    qreal sec = secHint;
+    if (sec <= 0) {
+        try {
+            const auto dh = SoundDataHandler::sGetCreateDataHandler<SoundDataHandler>(path);
+            if (!dh) {
+                emit logMessage(QStringLiteral("无法解码音频文件"));
+                return false;
+            }
+            const auto sh = enve::make_shared<SoundHandler>(dh.get());
+            sec = sh->durationSec();
+        } catch (const std::exception& e) {
+            gPrintExceptionCritical(e);
+            emit logMessage(QStringLiteral("无法解码音频文件"));
+            return false;
+        }
+    }
+    if (sec <= 0) {
+        emit logMessage(QStringLiteral("音频时长未知，无法插入"));
+        return false;
+    }
+    const int len = qMax(1, qCeil(sec * scene->getFps()));
+    const int S = qMax(0, startFrame);
+
+    const auto pushes = insertShiftPlan(trackId, S, len, {});
+    mInWriteback = true;
+    {
+        // 与导入同款：不进撤销栈（素材插入 + 异步解码混合态）
+        const auto undoBlock = scene->blockUndoRedo();
+        for (const auto &m : pushes) {
+            const auto oc = clip(m.clipId);
+            if (oc && oc->layer) {
+                shiftLayer(oc->layer.data(), m.start - oc->start);
+            }
+        }
+        const auto snd = enve::make_shared<eIndependentSound>();
+        snd->setFilePath(path);
+        scene->addContained(snd);
+        const auto dur = snd->getDurationRectangle();
+        if (dur) {
+            // 声音块的 durRect 绑定在动画窗内（bound=true）：异步
+            // handler 就绪时 updateDurationRectLength 首调会把块尾
+            // 覆写进 [0..dur-1] 并把越界窗钳回（S=300 落点实测被钳成
+            // [47..47]）。同步把动画窗整体搬到 [S..S+len-1]（与
+            // requestInsertMedia 的 setFirstAnimationFrame 同语义），
+            // 之后异步重算与 bind 都稳定于此窗
+            const auto flar = dur->ref<FixedLenAnimationRect>();
+            if (flar) {
+                flar->setFirstAnimationFrame(S);
+                flar->setAnimationFrameDuration(len);
+            }
+            dur->setMinAbsFrame(S);
+            dur->setMaxAbsFrame(S + len - 1);
+        }
+        snd->setTrackId(trackId);
+    }
+    mInWriteback = false;
+    finishAction();
+    emit logMessage(QStringLiteral("已插入音效（%1 秒）")
+                            .arg(QString::number(sec, 'f', 1)));
     return true;
 }
 

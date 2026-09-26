@@ -75,6 +75,7 @@
 #include "quickeffectsearchdialog.h"
 #include "projectpanel.h"
 #include "clipmonitorwidget.h"
+#include "soundbrowserpanel.h"
 #include <QShortcut>
 #include "textanimpresetpanel.h"
 #include "scriptmanager.h"
@@ -1569,6 +1570,9 @@ void MainWindow::rebuildWorkspaceMenu()
     if (mClipMonitorDock) {
         panelsMenu->addAction(mClipMonitorDock->toggleViewAction());
     }
+    if (mSoundBrowserDock) {
+        panelsMenu->addAction(mSoundBrowserDock->toggleViewAction());
+    }
     // the script console toggle lives in the Scripts menu only;
     // listing it here too showed the same entry twice
 
@@ -1859,6 +1863,22 @@ void MainWindow::setupLayout()
         });
     }
 
+    // 音效库面板（剪映式素材库）：本地音效目录浏览、波形卡片、
+    // 悬停试听、收藏、拖拽入时间轴音频轨
+    mSoundBrowserPanel = new SoundBrowserPanel(this);
+    connect(mSoundBrowserPanel, &SoundBrowserPanel::logMessage, this,
+            [this](const QString& msg) {
+        statusBar()->showMessage(msg, 4000);
+    });
+    // 双击音效卡片：装载到片段监视器预览（项目面板同语义）
+    connect(mSoundBrowserPanel, &SoundBrowserPanel::monitorRequested,
+            this, [this](const QString& path) {
+        mClipMonitor->loadFile(path);
+    });
+    mSoundBrowserDock = makeDock(tr("音效库"),
+                                 QStringLiteral("dockSoundBrowser"),
+                                 mSoundBrowserPanel);
+
     setCentralWidget(mStackWidget);
     addDockWidget(Qt::RightDockWidgetArea, mFillStrokeDock);
     addDockWidget(Qt::RightDockWidgetArea, mPropertiesDock);
@@ -1869,10 +1889,12 @@ void MainWindow::setupLayout()
     addDockWidget(Qt::BottomDockWidgetArea, mTimelineDock);
     addDockWidget(Qt::RightDockWidgetArea, mTextAnimDock);
     addDockWidget(Qt::RightDockWidgetArea, mClipMonitorDock);
+    addDockWidget(Qt::RightDockWidgetArea, mSoundBrowserDock);
 
     // hidden by default, can be opened from the Panels menu
     mEasingDock->hide();
     mTextAnimDock->hide();
+    mSoundBrowserDock->hide();
 
 
     // window-level Space shortcut: playback toggles from any focus

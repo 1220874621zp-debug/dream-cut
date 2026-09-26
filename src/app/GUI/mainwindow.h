@@ -293,6 +293,8 @@ private:
     ClipMonitorWidget *mClipMonitor = nullptr;
     class TextAnimPresetPanel *mTextAnimPanel = nullptr;
     EffectsPresetsPanel *mEffectsPresetsPanel = nullptr;
+    QDockWidget *mSoundBrowserDock = nullptr;
+    class SoundBrowserPanel *mSoundBrowserPanel = nullptr;
     QuickEffectSearchDialog *mQuickEffectSearch = nullptr;
     // JS plugin system (Scripts menu + console dock)
     ScriptManager *mScriptManager = nullptr;

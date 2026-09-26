@@ -1,5 +1,6 @@
 #include "nletimelineview.h"
 #include "nletimelinemodel.h"
+#include "GUI/soundbrowserpanel.h"
 
 #include <QPainter>
 #include <QPainterPath>
@@ -2664,16 +2665,41 @@ void NleTimelineView::dropEvent(QDropEvent *e)
                 "application/x-dreamcut-clip-path"))) { return; }
     const QString path = QString::fromUtf8(mime->data(
                 QStringLiteral("application/x-dreamcut-clip-path")));
+    if (path.isEmpty()) { return; }
+
+    const QPointF p = e->position();
+    // 纯音频文件（音效库/监视器拖入）：CapCut 音效语义——路由最近
+    // 音频轨，落 eIndependentSound 块；时长秒由 mime 携带（视图按
+    // 场景 fps 换算在模型侧），video 分支的帧出入点对音频无意义
+    if (SoundBrowserPanel::isSoundFile(path)) {
+        const qreal sec = QString::fromUtf8(mime->data(QStringLiteral(
+                    "application/x-dreamcut-clip-sec"))).toDouble();
+        int aIdx = p.y() > rulerHeight() ? trackAtY(int(p.y())) : -1;
+        if (aIdx < 0 || !mModel->tracks().value(aIdx).audio) {
+            aIdx = nearestTrackOfType(int(p.y()), true);
+        }
+        if (aIdx < 0) { emit logMessage(QStringLiteral("没有音频轨可放置")); return; }
+        const auto &tr = mModel->tracks().at(aIdx);
+        if (tr.locked) {
+            emit logMessage(QStringLiteral("目标轨道已锁定"));
+            return;
+        }
+        const int frame = qMax(0, xToFrame(int(p.x())));
+        if (mModel->requestInsertSound(path, tr.id, frame, sec)) {
+            e->acceptProposedAction();
+        }
+        return;
+    }
+
     const auto io = QString::fromUtf8(mime->data(
                 QStringLiteral("application/x-dreamcut-clip-inout")))
             .split(',');
-    if (path.isEmpty() || io.size() != 2) { return; }
+    if (io.size() != 2) { return; }
     bool inOk = false, outOk = false;
     const int inF = io.at(0).toInt(&inOk);
     const int outF = io.at(1).toInt(&outOk);
     if (!inOk || !outOk || inF < 0 || outF < inF) { return; }
 
-    const QPointF p = e->position();
     // 轨道解析：落在轨道区外/标尺区 = 最近视频轨；锁定轨拒绝
     int trIdx = p.y() > rulerHeight() ? trackAtY(int(p.y())) : -1;
     if (trIdx < 0 || mModel->tracks().value(trIdx).audio) {

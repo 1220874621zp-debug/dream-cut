@@ -416,6 +416,21 @@ int main(int argc, char *argv[])
 
     // setup app
     QApplication app(argc, argv);
+    // 无头台架：逢模态即关（项目管理面板/预设询问等启动门，
+    // 嵌套 exec 循环会处理本定时器，构造链才不会被卡死）
+    QTimer* modalCloser = nullptr;
+    if (qEnvironmentVariableIsSet("DREAMCUT_SOUNDBROWSER_AUTOTEST")) {
+        modalCloser = new QTimer(&app);
+        modalCloser->setInterval(400);
+        QObject::connect(modalCloser, &QTimer::timeout, &app, []() {
+            QWidget* mw = QApplication::activeModalWidget();
+            if (mw) {
+                qInfo() << "[AUTOTESTSB] closing modal" << mw;
+                mw->close();
+            }
+        });
+        modalCloser->start();
+    }
     setlocale(LC_NUMERIC, "C");
 
     qInfo("[BUILD] %s %s — 删除预览修复轮次3(轨道全链探针+缓存拒显)",
