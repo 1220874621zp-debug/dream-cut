@@ -946,12 +946,13 @@ void MainWindow::setupToolBar()
     }
     {
         // 工具属性（变换滑杆/节点工具/自动选层）不再占顶部独立行，
-        // 转垂直嵌入属性面板“工具属性”页
+        // 条目重排进属性面板“工具属性”页的流式布局，按面板宽度
+        // 自动换行（QToolBar 本体转隐藏，动作/动作组仍是事实源）
         const auto toolbar = mToolBox->getToolBar(Ui::ToolBox::Controls);
         if (toolbar && mToolPropsTabHost && mToolPropsTabHost->layout()) {
-            toolbar->setOrientation(Qt::Vertical);
-            toolbar->setMovable(false);
-            mToolPropsTabHost->layout()->addWidget(toolbar);
+            const auto flowHost = new Ui::ToolBarFlow(this);
+            mToolPropsTabHost->layout()->addWidget(flowHost);
+            flowHost->attachToolBar(toolbar);
         }
     }
 

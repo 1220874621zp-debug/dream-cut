@@ -109,6 +109,7 @@ set(
     widgets/toolbar.cpp
     widgets/toolbox.cpp
     widgets/toolcontrols.cpp
+    widgets/toolbarflow.cpp
     widgets/toolinteract.cpp
     widgets/twocolumnlayout.cpp
     widgets/uilayout.cpp
@@ -199,6 +200,7 @@ set(
     widgets/toolbox.h
     widgets/toolbutton.h
     widgets/toolcontrols.h
+    widgets/toolbarflow.h
     widgets/toolinteract.h
     widgets/twocolumnlayout.h
     widgets/uilayout.h

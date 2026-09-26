@@ -58,6 +58,7 @@
 #include "widgets/canvastoolbar.h"
 #include "widgets/aboutwidget.h"
 #include "widgets/toolbox.h"
+#include "widgets/toolbarflow.h"
 #include <QDockWidget>
 
 #ifndef Q_OS_MAC
