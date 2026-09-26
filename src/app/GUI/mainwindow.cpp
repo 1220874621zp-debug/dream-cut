@@ -1788,7 +1788,7 @@ void MainWindow::setupLayout()
             [this](const QString &path) {
         mClipMonitor->loadFile(path);
     });
-    mClipMonitorDock = makeDock(tr("Clip Monitor"),
+    mClipMonitorDock = makeDock(tr("片段监视器"),
                                 QStringLiteral("dockClipMonitor"),
                                 mClipMonitor);
 
