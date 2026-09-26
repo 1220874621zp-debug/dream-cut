@@ -208,6 +208,15 @@ public:
     bool requestInsertSound(const QString &path, const int trackId,
                             const int startFrame,
                             const qreal secHint = -1.0);
+    // 项目面板链接场景拖入：在 trackId 的 startFrame 落外部工程场
+    // 景的动态链接块（让位插入，requestInsertMedia 同款事务语义）
+    bool requestInsertSceneLink(const QString &path, const int sceneDocId,
+                                const QString &sceneName, const int trackId,
+                                const int startFrame);
+    // 菜单"导入链接工程"：链接场景追加到主轨末尾（多次调用自动
+    // 接龙——每次都取当前主轨末帧作落点）
+    bool requestAppendSceneLink(const QString &path, const int sceneDocId,
+                                const QString &sceneName);
     // kdenlive "detach audio": pull the VideoBox's embedded sound out
     // as an independent audio clip (same file, same range, same
     // speed) parked on the first audio track; the embedded copy goes

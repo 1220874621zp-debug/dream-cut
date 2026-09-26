@@ -42,6 +42,7 @@
 #include <QLineEdit>
 
 #include "Private/document.h"
+#include "Boxes/internallinkcanvasbox.h"
 #include "canvas.h"
 #include "fileshandler.h"
 #include "FileCacheHandlers/filecachehandler.h"
@@ -58,6 +59,10 @@ const int kScenePtrRole = Qt::UserRole + 1;
 const int kFilePtrRole = Qt::UserRole + 2;
 // the item data role carrying the folder id (folder rows only)
 const int kFolderIdRole = Qt::UserRole + 3;
+// 链接工程行携带源工程路径；链接场景行携带三行载荷
+// "path\ndocId\nsceneName"（拖出时间轴的 mime 同构）
+const int kLinkProjectRole = Qt::UserRole + 4;
+const int kLinkSceneRole = Qt::UserRole + 5;
 
 QString fileIconName(const QString& path)
 {
@@ -152,7 +157,13 @@ protected:
         if (cur && !rows.contains(cur)) { rows.prepend(cur); }
         QList<QByteArray> scenePtrs;
         QList<QUrl> fileUrls;
+        QList<QString> linkPayloads;
         for (const auto item : rows) {
+            const auto linkPayload = item->data(0, kLinkSceneRole).toString();
+            if (!linkPayload.isEmpty()) {
+                linkPayloads << linkPayload;
+                continue;
+            }
             const auto scene = reinterpret_cast<Canvas*>(
                         item->data(0, kScenePtrRole).toULongLong());
             if (scene) {
@@ -164,13 +175,21 @@ protected:
                         item->data(0, kFilePtrRole).toULongLong());
             if (handler) { fileUrls << QUrl::fromLocalFile(handler->path()); }
         }
-        if (scenePtrs.isEmpty() && fileUrls.isEmpty()) { return; }
+        if (scenePtrs.isEmpty() && fileUrls.isEmpty() &&
+                linkPayloads.isEmpty()) { return; }
         auto mimeData = new QMimeData;
         if (!scenePtrs.isEmpty()) {
             mimeData->setData(ProjectPanel::sMimeFormat(),
                               scenePtrs.join('\n'));
         }
         if (!fileUrls.isEmpty()) { mimeData->setUrls(fileUrls); }
+        // 链接场景拖向时间轴：x-dreamcut-scene-link，多选多载荷
+        // （每场景三行，拖放端按 3 的倍数切段逐个落块）
+        if (!linkPayloads.isEmpty()) {
+            mimeData->setData(QStringLiteral(
+                        "application/x-dreamcut-scene-link"),
+                        linkPayloads.join(QLatin1Char('\n')).toUtf8());
+        }
         QDrag drag(this);
         drag.setMimeData(mimeData);
         const auto pm = cur ? cur->icon(0).pixmap(32, 32) : QPixmap();
@@ -289,7 +308,20 @@ ProjectPanel::ProjectPanel(Document& doc, QWidget* const parent) :
             this, [this](QTreeWidgetItem* item, int) {
         if (const auto scene = sceneAt(item)) {
             switchToScene(scene);
-        } else if (const auto handler = fileAt(item)) {
+            return;
+        }
+        const QString linkPayload = item ?
+                    item->data(0, kLinkSceneRole).toString() : QString();
+        if (!linkPayload.isEmpty()) {
+            // 双击链接场景：追加到主轨末尾（拖拽的键盘等价物）
+            const auto parts = linkPayload.split(QLatin1Char('\n'));
+            if (parts.count() == 3) {
+                emit sceneLinkImportRequested(
+                            parts.at(0), parts.at(1).toInt(), parts.at(2));
+            }
+            return;
+        }
+        if (const auto handler = fileAt(item)) {
             // 双击导入：把素材加进当前场景（同文件复用解码缓存）；
             // 系统播放器预览保留在右键菜单
             emit importRequested(handler->path());
@@ -340,6 +372,13 @@ ProjectPanel::ProjectPanel(Document& doc, QWidget* const parent) :
             removeFileItem(handler);
         });
     }
+
+    // 链接工程区随外部工程缓存增删/重载刷新
+    const auto cache = ExternalProjectCache::instance();
+    connect(cache, &ExternalProjectCache::projectAdded,
+            this, [this](const QString&) { rebuildLinkProjects(); });
+    connect(cache, &ExternalProjectCache::projectReloaded,
+            this, [this](const QString&) { rebuildLinkProjects(); });
 
     rebuild();
 }
@@ -529,7 +568,64 @@ void ProjectPanel::rebuild()
             if (fh) { addFileItem(fh.get()); }
         }
     }
+    rebuildLinkProjects();
     updateActiveMark();
+}
+
+// 链接工程区：每个已缓存的外部工程一行（文件名 + 链环图标），
+// 场景为其子行；行不参与文件夹整理/激活标记（无 kScenePtr/kFilePtr/
+// kFolderId 数据，现有遍历自然跳过）。重载后场景名/范围可能变化，
+// 全量重建该区
+void ProjectPanel::rebuildLinkProjects()
+{
+    // 先摘旧行（自底向上防迭代器失效；场景行是工程行子项，删父带子）
+    for (int i = mTree->topLevelItemCount() - 1; i >= 0; i--) {
+        const auto item = mTree->topLevelItem(i);
+        if (item->data(0, kLinkProjectRole).isValid()) {
+            mTree->takeTopLevelItem(i);
+            delete item;
+        }
+    }
+    const auto projects = ExternalProjectCache::instance()
+            ->loadedProjects();
+    for (const auto& loaded : projects) {
+        if (!loaded || loaded->scenes.isEmpty()) { continue; }
+        const auto projItem = new QTreeWidgetItem(mTree);
+        const QFileInfo info(loaded->path);
+        projItem->setText(0, info.fileName());
+        projItem->setIcon(0, QIcon::fromTheme("link"));
+        projItem->setText(1, tr("%1 个场景").arg(loaded->scenes.count()));
+        projItem->setToolTip(0, loaded->path);
+        projItem->setToolTip(1, loaded->path);
+        projItem->setData(0, kLinkProjectRole, loaded->path);
+        projItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+        projItem->setExpanded(true);
+        for (const auto& sc : loaded->scenes) {
+            if (!sc) { continue; }
+            const auto sceneItem = new QTreeWidgetItem(projItem);
+            sceneItem->setText(0, sc->prp_getName());
+            sceneItem->setIcon(0, QIcon::fromTheme("link"));
+            const auto range = sc->getFrameRange();
+            sceneItem->setText(1, tr("链接场景 | %1 帧")
+                               .arg(range.fMax - range.fMin + 1));
+            sceneItem->setToolTip(0, tr("%1 → %2")
+                                  .arg(loaded->path, sc->prp_getName()));
+            sceneItem->setData(0, kLinkSceneRole,
+                               QStringLiteral("%1\n%2\n%3")
+                               .arg(loaded->path)
+                               .arg(sc->getDocumentId())
+                               .arg(sc->prp_getName()));
+            sceneItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable |
+                                Qt::ItemIsDragEnabled |
+                                Qt::ItemNeverHasChildren);
+        }
+    }
+}
+
+QString ProjectPanel::linkPayloadAt(QTreeWidgetItem* const item) const
+{
+    if (!item) { return QString(); }
+    return item->data(0, kLinkSceneRole).toString();
 }
 
 void ProjectPanel::updateActiveMark()
@@ -578,6 +674,47 @@ void ProjectPanel::showContextMenu(const QPoint& pos)
         if (selScenes.isEmpty() && selFiles.isEmpty()) {
             if (scene) { selScenes << scene; }
             if (handler) { selFiles << handler; }
+        }
+    }
+
+    // 链接工程/链接场景行：独立小菜单（重载工程 / 插入时间轴），
+    // 不与通用场景-素材菜单混装
+    {
+        const QString linkPayload = linkPayloadAt(item);
+        const QString linkProject = (item &&
+                item->data(0, kLinkProjectRole).isValid()) ?
+                    item->data(0, kLinkProjectRole).toString() :
+                    QString();
+        if (!linkProject.isEmpty() || !linkPayload.isEmpty()) {
+            QMenu linkMenu(this);
+            if (!linkPayload.isEmpty()) {
+                const auto parts = linkPayload.split(QLatin1Char('\n'));
+                if (parts.count() == 3) {
+                    linkMenu.addAction(QIcon::fromTheme("link"),
+                            tr("插入到时间轴末尾"),
+                            this, [this, parts]() {
+                        emit sceneLinkImportRequested(
+                                    parts.at(0), parts.at(1).toInt(),
+                                    parts.at(2));
+                    });
+                }
+            }
+            if (!linkProject.isEmpty()) {
+                linkMenu.addAction(QIcon::fromTheme("view-refresh"),
+                        tr("重新加载链接工程"),
+                        this, [linkProject]() {
+                    QString err;
+                    if (!ExternalProjectCache::instance()->load(
+                                linkProject, true, &err)) {
+                        // 解析失败保留旧缓存（链接块维持旧画面），
+                        // 原因进日志取证
+                        qWarning() << "[ExtLink] 手动重载失败"
+                                   << linkProject << err;
+                    }
+                });
+            }
+            linkMenu.exec(mTree->viewport()->mapToGlobal(pos));
+            return;
         }
     }
 

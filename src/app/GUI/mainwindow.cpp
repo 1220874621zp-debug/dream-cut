@@ -1816,6 +1816,15 @@ void MainWindow::setupLayout()
             [this](const QString &path) {
         mClipMonitor->loadFile(path);
     });
+    // 面板链接场景双击/右键插入：追加到主轨末尾（与"导入链接工程"
+    // 菜单同语义）
+    connect(mProjectPanel, &ProjectPanel::sceneLinkImportRequested,
+            this, [this](const QString &path, const int docId,
+                         const QString &name) {
+        const auto dock = getTimeLineWidget();
+        const auto model = dock ? dock->nleModel() : nullptr;
+        if (model) { model->requestAppendSceneLink(path, docId, name); }
+    });
     // 双击导入同时把素材送进监视器（预览跟随素材）
     connect(mProjectPanel, &ProjectPanel::importRequested, this,
             [this](const QString &path) {
@@ -2297,26 +2306,27 @@ void MainWindow::importLinkedProject()
         return;
     }
 
-    int docId = -1;
-    QString sceneName;
-    if (loaded->scenes.count() > 1) {
-        const auto names = ExternalProjectCache::sceneNames(loaded.data());
-        bool ok = false;
-        const auto chosen = QInputDialog::getItem(
-                    this, title, tr("选择要链接的场景"),
-                    names, 0, false, &ok);
-        if (!ok || chosen.isEmpty()) { return; }
-        const int idx = names.indexOf(chosen);
-        if (idx < 0 || !loaded->scenes.at(idx)) { return; }
-        docId = loaded->scenes.at(idx)->getDocumentId();
-        sceneName = chosen;
-    } else if (loaded->scenes.first()) {
-        docId = loaded->scenes.first()->getDocumentId();
-        sceneName = loaded->scenes.first()->prp_getName();
-    } else {
+    // 默认导入全部场景：逐场景接龙追加到主轨末尾（剪映导入语义，
+    // 不再弹单场景选择框）；工程进缓存后项目面板同时挂出链接区，
+    // 后续任意场景可从面板再拖入时间轴
+    const auto dock = getTimeLineWidget();
+    const auto model = dock ? dock->nleModel() : nullptr;
+    if (!model) {
+        QMessageBox::warning(this, title, tr("时间轴不可用"));
         return;
     }
-    mActions.importLinkedProject(path, docId, sceneName);
+    int okCount = 0;
+    for (const auto& sc : loaded->scenes) {
+        if (!sc) { continue; }
+        if (model->requestAppendSceneLink(path, sc->getDocumentId(),
+                                          sc->prp_getName())) {
+            okCount++;
+        }
+    }
+    statusBar()->showMessage(
+                tr("已导入 %1/%2 个链接场景（源：%3）")
+                .arg(okCount).arg(loaded->scenes.count())
+                .arg(QFileInfo(path).fileName()), 5000);
 }
 
 void MainWindow::importImageSequence()

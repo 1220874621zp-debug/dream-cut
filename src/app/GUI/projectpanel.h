@@ -56,6 +56,10 @@ signals:
     void importRequested(const QString& filePath);
     // 单击素材条目：请求装载到片段监视器预览（kdenlive 行为）
     void monitorRequested(const QString& filePath);
+    // 双击/右键链接场景条目：请求把该外部场景追加到主轨末尾
+    void sceneLinkImportRequested(const QString& projectPath,
+                                  int sceneDocId,
+                                  const QString& sceneName);
 
 private:
     struct FolderInfo {
@@ -66,6 +70,11 @@ private:
     };
 
     void rebuild();
+    // 链接工程区（外部工程分组 + 场景行）：按 ExternalProjectCache
+    // 当前缓存重建；导入/重载信号触发
+    void rebuildLinkProjects();
+    // 链接场景行的三行载荷（path\ndocId\ndocName），非链接行返回空
+    QString linkPayloadAt(QTreeWidgetItem* const item) const;
     void updateActiveMark();
     void switchToScene(Canvas* const scene);
     Canvas* sceneAt(QTreeWidgetItem* const item) const;

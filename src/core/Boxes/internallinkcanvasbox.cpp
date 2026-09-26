@@ -284,7 +284,9 @@ ExternalProjectCache::load(const QString &path,
     const auto loaded = QSharedPointer<Loaded>::create();
     loaded->path = key;
     loaded->scenes = std::move(scenes);
+    const bool wasCached = mCache.contains(key);
     mCache.insert(key, loaded);
+    if (!wasCached) { emit projectAdded(key); }
     // 文件与父目录双双在册：rename 替换后靠目录事件兜底重挂
     if (QFile::exists(key) && !mWatcher.files().contains(key)) {
         mWatcher.addPath(key);

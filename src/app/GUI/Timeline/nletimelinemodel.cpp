@@ -9,6 +9,7 @@
 #include "Sound/esound.h"
 #include "Sound/eindependentsound.h"
 #include "Boxes/videobox.h"
+#include "Boxes/internallinkcanvasbox.h"
 #include "Sound/evideosound.h"
 #include "Timeline/durationrectangle.h"
 #include "Timeline/fixedlenanimationrect.h"
@@ -1474,6 +1475,124 @@ bool NleTimelineModel::requestInsertSound(const QString &path,
     emit logMessage(QStringLiteral("已插入音效（%1 秒）")
                             .arg(QString::number(sec, 'f', 1)));
     return true;
+}
+
+// 项目面板链接场景拖入：外部工程场景在目标轨落动态链接块。让位+
+// 落块同一 mInWriteback 事务（requestInsertMedia 同款铁律：中途
+// refresh 短路，一次 finishAction 让磁吸兜底对插入终态压实）
+bool NleTimelineModel::requestInsertSceneLink(const QString &path,
+                                              const int sceneDocId,
+                                              const QString &sceneName,
+                                              const int trackId,
+                                              const int startFrame)
+{
+    if (mInWriteback || mGestureActive) { return false; }
+    const auto scene = mPanelScene.data();
+    if (!scene || path.isEmpty()) { return false; }
+    const auto tr = track(trackId);
+    if (!tr) {
+        emit logMessage(QStringLiteral("目标轨道不存在"));
+        return false;
+    }
+    if (tr->audio) {
+        emit logMessage(QStringLiteral("链接场景请拖到视频轨"));
+        return false;
+    }
+    if (tr->locked) {
+        emit logMessage(QStringLiteral("目标轨道已锁定"));
+        return false;
+    }
+    // 先解析拿场景范围（块长度决定让位量）；解析失败保留旧缓存
+    QString err;
+    const auto loaded = ExternalProjectCache::instance()->load(
+                path, false, &err);
+    if (!loaded) {
+        emit logMessage(QStringLiteral("链接工程解析失败：%1").arg(err));
+        return false;
+    }
+    const auto target = ExternalProjectCache::instance()->findScene(
+                loaded.data(), sceneDocId, sceneName);
+    if (!target) {
+        emit logMessage(QStringLiteral("链接场景不存在：%1").arg(sceneName));
+        return false;
+    }
+    const int len = qMax(1, target->getFrameRange().fMax + 1);
+    const int S = qMax(0, startFrame);
+
+    const auto pushes = insertShiftPlan(trackId, S, len, {});
+    mInWriteback = true;
+    {
+        const auto undoBlock = scene->blockUndoRedo();
+        for (const auto &m : pushes) {
+            const auto oc = clip(m.clipId);
+            if (oc && oc->layer) {
+                shiftLayer(oc->layer.data(), m.start - oc->start);
+            }
+        }
+        // 主轨让位的联动随动（requestInsertMedia 同款：锚定主轨被
+        // 推块的覆盖块一并右移，否则覆盖素材静默错位）
+        if (mFollowLinked && trackId == mainTrackId() && !pushes.isEmpty()) {
+            QHash<int, int> deltas;
+            for (const auto &m : pushes) {
+                const auto oc = clip(m.clipId);
+                if (oc) { deltas.insert(m.clipId, m.start - oc->start); }
+            }
+            for (const auto &o : mClips) {
+                if (o.trackId == trackId || !o.layer ||
+                        deltas.contains(o.clipId)) { continue; }
+                const Clip *anchor = nullptr;
+                for (const auto &mc : mClips) {
+                    if (mc.trackId != trackId) { continue; }
+                    if (mc.start <= o.start &&
+                            o.start < mc.start + mc.duration) {
+                        anchor = &mc;
+                        break;
+                    }
+                }
+                if (!anchor) { continue; }
+                const int delta = deltas.value(anchor->clipId, 0);
+                if (delta == 0) { continue; }
+                const int ns = qMax(0, o.start + delta);
+                if (ns != o.start) { shiftLayer(o.layer.data(), ns - o.start); }
+            }
+        }
+        const auto box = enve::make_shared<InternalLinkCanvasBox>();
+        box->setSourceProject(path, target->getDocumentId(),
+                              target->prp_getName());
+        scene->addContained(box);
+        const auto dur = box->getDurationRectangle();
+        if (dur) {
+            // 动画窗与块窗一起搬到 S 起（FixedLen 绑窗语义，钳回防
+            // 护与 requestInsertSound 同理）
+            const auto flar = dur->ref<FixedLenAnimationRect>();
+            if (flar) { flar->setFirstAnimationFrame(S); }
+            dur->setMinAbsFrame(S);
+            dur->setMaxAbsFrame(S + len - 1);
+        }
+        box->setTrackId(trackId);
+    }
+    mInWriteback = false;
+    finishAction();
+    emit logMessage(QStringLiteral("已插入链接场景“%1”（%2 帧）")
+                            .arg(target->prp_getName()).arg(len));
+    return true;
+}
+
+// 菜单"导入链接工程"默认全场景：逐场景接龙追加到主轨末尾
+bool NleTimelineModel::requestAppendSceneLink(const QString &path,
+                                              const int sceneDocId,
+                                              const QString &sceneName)
+{
+    const int mt = mainTrackId();
+    if (mt < 0) {
+        emit logMessage(QStringLiteral("没有主轨可放置链接场景"));
+        return false;
+    }
+    int end = 0;
+    for (const auto &c : mClips) {
+        if (c.trackId == mt) { end = qMax(end, c.start + c.duration); }
+    }
+    return requestInsertSceneLink(path, sceneDocId, sceneName, mt, end);
 }
 
 // kdenlive-style detach: the embedded eVideoSound stays with the

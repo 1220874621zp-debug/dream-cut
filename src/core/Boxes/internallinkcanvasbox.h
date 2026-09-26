@@ -57,8 +57,14 @@ public:
                       const QString& sceneName) const;
 
     static QStringList sceneNames(Loaded* loaded);
+
+    // 项目面板用：当前缓存的全部外部工程（链接面板按此列出场景）
+    QList<QSharedPointer<Loaded>> loadedProjects() const
+    { return mCache.values(); }
 signals:
     void projectReloaded(const QString& path);
+    // 首次解析进缓存时广播（面板据此挂出链接工程分组）
+    void projectAdded(const QString& path);
 private slots:
     void onFileChanged(const QString& path);
     void onDebounceTimeout();

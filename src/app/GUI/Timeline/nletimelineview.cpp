@@ -2631,6 +2631,9 @@ void NleTimelineView::dragEnterEvent(QDragEnterEvent *e)
     } else if (e->mimeData()->hasFormat(
                    QStringLiteral("application/x-dreamcut-transition"))) {
         e->acceptProposedAction();
+    } else if (e->mimeData()->hasFormat(
+                   QStringLiteral("application/x-dreamcut-scene-link"))) {
+        e->acceptProposedAction();
     }
 }
 
@@ -2639,7 +2642,9 @@ void NleTimelineView::dragMoveEvent(QDragMoveEvent *e)
     if (e->mimeData()->hasFormat(
                 QStringLiteral("application/x-dreamcut-clip-path")) ||
             e->mimeData()->hasFormat(
-                QStringLiteral("application/x-dreamcut-transition"))) {
+                QStringLiteral("application/x-dreamcut-transition")) ||
+            e->mimeData()->hasFormat(
+                QStringLiteral("application/x-dreamcut-scene-link"))) {
         e->acceptProposedAction();
     }
 }
@@ -2657,6 +2662,37 @@ void NleTimelineView::dropEvent(QDropEvent *e)
                         .constData()));
         const int frame = qMax(0, xToFrame(int(e->position().x())));
         if (mModel->requestApplyTransitionAtDrop(frame, type)) {
+            e->acceptProposedAction();
+        }
+        return;
+    }
+    // 项目面板链接场景：mime 三行 = 工程路径\n场景docId\n场景名，
+    // 落点解析最近视频轨（按 y 就近，与媒体拖入同语义）
+    if (mime->hasFormat(QStringLiteral(
+                "application/x-dreamcut-scene-link"))) {
+        const auto parts = QString::fromUtf8(mime->data(
+                    QStringLiteral("application/x-dreamcut-scene-link")))
+                .split('\n');
+        if (parts.count() != 3 || parts.at(0).isEmpty()) { return; }
+        bool idOk = false;
+        const int docId = parts.at(1).toInt(&idOk);
+        const QPointF sp = e->position();
+        int stIdx = sp.y() > rulerHeight() ? trackAtY(int(sp.y())) : -1;
+        if (stIdx < 0 || mModel->tracks().value(stIdx).audio) {
+            stIdx = nearestTrackOfType(int(sp.y()), false);
+        }
+        if (stIdx < 0) {
+            emit logMessage(QStringLiteral("没有视频轨可放置"));
+            return;
+        }
+        const auto &strk = mModel->tracks().at(stIdx);
+        if (strk.locked) {
+            emit logMessage(QStringLiteral("目标轨道已锁定"));
+            return;
+        }
+        const int sframe = qMax(0, xToFrame(int(sp.x())));
+        if (idOk && mModel->requestInsertSceneLink(
+                    parts.at(0), docId, parts.at(2), strk.id, sframe)) {
             e->acceptProposedAction();
         }
         return;
