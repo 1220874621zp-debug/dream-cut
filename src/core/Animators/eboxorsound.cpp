@@ -245,25 +245,35 @@ void eBoxOrSound::prp_readProperty_impl(eReadStream& src) {
                 }
             }
         } else if(!mDurationRectangle) {
-            // v54 遗留自愈：无标签时普通层的矩形可能是 NLE 挂的
-            // FixedLenAnimationRect（22 字节）也可能是基类（12 字节）。
-            // 构造器自带矩形的类（视频/声音）类型确定不嗅探；其余先按
-            // FixedLen 试读，再用后随 name 的字符数字段校验，不合法则
-            // 退回基类重读（name 长度按 ≤512 判合法）
-            const qint64 durStart = src.pos();
-            const auto fla = enve::make_shared<FixedLenAnimationRect>(*this);
-            setDurationRectangle(fla);
-            fla->readDurationRectangle(src);
-            readDone = true;
-            uint nameProbe = 0;
-            src.read(&nameProbe, sizeof(uint));
-            src.seekRaw(src.pos() - qint64(sizeof(uint)));
-            if(nameProbe > 512) {
-                qWarning() << "[DURRECT-HEAL] fixedlen 试读失败于" << durStart
-                           << "退回基类矩形重读";
-                src.seekRaw(durStart);
+            // 无标签矩形（< v55）：类型按文件谱系分流。nleTrackSpecs
+            // (52) 是本 fork 的第一个版本条目——更老的文件只能来自
+            // 上游 friction/enve，其普通层时长条恒为基类矩形（12 字
+            // 节），直接读；52~54 是本 fork 的 NLE 早期，普通层可能被
+            // 挂过 FixedLenAnimationRect（22 字节）且无标签写出，才需
+            // 要嗅探自愈（先按 FixedLen 试读，再用后随 name 的字符数
+            // 校验，不合法退回基类重读）。此前不分谱系一律先按
+            // FixedLen 试读，上游文件被多吞 10 字节后嗅探对中文名的
+            // UTF-16 字节恰好误判放行，流错位直至 SWT 抽象的 count
+            // 读出天文数字——打开上游工程即 bad_alloc/死循环
+            if(src.evFileVersion() < EvFormat::nleTrackSpecs) {
                 createDurationRectangle();
                 mDurationRectangle->readDurationRectangle(src);
+            } else {
+                const qint64 durStart = src.pos();
+                const auto fla = enve::make_shared<FixedLenAnimationRect>(*this);
+                setDurationRectangle(fla);
+                fla->readDurationRectangle(src);
+                readDone = true;
+                uint nameProbe = 0;
+                src.read(&nameProbe, sizeof(uint));
+                src.seekRaw(src.pos() - qint64(sizeof(uint)));
+                if(nameProbe > 512) {
+                    qWarning() << "[DURRECT-HEAL] fixedlen 试读失败于" << durStart
+                               << "退回基类矩形重读";
+                    src.seekRaw(durStart);
+                    createDurationRectangle();
+                    mDurationRectangle->readDurationRectangle(src);
+                }
             }
         }
         if(!readDone) mDurationRectangle->readDurationRectangle(src);

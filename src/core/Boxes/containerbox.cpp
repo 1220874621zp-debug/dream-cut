@@ -45,6 +45,7 @@
 #include "Private/Tasks/taskscheduler.h"
 #include "Properties/boolpropertycontainer.h"
 #include "ReadWrite/evformat.h"
+#include "ReadWrite/xevformat.h"
 #include "internallinkbox.h"
 
 class FlipBookProperty : public BoolPropertyContainer {
@@ -78,6 +79,24 @@ private:
     qsptr<IntAnimator> mIndex;
 };
 
+// 上游同款：读取按 switchLayers(42) 版本门，写出走
+// BoolPropertyContainer 默认（恒写）——与上游流格式逐字节一致
+class SwitchLayerProperty : public BoolPropertyContainer {
+    e_OBJECT
+
+    SwitchLayerProperty(const QString& name) : BoolPropertyContainer(name) {}
+public:
+    void prp_readProperty(eReadStream &src) override {
+        const int v = src.evFileVersion();
+        // 上游(<52)与本 fork 恢复后(>=57)的文件都带这段；本 fork
+        // 52~56 的存量文件是在属性缺失期存的，流里没有这字节段
+        if(v < EvFormat::switchLayers) return;
+        if(v >= EvFormat::nleTrackSpecs &&
+           v < EvFormat::switchLayerRestore) return;
+        BoolPropertyContainer::prp_readProperty(src);
+    }
+};
+
 ContainerBox::ContainerBox(const eBoxType type) :
     BoxWithPathEffects(type == eBoxType::group ? "Group" : "Layer",
                        type) {
@@ -90,10 +109,14 @@ ContainerBox::ContainerBox(const eBoxType type) :
     mFlipBook = enve::make_shared<FlipBookProperty>("flip book");
     ca_addChild(mFlipBook);
 
+    mSwitchLayer = enve::make_shared<SwitchLayerProperty>("switch layer");
+    ca_addChild(mSwitchLayer);
+
     // 2.5D billboard transform is not supported on containers
     // (children are rendered individually, group 3D would not apply)
     mTransformAnimator->set3DPropertiesVisible(false);
     mFlipBook->SWT_hide();
+    mSwitchLayer->SWT_hide();
 }
 
 ContainerBox::ContainerBox(const QString &name, const eBoxType type) :
@@ -1810,10 +1833,12 @@ void ContainerBox::writeBoxOrSoundXEV(const stdsptr<XevZipFileSaver>& xevFileSav
 #include "imagesequencebox.h"
 #include "internallinkbox.h"
 #include "internallinkcanvasbox.h"
+#include "internallinkcanvas.h"
 #include "customboxcreator.h"
 #include "nullobject.h"
 
-qsptr<BoundingBox> createBoxOfNonCustomType(const eBoxType type) {
+qsptr<BoundingBox> createBoxOfNonCustomType(const eBoxType type,
+                                                const int evVersion) {
     switch(type) {
         case(eBoxType::vectorPath):
             return enve::make_shared<SmartVectorPath>();
@@ -1840,6 +1865,15 @@ qsptr<BoundingBox> createBoxOfNonCustomType(const eBoxType type) {
         case(eBoxType::internalLinkGroup):
             return enve::make_shared<InternalLinkGroupBox>(nullptr, false);
         case(eBoxType::internalLinkCanvas):
+            // 同一标签两种血统：上游(<52)文件里是 InternalLinkCanvas
+            // （链接场景盒，ContainerBox 系）；本 fork 52~56 文件里是
+            // 早期的外部工程链接盒（三字段格式）；57 起新盒走独立槽
+            // 位 nleSceneLink。按文件版本分流，两边都不错位
+            if(evVersion >= EvFormat::nleTrackSpecs) {
+                return enve::make_shared<InternalLinkCanvasBox>();
+            }
+            return enve::make_shared<InternalLinkCanvas>(nullptr, false);
+        case(eBoxType::nleSceneLink):
             return enve::make_shared<InternalLinkCanvasBox>();
         case(eBoxType::nullObject):
             return enve::make_shared<NullObject>();
@@ -1885,7 +1919,7 @@ void ContainerBox::readAllContainedXEV(
                     RuntimeThrow("Invalid object type " + typeStr);
                 const eBoxType type = static_cast<eBoxType>(typeInt);
 
-                auto obj = createBoxOfNonCustomType(type);
+                auto obj = createBoxOfNonCustomType(type, int(XevFormat::version));
 
                 if(type == eBoxType::custom) {
                     const auto id = CustomIdentifier::sReadXEV(ele);
@@ -1948,7 +1982,7 @@ qsptr<BoundingBox> readIdCreateBox(eReadStream& src) {
     eBoxType type;
     src.read(&type, sizeof(eBoxType));
 
-    const auto result = createBoxOfNonCustomType(type);
+    const auto result = createBoxOfNonCustomType(type, src.evFileVersion());
     if(result) return result;
     if(type == eBoxType::custom) {
         const auto id = CustomIdentifier::sRead(src);

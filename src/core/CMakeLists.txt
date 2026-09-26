@@ -134,7 +134,9 @@ set(
     Boxes/imagerenderdata.cpp
     Boxes/imagesequencebox.cpp
     Boxes/internallinkbox.cpp
+    Boxes/internallinkcanvas.cpp
     Boxes/internallinkcanvasbox.cpp
+    Boxes/linkcanvasrenderdata.cpp
     Boxes/internallinkgroupbox.cpp
     Boxes/layerboxrenderdata.cpp
     Boxes/pathbox.cpp
@@ -530,7 +532,9 @@ set(
     Boxes/imagesequencebox.h
     Boxes/internallinkbox.h
     Boxes/internallinkbox.h
+    Boxes/internallinkcanvas.h
     Boxes/internallinkcanvasbox.h
+    Boxes/linkcanvasrenderdata.h
     Boxes/internallinkgroupbox.h
     Boxes/layerboxrenderdata.h
     Boxes/adjustmentlayer.h

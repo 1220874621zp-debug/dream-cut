@@ -139,6 +139,15 @@ namespace EvFormat {
         // right after the name and default to linear
         transitionEase = 56,
 
+        // switch-layer property restored on the container property
+        // tree. Upstream (>= switchLayers/42) files always carry the
+        // "switch layer" child; this fork's 52~56 files were saved
+        // without it (the property was absent from the fork until
+        // now). From 57 on the fork writes it again, byte-identical
+        // with upstream, so upstream projects load without stream
+        // misalignment
+        switchLayerRestore = 57,
+
         nextVersion
     };
 

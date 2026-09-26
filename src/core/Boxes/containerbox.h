@@ -32,6 +32,7 @@ class PathBox;
 class PathEffectCollection;
 class BlendEffectBoxShadow;
 class FlipBookProperty;
+class SwitchLayerProperty;
 
 class CORE_EXPORT ContainerBox : public BoxWithPathEffects {
     Q_OBJECT
@@ -338,6 +339,10 @@ private:
     QList<qsptr<BlendEffectBoxShadow>> mBlendShadows;
     ConnContextObjList<qsptr<eBoxOrSound>> mContained;
     qsptr<FlipBookProperty> mFlipBook;
+    // 上游 Moho 式切换组属性：本 fork 无切换渲染/交互，但属性树
+    // 孩子集合决定流对齐——上游（>=42）每个容器盒都写这段，缺了
+    // 读上游工程必错位；挂树 + SWT_hide 做序列化占位
+    qsptr<SwitchLayerProperty> mSwitchLayer;
 };
 
 #endif // CONTAINERBOX_H

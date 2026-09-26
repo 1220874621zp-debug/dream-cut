@@ -190,7 +190,7 @@ bool parseExternalProject(const QString& path,
         file.seek(savedPos);
 
         src.readCheckpoint("File beginning pos mismatch");
-
+    
         // 场景设置段：裸构造（不进 fScenes，不触发 UI），beforeContent
         // 版本先读设置，与 loadEVFile 的调用序一致
         int nScenes; src >> nScenes;
@@ -371,10 +371,10 @@ void ExternalProjectCache::onDebounceTimeout() {
 
 InternalLinkCanvasBox::InternalLinkCanvasBox() :
     InternalLinkBox(nullptr, false) {
-    // InternalLinkBox 构造把类型钉死为 internalLink，但读写两侧的
-    // 盒类型标签就是 mType（readIdCreateBox 按 it 分发构造），子类
-    // 必须改写为 internalLinkCanvas，否则读回构造的是基类、流错位
-    mType = eBoxType::internalLinkCanvas;
+    // 盒类型标签就是 mType（readIdCreateBox 按 it 分发构造）。槽位
+    // 用 fork 专属的 nleSceneLink：internalLinkCanvas 是上游链接场
+    // 景盒（InternalLinkCanvas）的标签，两边序列化格式不同族
+    mType = eBoxType::nleSceneLink;
     prp_setName(QStringLiteral("场景链接"));
     connect(ExternalProjectCache::instance(),
             &ExternalProjectCache::projectReloaded,

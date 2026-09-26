@@ -93,6 +93,11 @@ enum class eBoxType {
     nullObject,
     adjustmentLayer,
     solid,
+    // 本 fork 专属的"外部工程场景动态链接块"。internalLinkCanvas 槽
+    // 位属于上游 InternalLinkCanvas（链接场景盒，ContainerBox 系序
+    // 列化），fork 裁剪时类被删、槽位曾被复用导致上游文件读回错位
+    // 崩溃——上游类已搬回，本 fork 的新盒改用独立槽位
+    nleSceneLink,
 
     count
 };
