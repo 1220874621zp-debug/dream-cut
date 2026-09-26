@@ -359,11 +359,11 @@ Friction--Ui--ToolControls {
     border: 0;
 }
 
+/* ToolControls 现为竖排嵌入属性面板“工具属性”页：高度随内容生长，
+   不再按顶部横条钳 22~26px（子件行高保持紧凑） */
 Friction--Ui--ToolControls {
     background-color: %16;
-    min-height: 22px;
-    max-height: 26px;
-    padding: 0px 2px;
+    padding: 2px;
 }
 
 Friction--Ui--ToolControls QWidget {

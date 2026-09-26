@@ -378,6 +378,7 @@ private:
     BoxScrollWidget *mObjectSettingsWidget;
     ScrollArea *mObjectSettingsScrollArea;
     class AEPropertiesInspector *mPropertiesInspector;
+    QWidget *mToolPropsTabHost = nullptr;
 
     void setupMainWidgets();
     void setupStackWidgets();
@@ -390,6 +391,7 @@ private:
     void setupMenuEffects();
     void setupMenuExtras();
     void setupPropertiesActions();
+    void enforceToolBarLayout();
 
     BoundingBox* getCurrentBox();
 
@@ -401,6 +403,7 @@ private:
     int mTabColorIndex;
     int mTabTextIndex;
     int mTabPropertiesIndex;
+    int mToolPropsTabIndex = -1;
     int mTabQueueIndex;
 
     Friction::Ui::ColorToolBar *mColorToolBar;

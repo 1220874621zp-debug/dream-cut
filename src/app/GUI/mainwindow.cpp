@@ -939,13 +939,33 @@ void MainWindow::setupToolBar()
     addToolBar(mColorToolBar);
 
     {
+        // 工具组并入顶部主工具栏：插在文件钮与填充/描边钮之间；
+        // 旧存档若把它钉在左侧区，由 enforceToolBarLayout 恢复后拉回
         const auto toolbar = mToolBox->getToolBar(Ui::ToolBox::Main);
-        if (toolbar) { addToolBar(Qt::LeftToolBarArea, toolbar); }
+        if (toolbar) { insertToolBar(mColorToolBar, toolbar); }
     }
     {
+        // 工具属性（变换滑杆/节点工具/自动选层）不再占顶部独立行，
+        // 转垂直嵌入属性面板“工具属性”页
         const auto toolbar = mToolBox->getToolBar(Ui::ToolBox::Controls);
-        if (toolbar) { addToolBar(Qt::TopToolBarArea, toolbar); }
+        if (toolbar && mToolPropsTabHost && mToolPropsTabHost->layout()) {
+            toolbar->setOrientation(Qt::Vertical);
+            toolbar->setMovable(false);
+            mToolPropsTabHost->layout()->addWidget(toolbar);
+        }
     }
+
+    // 点击形状/文字/钢笔等工具时属性面板自动翻到“工具属性”页；
+    // 物体模式是常态不抢页，避免启动/回切时反复跳页
+    connect(&mDocument, &Document::canvasModeSet,
+            this, [this](const CanvasMode mode) {
+        if (mode == CanvasMode::boxTransform) { return; }
+        if (!mPropertiesDock || mPropertiesDock->isHidden()) { return; }
+        if (mToolPropsTabIndex < 0) { return; }
+        if (mTabProperties->currentIndex() != mToolPropsTabIndex) {
+            mTabProperties->setCurrentIndex(mToolPropsTabIndex);
+        }
+    });
 
     mCanvasToolBar = new Ui::CanvasToolBar(this);
     installNumericFilter(mCanvasToolBar->getResolutionComboBox());
@@ -1280,7 +1300,7 @@ void MainWindow::readSettings(const QString &openProject)
                                                      1).toInt();
     qWarning() << "WORKSPACE: stateVersion" << stateVersion
                << "restoreDefaultUi" << eSettings::instance().fRestoreDefaultUi;
-    if (!eSettings::instance().fRestoreDefaultUi && stateVersion == 2) {
+    if (!eSettings::instance().fRestoreDefaultUi && stateVersion == 3) {
         // A custom workspace that the user applied/saved takes priority
         // over the ad-hoc last session layout, so it is re-applied on
         // every startup.
@@ -1351,12 +1371,6 @@ void MainWindow::readSettings(const QString &openProject)
     mRenderWindowAct->setChecked(false);
     mRenderWindowAct->blockSignals(false);
 
-    {
-        // force tool controls to own row
-        const auto toolbar = mToolBox->getToolBar(Ui::ToolBox::Controls);
-        if (toolbar) { insertToolBarBreak(toolbar); }
-    }
-
     if (isFull) { showFullScreen(); }
     else if (isMax) { showMaximized(); }
 
@@ -1386,7 +1400,7 @@ void MainWindow::writeSettings()
         AppSupport::setSettings("ui", "fullScreen", isFullScreen());
         // persist the current panel layout so it is restored on startup
         AppSupport::setSettings("ui", "state", saveState());
-        AppSupport::setSettings("ui", "stateVersion", 2);
+        AppSupport::setSettings("ui", "stateVersion", 3);
     }
 
     AppSupport::setSettings("FillStroke", "LastStrokeColor",
@@ -1452,6 +1466,7 @@ void MainWindow::applyWorkspace(const QString &name)
     // their layout silently
     if (mScriptManager) { mScriptManager->ensurePanelsInState(state); }
     restoreState(state);
+    enforceToolBarLayout();
     // and the reverse: script panels from the previous workspace that
     // the new snapshot does not reference must be closed
     if (mScriptManager) { mScriptManager->hidePanelsNotInState(state); }
@@ -1655,6 +1670,17 @@ void MainWindow::setupPropertiesWidgets()
                                                  ThemeSupport::themedToolIcon("drawPathAutoChecked",
                                                                               ThemeSupport::getThemeColorBlue(), 64),
                                                  tr("Properties"));
+
+    // 工具属性页：随当前工具切换的上下文参数宿主（ToolControls 工具
+    // 栏在 setupToolBar 里转垂直后注入——ToolBox 晚于本函数构造）
+    mToolPropsTabHost = new QWidget(this);
+    const auto toolPropsLayout = new QVBoxLayout(mToolPropsTabHost);
+    toolPropsLayout->setContentsMargins(0, 0, 0, 0);
+    toolPropsLayout->setSpacing(0);
+    mToolPropsTabIndex = mTabProperties->addTab(mToolPropsTabHost,
+                                                ThemeSupport::themedToolIcon("adjustments",
+                                                                             ThemeSupport::getThemeColorBlue(), 64),
+                                                tr("工具属性"));
     // the effects presets panel lives in its own dock (see setupLayout),
     // it is no longer a tab inside the properties dock
     mEffectsPresetsPanel = new EffectsPresetsPanel(this, this);
@@ -2494,6 +2520,7 @@ void MainWindow::applyPendingStateRestore()
     const bool restored = restoreState(state);
     qWarning() << "WORKSPACE: stable-geometry restoreState returned"
                << restored << "window" << width() << "x" << height();
+    enforceToolBarLayout();
 
     // keep view menu actions in sync with the restored docks
     mViewTimelineAct->blockSignals(true);
@@ -2502,6 +2529,18 @@ void MainWindow::applyPendingStateRestore()
     mViewFillStrokeAct->blockSignals(true);
     mViewFillStrokeAct->setChecked(!mFillStrokeDock->isHidden());
     mViewFillStrokeAct->blockSignals(false);
+}
+
+void MainWindow::enforceToolBarLayout()
+{
+    // 旧版存档会把工具组留在左侧工具栏区：恢复状态后重新锚回顶部
+    // 主工具栏（新存档本来就在顶部，此函数为无操作）
+    const auto toolbar = mToolBox ? mToolBox->getToolBar(Ui::ToolBox::Main)
+                                  : nullptr;
+    if (toolbar && mColorToolBar &&
+        toolBarArea(toolbar) == Qt::LeftToolBarArea) {
+        insertToolBar(mColorToolBar, toolbar);
+    }
 }
 
 void MainWindow::updateRecentMenu()

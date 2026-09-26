@@ -28,6 +28,7 @@
 #include <QToolButton>
 #include <QPainter>
 #include <QApplication>
+#include <QMainWindow>
 
 using namespace Friction::Ui;
 
@@ -77,7 +78,11 @@ const QList<QAction*> ToolBox::getNodeActions()
 void ToolBox::setMovable(const bool movable)
 {
     mMain->setMovable(movable);
-    mControls->setMovable(movable);
+    // mControls 由 MainWindow 嵌入属性面板（不再是主窗口工具栏），
+    // 仅当仍挂在主窗口上时才设置可拖动
+    if (qobject_cast<QMainWindow*>(mControls->parentWidget())) {
+        mControls->setMovable(movable);
+    }
 }
 
 void ToolBox::setupToolBox(QWidget *parent)
