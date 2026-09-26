@@ -1,6 +1,9 @@
 #include "clipmonitorwidget.h"
 #include "soundbrowserpanel.h"
 
+#include "CacheHandlers/soundcachehandler.h"
+#include "Sound/soundpeaks.h"
+
 #include <QAudioOutput>
 #include <QDrag>
 #include <QFontDatabase>
@@ -20,7 +23,15 @@
 #include <QVBoxLayout>
 #include <QVideoFrame>
 #include <QVideoSink>
+#include <QThreadPool>
 #include <QWheelEvent>
+
+// 条带音频波形参数：64 列/秒（SoundPeaks 同粒度），长文件解码预算
+// 10 分钟（超出部分包络留空）
+namespace {
+constexpr int kWaveColsPerSec = 64;
+constexpr int kWaveMaxSecs = 600;
+}
 #include <functional>
 
 namespace {
@@ -250,6 +261,30 @@ public:
         setMouseTracking(true);
     }
 
+    // ---- 条带音频波形（槽位制：-1 哨兵 = 该秒未回）
+    void resetWave() {
+        mWaveCols.clear();
+        mWaveTotalSecs = 0;
+        mWaveFilled = 0;
+        update();
+    }
+    void setWaveTotal(const int secs) {
+        mWaveTotalSecs = qMax(0, secs);
+        mWaveCols.assign(size_t(mWaveTotalSecs * kWaveColsPerSec), -1.);
+        mWaveFilled = 0;
+        update();
+    }
+    void putWavePeaks(const int sec, const QVector<qreal> &cols) {
+        if (mWaveTotalSecs <= 0 || cols.isEmpty()) { return; }
+        for (int i = 0; i < cols.size(); i++) {
+            const int idx = sec * kWaveColsPerSec + i;
+            if (idx < 0 || idx >= mWaveCols.size()) { continue; }
+            if (mWaveCols.at(size_t(idx)) < 0.) { mWaveFilled++; }
+            mWaveCols[size_t(idx)] = qBound(0., cols.at(i), 1.);
+        }
+        update();
+    }
+
     int mFrameCount = 0;
     int mCurrent = 0;
     int mZoneIn = 0;
@@ -259,6 +294,10 @@ public:
     // Ctrl+滚轮以鼠标为锚缩放，播放头越窗自动滚动追边
     int mZoomFrom = 0;
     int mZoomFrames = 0; // 0 = 跟随全长（未初始化）
+    // 条带波形槽位
+    QVector<qreal> mWaveCols;
+    int mWaveTotalSecs = 0;
+    int mWaveFilled = 0;
     // 缩放窗口变化通知（面板侧同步滑动条）；内嵌类不走 moc 用回调
     std::function<void()> mOnZoomChanged;
 
@@ -346,6 +385,28 @@ protected:
             p.fillRect(QRect(zr.right() - 1, zr.y(), 2, zr.height()),
                        outHot ? QColor(0xff, 0xff, 0xff)
                               : QColor(0xd0, 0xd0, 0xd4, 160));
+        }
+
+        // 条带音频波形：包络居中，随缩放窗口映射（zone 之上、
+        // 刻度/播放头之下）；未回秒留空隙
+        if (mWaveFilled > 0 && !mWaveCols.empty() && mMon->mFps > 0.) {
+            const qreal fps = mMon->mFps;
+            const int halfH = (height() - 6) / 2;
+            const int midY = height() / 2;
+            QPen wp(QColor(0x9f, 0xc0, 0xe8, 200), 1);
+            p.setPen(wp);
+            int prevX = -1;
+            for (int x = 0; x < width(); x++) {
+                const int frame = frameAtX(x);
+                const int col = qBound(0,
+                        int(frame / fps * kWaveColsPerSec),
+                        int(mWaveCols.size()) - 1);
+                const qreal v = mWaveCols.at(size_t(col));
+                if (x == prevX || v < 0.) { continue; }
+                prevX = x;
+                p.drawLine(x, midY - int(v * halfH),
+                           x, midY + int(v * halfH));
+            }
         }
 
         // 刻度：主（每 5 个 tick）半高、次 1/4 高。刻度号对齐全局
@@ -791,6 +852,97 @@ void ClipMonitorWidget::loadFile(const QString &path) {
     mPlayer->setPosition(0);
     updateControls();
     emit zoneChanged();
+    startWaveLoad(path);
+}
+
+// ---------------------------------------------------------------
+// 条带音频波形（SoundPeaks 同管线）：异步开源 + 预算内逐秒并行，
+// 解码完释放 fd；换片以 mWavePath 为准，旧件在途回调按 sh 指针
+// 判同丢弃
+// ---------------------------------------------------------------
+
+void ClipMonitorWidget::startWaveLoad(const QString &path) {
+    mRuler->resetWave();
+    mWavePath.clear();
+    mWavePending = 0;
+    mWaveSh.reset();
+    mWaveDh.reset();
+    if (path.isEmpty()) { return; }
+    mWavePath = path;
+    // DataHandler 注册表查取（UI 线程，便宜且必须持强引用）
+    qsptr<SoundDataHandler> dh;
+    try {
+        dh = SoundDataHandler::sGetCreateDataHandler<SoundDataHandler>(path);
+    } catch (...) {}
+    if (!dh) { return; }
+    const QPointer<ClipMonitorWidget> selfQ = this;
+    QThreadPool::globalInstance()->start([selfQ, dh, path]() {
+        stdsptr<SoundHandler> sh;
+        try {
+            sh = enve::make_shared<SoundHandler>(dh.get());
+        } catch (...) {} // 无音频流/坏文件 = 无波形，静默
+        if (!selfQ) { return; }
+        QMetaObject::invokeMethod(selfQ.data(), [selfQ, dh, path, sh]() {
+            if (selfQ) { selfQ->waveOpenDone(path, dh, sh); }
+        }, Qt::QueuedConnection);
+    });
+}
+
+void ClipMonitorWidget::waveOpenDone(const QString &path,
+                                     const qsptr<SoundDataHandler> &dh,
+                                     const stdsptr<SoundHandler> &sh) {
+    if (mWavePath != path) { return; } // 已换片
+    const qreal dur = sh ? sh->durationSec() : 0.;
+    if (!sh || dur <= 0.) { return; } // 无音频流
+    mWaveDh = dh;
+    mWaveSh = sh;
+    const int secs = qMin(qCeil(dur), kWaveMaxSecs);
+    mRuler->setWaveTotal(secs);
+    mWavePending = secs;
+    for (int s = 0; s < secs; s++) { queueWaveSecond(sh, s); }
+    qInfo() << "[MONWAVE] open" << path << "secs" << secs;
+}
+
+void ClipMonitorWidget::queueWaveSecond(const stdsptr<SoundHandler> &sh,
+                                        const int sec) {
+    if (const auto samples = sh->getSamplesForSecond(sec)) {
+        deliverWaveSecond(sh, sec);
+        return;
+    }
+    auto reader = sh->getSecondReader(sec);
+    if (!reader) { reader = sh->addSecondReader(sec); }
+    if (!reader) { deliverWaveSecond(sh, sec); return; }
+    const QPointer<ClipMonitorWidget> selfQ = this;
+    reader->addDependent(
+        {[selfQ, sh, sec]() {
+             if (!selfQ) { return; }
+             QMetaObject::invokeMethod(selfQ.data(), [selfQ, sh, sec]() {
+                 if (selfQ) { selfQ->deliverWaveSecond(sh, sec); }
+             }, Qt::QueuedConnection);
+         },
+         [selfQ, sh, sec]() { // canceled = 该秒无数据，照常记账
+             if (!selfQ) { return; }
+             QMetaObject::invokeMethod(selfQ.data(), [selfQ, sh, sec]() {
+                 if (selfQ) { selfQ->deliverWaveSecond(sh, sec); }
+             }, Qt::QueuedConnection);
+         }});
+}
+
+void ClipMonitorWidget::deliverWaveSecond(const stdsptr<SoundHandler> &sh,
+                                          const int sec) {
+    // 换片守卫：sh 与当前件不同 = 旧件在途回调，丢弃不记账
+    if (mWavePending <= 0 || sh != mWaveSh) { return; }
+    if (const auto samples = sh->getSamplesForSecond(sec)) {
+        mRuler->putWavePeaks(
+                    sec, SoundPeaks::peaksForSecond(samples,
+                                                    kWaveColsPerSec));
+    } // 失败秒：槽位留空隙
+    if (--mWavePending <= 0) {
+        // 解码完成：释放解复用上下文（fd），已解秒留在共享缓存
+        mWaveSh.reset();
+        mWaveDh.reset();
+        qInfo() << "[MONWAVE] done" << mWavePath;
+    }
 }
 
 int ClipMonitorWidget::frameFromMs(const qint64 ms) const {

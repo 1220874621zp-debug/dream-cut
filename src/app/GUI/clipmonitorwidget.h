@@ -8,6 +8,9 @@
 #include <QWidget>
 #include <QImage>
 
+#include "smartPointers/ememory.h"
+#include "smartPointers/selfref.h"
+
 class QMediaPlayer;
 class QAudioOutput;
 class QVideoSink;
@@ -16,6 +19,8 @@ class QScrollBar;
 class QToolButton;
 class MonitorView;
 class MonitorRuler;
+class SoundHandler;
+class SoundDataHandler;
 
 class ClipMonitorWidget : public QWidget {
     Q_OBJECT
@@ -58,6 +63,14 @@ private:
     void seekToEnd();
     void updateControls();
 
+    // ---- 条带音频波形（SoundPeaks 同管线，异步开流+逐秒并行）----
+    void startWaveLoad(const QString &path);
+    void waveOpenDone(const QString &path,
+                      const qsptr<SoundDataHandler> &dh,
+                      const stdsptr<SoundHandler> &sh);
+    void queueWaveSecond(const stdsptr<SoundHandler> &sh, const int sec);
+    void deliverWaveSecond(const stdsptr<SoundHandler> &sh, const int sec);
+
     MonitorView *mView = nullptr;
     MonitorRuler *mRuler = nullptr;
     QScrollBar *mZoomScroll = nullptr;
@@ -75,6 +88,12 @@ private:
     // 新装载哨兵：只在真正换了素材时重置 zone（LoadedMedia 会重发，
     // 播放到头再播/seek 回冲都要保住用户设的出入点）
     bool mZoneResetPending = false;
+
+    // 条带波形状态（换片以 mWavePath 为准；解码完释放 fd）
+    QString mWavePath;
+    int mWavePending = 0;
+    qsptr<SoundDataHandler> mWaveDh;
+    stdsptr<SoundHandler> mWaveSh;
 
     QLabel *mTimeLabel = nullptr;
     QLabel *mFileLabel = nullptr;
