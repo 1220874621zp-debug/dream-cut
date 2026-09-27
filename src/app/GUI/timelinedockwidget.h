@@ -116,6 +116,9 @@ public:
     // NLE 视图播放头（转场卡片"应用"的目标交界判定帧）
     int nlePlayheadFrame() const;
 
+    // 无头台架（env DREAMCUT_FADE_AUTOTEST）
+    void fadeAutotestStage();
+
 private:
     void setLoop(const bool loop);
     // quick PNG export of the current canvas frame

@@ -39,6 +39,7 @@
 #include "Sound/evideosound.h"
 #include "Sound/eindependentsound.h"
 #include "Animators/qrealkey.h"
+#include "Animators/transformanimator.h"
 #include <QFileInfo>
 
 static const int SNAP_PX = 8;
@@ -805,6 +806,183 @@ bool NleTimelineView::armVolumeGesture(const QPoint &pos, const bool alt)
     return true;
 }
 
+// ---- 块角淡入淡出手柄 ----
+
+QrealAnimator *NleTimelineView::fadeAnimatorFor(
+        const NleTimelineModel::Clip &c, bool *const isAudioOut) const
+{
+    if (isAudioOut) { *isAudioOut = false; }
+    // 音频块（独立/分离）：音量包络；视觉块：不透明度（文字/图形
+    // 层同样适用，转场式音画分治留给后续）
+    if (const auto sound = enve_cast<eSound*>(c.layer.data())) {
+        auto * const anim = sound->volumeAnimator();
+        if (!anim) { return nullptr; }
+        if (isAudioOut) { *isAudioOut = true; }
+        return anim;
+    }
+    if (const auto box = enve_cast<BoundingBox*>(c.layer.data())) {
+        const auto ta = box->getTransformAnimator();
+        if (!ta) { return nullptr; }
+        // getOpacityAnimator 在 Advanced 档上；盒子的变换器恒为
+        // BoxTransformAnimator（Advanced 子类），下行安全
+        return static_cast<AdvancedTransformAnimator*>(ta)
+                ->getOpacityAnimator();
+    }
+    return nullptr;
+}
+
+int NleTimelineView::fadeDetectLen(const NleTimelineModel::Clip &c,
+                                   const bool out) const
+{
+    bool isAudio = false;
+    auto * const anim = fadeAnimatorFor(c, &isAudio);
+    if (!anim || c.duration < 2) { return -1; }
+    // 锚键：入=rel 0 值 0；出=rel duration-1 值 0（duration 越动画
+    // 窗外，落键会被拒）。另一端=邻近的满值键
+    const int anchorRel = out ? c.duration - 1 : 0;
+    bool hasAnchor = false;
+    int flatRel = -1;
+    for (const auto &k : anim->anim_getKeys()) {
+        const auto qk = static_cast<QrealKey*>(k);
+        const int rel = qk->getRelFrame();
+        if (rel == anchorRel && qk->getValue() <= 1.) {
+            hasAnchor = true;
+        } else if (qk->getValue() >= 99. && qk->getValue() <= 101.) {
+            if (!out && rel > anchorRel &&
+                    (flatRel < 0 || rel < flatRel)) {
+                flatRel = rel;
+            } else if (out && rel < anchorRel &&
+                       (flatRel < 0 || rel > flatRel)) {
+                flatRel = rel;
+            }
+        }
+    }
+    // 方向感知：入=flat 在锚右侧（len=flat-anchor），出=flat 在锚
+    // 左侧（len=anchor-flat）；方向盲的 flatRel<=anchorRel 会把
+    // 淡出恒拒（键序 12:100 47:0 实证）
+    if (!hasAnchor || flatRel < 0) { return -1; }
+    if (!out) {
+        return flatRel > anchorRel ? flatRel - anchorRel : -1;
+    }
+    return flatRel < anchorRel ? anchorRel - flatRel : -1;
+}
+
+QRectF NleTimelineView::fadeHandleRect(
+        const NleTimelineModel::Move &m, const bool out) const
+{
+    const QRectF r = moveRect(m);
+    return out ? QRectF(r.right() - 20, r.top(), 20, 18)
+               : QRectF(r.left(), r.top(), 20, 18);
+}
+
+void NleTimelineView::fadeWrite(const int clipId, const bool out,
+                                const int len)
+{
+    const auto c = mModel->clip(clipId);
+    if (!c) { return; }
+    bool isAudio = false;
+    auto * const anim = fadeAnimatorFor(*c, &isAudio);
+    if (!anim || c->duration < 2) { return; }
+    const int anchorRel = out ? c->duration - 1 : 0;
+    // 清旧淡变键（先快照指针再删——遍历中删键=迭代器失效）
+    const int oldLen = fadeDetectLen(*c, out);
+    if (oldLen > 0) {
+        const int oldFlatRel = out ? c->duration - oldLen : oldLen;
+        QList<Key*> doomed;
+        for (const auto &k : anim->anim_getKeys()) {
+            if (k->getRelFrame() == anchorRel ||
+                    k->getRelFrame() == oldFlatRel) {
+                doomed << k;
+            }
+        }
+        for (auto * const k : doomed) {
+            anim->anim_removeKeyAction(k->ref<Key>());
+        }
+    }
+    if (len <= 0) {
+        update();
+        emit logMessage(out ? tr("已移除淡出") : tr("已移除淡入"));
+        return;
+    }
+    const int l = qBound(1, len, c->duration - 1);
+    const int flatRel = out ? c->duration - l : l;
+    // 锚键恒 0（角端静音），平键恒 100；方向只由帧序承载
+    const qreal aVal = 0.;
+    const qreal fVal = 100.;
+    const auto kA = enve::make_shared<QrealKey>(aVal, anchorRel, anim);
+    const auto kF = enve::make_shared<QrealKey>(fVal, flatRel, anim);
+    // corner 模式 + 控制点共线 = 线性淡变（默认 smooth 会过冲）
+    const qreal df = flatRel - anchorRel;
+    const qreal dv = fVal - aVal;
+    kA->setCtrlsMode(CtrlsMode::corner);
+    kF->setCtrlsMode(CtrlsMode::corner);
+    kA->setC1Frame(anchorRel + df/3.);
+    kA->setC1Value(aVal + dv/3.);
+    kF->setC0Frame(flatRel - df/3.);
+    kF->setC0Value(fVal - dv/3.);
+    anim->anim_appendKeyAction(kA);
+    anim->anim_appendKeyAction(kF);
+    update();
+    emit logMessage(tr("%1 %2 帧（%3）").arg(
+                        out ? tr("淡出") : tr("淡入")).arg(l).arg(
+                        isAudio ? tr("音量") : tr("不透明度")));
+}
+
+void NleTimelineView::drawFadeOverlay(QPainter &p,
+                                      const NleTimelineModel::Clip &c,
+                                      const NleTimelineModel::Move &m,
+                                      const QRectF &r)
+{
+    const bool active = mDrag == DragMode::FadeHandle &&
+            mFadeClipId == c.clipId;
+    int len = fadeDetectLen(c, false);
+    int lenOut = fadeDetectLen(c, true);
+    if (active) {
+        if (mFadeOut) { lenOut = mFadeLen; } else { len = mFadeLen; }
+    }
+    const bool selected = mModel->isSelected(c.clipId);
+    const bool hovered = c.clipId == mHoverId;
+    if (!selected && !hovered && len <= 0 && lenOut <= 0 && !active) {
+        return;
+    }
+    const QRectF body = r.adjusted(2, 18, -2, -3);
+    if (body.height() < 8) { return; }
+    const QColor accent = ThemeSupport::getThemeHighlightColor();
+    // 淡变区：半透明三角 + 对角线（音频块的真实包络另有白色键
+    // 线，这里是淡变范围的可视提示）
+    for (int corner = 0; corner < 2; corner++) {
+        const bool out = corner == 1;
+        const int l = out ? lenOut : len;
+        if (l <= 0) { continue; }
+        const qreal xCorner = out ? frameToX(m.start + m.duration)
+                                  : frameToX(m.start);
+        const qreal xTip = out ? frameToX(m.start + m.duration - l)
+                               : frameToX(m.start + l);
+        QPolygonF tri;
+        tri << QPointF(xTip, body.top())
+            << QPointF(xTip, body.bottom())
+            << QPointF(xCorner, body.bottom());
+        QColor fill = accent; fill.setAlpha(36);
+        p.setPen(Qt::NoPen);
+        p.setBrush(fill);
+        p.drawPolygon(tri);
+        p.setPen(QPen(QColor(0xff, 0xff, 0xff, 180), 1.2));
+        p.drawLine(QPointF(xTip, body.top()),
+                   QPointF(xCorner, body.bottom()));
+    }
+    // 角手柄圆点
+    for (int corner = 0; corner < 2; corner++) {
+        const bool out = corner == 1;
+        const int l = out ? lenOut : len;
+        const QPointF ctr(out ? r.right() - 10. : r.left() + 10.,
+                          r.top() + 9.);
+        const bool on = l > 0;
+        p.setPen(QPen(on ? accent : QColor(0xff, 0xff, 0xff, 120), 1.4));
+        p.setBrush(on ? accent : QColor(0x33, 0x33, 0x33, 160));
+        p.drawEllipse(ctr, 4., 4.);
+    }
+}
+
 QString NleTimelineView::timecode(const int frame) const
 {
     const int fpsInt = qMax(1, qRound(mModel->fps()));
@@ -1184,6 +1362,10 @@ void NleTimelineView::drawClip(QPainter &p,
                           cPlayhead.blue(), 40));
         p.drawPath(path);
     }
+    // 淡入淡出可视化（角手柄 + 淡变区），候选感知随拖块走
+    if (!ghost && !mModel->isDisabled(c.clipId)) {
+        drawFadeOverlay(p, c, m, r);
+    }
     p.restore();
 }
 
@@ -1532,6 +1714,7 @@ void NleTimelineView::mousePressEvent(QMouseEvent *e)
         mVolKey = nullptr;
         mVolAnim = nullptr;
         mVolClipId = -1;
+        mFadeClipId = -1;
         mModel->setGestureActive(false);
     }
 
@@ -1674,6 +1857,37 @@ void NleTimelineView::mousePressEvent(QMouseEvent *e)
         }
         update();
         return;
+    }
+
+    // 块角淡入淡出手柄（CapCut）：左上=淡入 右上=淡出，拖角定长、
+    // 原位点击=清除已有淡变；先于包络/移动命中（角区在名条上，
+    // 与包络体不重叠）
+    if (clipId >= 0 && mTool == EditTool::Select) {
+        const auto cf = mModel->clip(clipId);
+        if (cf && !mModel->isDisabled(clipId)) {
+            const auto fm = effectiveMove(clipId);
+            bool fadeOutHit = false;
+            bool hit = false;
+            if (fadeAnimatorFor(*cf, nullptr)) {
+                if (fadeHandleRect(fm, false).contains(e->pos())) {
+                    hit = true; fadeOutHit = false;
+                } else if (fadeHandleRect(fm, true).contains(e->pos())) {
+                    hit = true; fadeOutHit = true;
+                }
+            }
+            if (hit) {
+                mModel->setSelection({clipId});
+                mDrag = DragMode::FadeHandle;
+                mFadeClipId = clipId;
+                mFadeOut = fadeOutHit;
+                mFadeStartLen = fadeDetectLen(*cf, fadeOutHit);
+                mFadeLen = mFadeStartLen > 0 ? mFadeStartLen : 0;
+                mFadePressX = e->pos().x();
+                mModel->setGestureActive(true);
+                update();
+                return;
+            }
+        }
     }
 
     // volume envelope beats the clip gestures (CapCut: pressing the
@@ -1859,6 +2073,23 @@ void NleTimelineView::mouseMoveEvent(QMouseEvent *e)
         }
         update();
         return; // envelope drags never auto-scroll the content
+    }
+    case DragMode::FadeHandle: {
+        // 拖角定长：淡入向右拉长、淡出向左拉长（CapCut 方向语义）
+        if (mFadeClipId >= 0) {
+            const auto c = mModel->clip(mFadeClipId);
+            if (c && c->duration > 1) {
+                const int dx = e->pos().x() - mFadePressX;
+                const int df = qRound((mFadeOut ? -dx : dx) / mPxPerFrame);
+                const int base = mFadeStartLen > 0 ? mFadeStartLen : 0;
+                mFadeLen = qBound(0, base + df, c->duration - 1);
+                feedback(QStringLiteral("%1 %2 帧").arg(
+                             mFadeOut ? QStringLiteral("淡出")
+                                      : QStringLiteral("淡入")).arg(mFadeLen));
+            }
+        }
+        update();
+        return; // fade drags never auto-scroll the content
     }
     case DragMode::TrackHeight: {
         if (mDragTrackIdx >= 0 && mDragTrackIdx < mModel->tracks().size()) {
@@ -2365,6 +2596,23 @@ void NleTimelineView::mouseReleaseEvent(QMouseEvent *e)
         mVolAnim = nullptr;
         mVolClipId = -1;
         mDrag = DragMode::None;
+        update();
+        return;
+    }
+
+    // 淡变提交：手势先复位再落键（转场同款顺序），原位点击
+    // （len==0 且原本有淡变）= 清除；原本就没有且没拖 = 不动
+    if (mDrag == DragMode::FadeHandle) {
+        mDrag = DragMode::None;
+        const int id = mFadeClipId;
+        const bool out = mFadeOut;
+        const int len = mFadeLen;
+        const bool had = mFadeStartLen > 0;
+        mFadeClipId = -1;
+        mModel->setGestureActive(false);
+        if (id >= 0 && (len > 0 || had)) {
+            fadeWrite(id, out, len);
+        }
         update();
         return;
     }

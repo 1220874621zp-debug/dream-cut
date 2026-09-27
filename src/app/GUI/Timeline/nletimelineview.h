@@ -35,6 +35,16 @@ public:
     explicit NleTimelineView(NleTimelineModel * const model,
                              QWidget * const parent = nullptr);
 
+    // 淡入淡出写口/读口（无头台架与后续右键菜单复用）：
+    // 落键（len<=0 = 移除）corner 模式共线控制点 = 线性淡变
+    void fadeWrite(const int clipId, const bool out, const int len);
+    // 现有淡变长度（帧，-1 = 无）：角锚键值 0 + 邻近满值键
+    int fadeDetectLen(const NleTimelineModel::Clip &c,
+                      const bool out) const;
+    // 淡变目标动画器（音频=音量 视觉=不透明度），台架/菜单复用
+    QrealAnimator *fadeAnimatorFor(const NleTimelineModel::Clip &c,
+                                   bool *isAudioOut) const;
+
     void setScrollBar(QScrollBar * const bar);
     int playheadFrame() const { return mPlayheadFrame; }
 
@@ -167,7 +177,15 @@ private:
     // consume a press on the envelope: drag a key, Alt-delete one, or
     // create+drag a new key at the cursor frame
     bool armVolumeGesture(const QPoint &pos, const bool alt);
-    QPixmap thumbnailTile(const int clipId, const int hueSeed, const int h);
+
+    // ---- 块角淡入淡出手柄（CapCut 式）----
+    // 音频块=音量关键帧对（0→100），视频/视觉块=不透明度关键帧对；
+    // 拖角定长，点击角（已有淡变时）=清除（写口/读口在 public 区）
+    QRectF fadeHandleRect(const NleTimelineModel::Move &m,
+                          const bool out) const;
+    void drawFadeOverlay(QPainter &p, const NleTimelineModel::Clip &c,
+                         const NleTimelineModel::Move &m,
+                         const QRectF &r);    QPixmap thumbnailTile(const int clipId, const int hueSeed, const int h);
     QString timecode(const int frame) const;
     // audio info tag (bitrate for independent sounds), cached per id
     QString audioTagFor(const NleTimelineModel::Clip &c);
@@ -175,7 +193,7 @@ private:
     // ---- interaction ----
     enum class DragMode { None, MoveClip, TrimLeft, TrimRight, Playhead,
                           TrackHeight, SpacerMove, Pan, VolumePoint,
-                          TransitionSize };
+                          TransitionSize, FadeHandle };
     // candidate track id for the CapCut lane lifecycle: dragging a
     // clip below every track targets a NEW track of its type, which
     // materializes on release
@@ -270,6 +288,12 @@ private:
     QrealAnimator *mVolAnim = nullptr;
     QrealKey *mVolKey = nullptr;
     int mVolClipId = -1;
+    // 块角淡入淡出拖拽态
+    int mFadeClipId = -1;
+    bool mFadeOut = false;      // false = 左上角淡入
+    int mFadeLen = 0;           // 拖拽实时长度（帧）
+    int mFadeStartLen = -1;     // 按下时已有淡变（-1 = 无）
+    int mFadePressX = 0;
 
     int mHoverId = -1;
     QPoint mHoverPos;          // live cursor pos for the razor guide

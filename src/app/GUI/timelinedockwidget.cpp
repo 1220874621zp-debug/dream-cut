@@ -38,6 +38,9 @@
 #include <QTime>
 #include <QStatusBar>
 #include <QTimer>
+#include <QProcess>
+#include <QFile>
+#include "Animators/qrealkey.h"
 #include <QSvgRenderer>
 #include <QFile>
 #include <QApplication>
@@ -685,6 +688,94 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
 
     setupPropertyShortcuts();
 
+    // 无头台架：DREAMCUT_FADE_AUTOTEST=1 ——建场景→插音频块→写淡入
+    // →键数/线性插值断言→重写→清除断言（[AUTOTESTFADE] 落日志）
+    if (qEnvironmentVariableIsSet("DREAMCUT_FADE_AUTOTEST")) {
+        QTimer::singleShot(2500, this, [this]() {
+            if (!Document::sInstance->fActiveScene) {
+                mDocument.createNewScene();
+                QTimer::singleShot(600, this, [this]() {
+                    fadeAutotestStage();
+                });
+                return;
+            }
+            fadeAutotestStage();
+        });
+    }
+}
+
+void TimelineDockWidget::fadeAutotestStage()
+{
+    if (!mNleView || !mNleModel) {
+        qInfo("[AUTOTESTFADE] ABORT no view/model");
+        return;
+    }
+    // 插一段正弦到音频轨（结构化查找，不按绝对帧断言）
+    const QString wav = QStringLiteral("/tmp/dcfade_%1.wav").arg(
+                QCoreApplication::applicationPid());
+    QProcess::execute(QStringLiteral("python3"),
+        {QStringLiteral("-c"),
+         QStringLiteral("import wave,struct,math;"
+                        "w=wave.open('%1','w');w.setnchannels(1);"
+                        "w.setsampwidth(2);w.setframerate(44100);"
+                        "f=[]\n"
+                        "for i in range(44100*2):"
+                        "f.append(struct.pack('<h',int(12000*"
+                        "math.sin(2*math.pi*440*i/44100))))\n"
+                        "w.writeframes(b''.join(f));w.close()").arg(wav)});
+    const int tid = mNleModel->requestTrackAdd(true);
+    mNleModel->requestInsertSound(wav, tid, 0);
+    QTimer::singleShot(1500, this, [this, wav, tid]() {
+        QFile::remove(wav);
+        int clipId = -1;
+        const auto clips = mNleModel->clips();
+        for (const auto &c : clips) {
+            if (c.trackId == tid && c.audio) { clipId = c.clipId; break; }
+        }
+        if (clipId < 0) {
+            qInfo("[AUTOTESTFADE] ABORT no clip (tid=%d)", tid);
+            return;
+        }
+        const auto c = mNleModel->clip(clipId);
+        qInfo("[AUTOTESTFADE] clip=%d dur=%d detectBefore=%d",
+              clipId, c ? c->duration : -1,
+              c ? mNleView->fadeDetectLen(*c, false) : -2);
+        // 写 48 帧淡入
+        mNleView->fadeWrite(clipId, false, 48);
+        const auto c2 = mNleModel->clip(clipId);
+        const int det = c2 ? mNleView->fadeDetectLen(*c2, false) : -2;
+        bool isAudio = false;
+        const auto anim = c2
+                ? mNleView->fadeAnimatorFor(*c2, &isAudio) : nullptr;
+        const auto keyCount = [](QrealAnimator * const a) {
+            int n = 0;
+            for (const auto &k : a->anim_getKeys()) { Q_UNUSED(k) n++; }
+            return n;
+        };
+        const int nKeys = anim ? keyCount(anim) : -1;
+        // 中点值应≈50（线性对键）
+        const qreal mid = anim ? anim->getBaseValue(24) : -1.;
+        qInfo("[AUTOTESTFADE] fadeIn48 detect=%d isAudio=%d keys=%d "
+              "mid=%0.1f", det, int(isAudio), nKeys, double(mid));
+        // 重写 24 帧（清旧+写新）
+        mNleView->fadeWrite(clipId, false, 24);
+        const auto c3 = mNleModel->clip(clipId);
+        const int det2 = c3 ? mNleView->fadeDetectLen(*c3, false) : -2;
+        const int nKeys2 = anim ? keyCount(anim) : -1;
+        qInfo("[AUTOTESTFADE] rewrite24 detect=%d keys=%d", det2, nKeys2);
+        // 清除
+        mNleView->fadeWrite(clipId, false, 0);
+        const auto c4 = mNleModel->clip(clipId);
+        const int det3 = c4 ? mNleView->fadeDetectLen(*c4, false) : -2;
+        const int nKeys3 = anim ? keyCount(anim) : -1;
+        qInfo("[AUTOTESTFADE] clear detect=%d keys=%d", det3, nKeys3);
+        // 淡出对称验证
+        mNleView->fadeWrite(clipId, true, 36);
+        const auto c5 = mNleModel->clip(clipId);
+        qInfo("[AUTOTESTFADE] fadeOut36 detect=%d",
+              c5 ? mNleView->fadeDetectLen(*c5, true) : -2);
+        qInfo("[AUTOTESTFADE] DONE");
+    });
 }
 
 void TimelineDockWidget::setupNleActions()
