@@ -2408,7 +2408,8 @@ void Canvas::writeBoundingBox(eWriteStream& dst) const
             << qint32(s.mLocked) << qint32(s.mHeight)
             << qint32(s.mMain)
             << qint32(s.mSolo)
-            << s.mName.toUtf8();
+            << s.mName.toUtf8()
+            << s.mVolume;
     }
     clearGradientRWIds();
 }
@@ -2433,11 +2434,16 @@ void Canvas::readBoundingBox(eReadStream& src)
         mTrackSpecs.clear();
         const bool hasMain = src.evFileVersion() >= EvFormat::nleTrackMain;
         const bool hasSolo = src.evFileVersion() >= EvFormat::nleTrackSolo;
+        const bool hasVolume = src.evFileVersion() >= EvFormat::nleTrackVolume;
         for (qint32 i = 0; i < count; ++i) {
             qint32 id = -1, audio = 0, locked = 0, height = 0, main = 0;
             qint32 solo = 0;
             QByteArray name;
-            if (hasSolo) {
+            qreal volume = 1.;
+            if (hasVolume) {
+                src >> id >> audio >> locked >> height >> main >> solo
+                    >> name >> volume;
+            } else if (hasSolo) {
                 src >> id >> audio >> locked >> height >> main >> solo >> name;
             } else if (hasMain) {
                 src >> id >> audio >> locked >> height >> main >> name;
@@ -2451,6 +2457,7 @@ void Canvas::readBoundingBox(eReadStream& src)
             spec.mHeight = height;
             spec.mMain = main != 0;
             spec.mSolo = solo != 0;
+            spec.mVolume = volume > 0. ? volume : 1.;
             spec.mName = QString::fromUtf8(name);
             mTrackSpecs.append(spec);
         }
@@ -2593,6 +2600,30 @@ void Canvas::setTrackSpecHeight(const int id, const int height)
     for (auto &s : mTrackSpecs) {
         if (s.mId == id) { s.mHeight = height; return; }
     }
+}
+
+void Canvas::setTrackSpecVolume(const int id, const qreal volume)
+{
+    for (auto &s : mTrackSpecs) {
+        if (s.mId == id) {
+            if (qAbs(s.mVolume - volume) < 0.0001) { return; }
+            s.mVolume = volume;
+            // 推子变动必须立刻可听：作废全部已合并秒，下一次调度
+            // 会带着新轨道音量重新混（与可见性翻转的失效同款）
+            if (mSoundComposition) {
+                mSoundComposition->invalidateRange({0, INT_MAX});
+            }
+            return;
+        }
+    }
+}
+
+qreal Canvas::trackSpecVolume(const int id) const
+{
+    for (const auto &s : mTrackSpecs) {
+        if (s.mId == id) { return s.mVolume; }
+    }
+    return 1.;
 }
 
 void Canvas::setTrackSpecMain(const int id, const bool main)

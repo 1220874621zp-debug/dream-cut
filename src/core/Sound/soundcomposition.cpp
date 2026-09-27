@@ -135,6 +135,9 @@ SoundMerger *SoundComposition::scheduleSecond(const int secondId) {
         const iValueRange enabledSecRange{qFloor(enabledFrameRange.fMin/fps),
                                           qFloor(enabledFrameRange.fMax/fps)};
         if(!enabledSecRange.inRange(secondId)) continue;
+        // 混音器轨道推子（spec 平凡值，1 = 原声）
+        const qreal trackVol =
+                mParent->trackSpecVolume(sound->trackId());
         const auto secs = sound->absSecondToRelSeconds(secondId);
         for(int i = secs.fMin; i <= secs.fMax; i++) {
             const auto samples = sound->getSamplesForSecond(i);
@@ -143,7 +146,8 @@ SoundMerger *SoundComposition::scheduleSecond(const int secondId) {
                                        sound->absSampleRange(),
                                        sound->getVolumeSnap(),
                                        sound->getStretch(),
-                                       enve::make_shared<Samples>(samples)});
+                                       enve::make_shared<Samples>(samples),
+                                       trackVol});
             } else {
                 const auto reader = sound->getSecondReader(i);
                 if(!reader) continue;
@@ -153,7 +157,8 @@ SoundMerger *SoundComposition::scheduleSecond(const int secondId) {
                                        sound->getSampleShift(),
                                        sound->absSampleRange(),
                                        sound->getVolumeSnap(),
-                                       sound->getStretch());
+                                       sound->getStretch(),
+                                       trackVol);
             }
         }
     }
@@ -164,6 +169,96 @@ SoundMerger *SoundComposition::scheduleSecond(const int secondId) {
 void SoundComposition::frameRangeChanged(const FrameRange &range) {
     const qreal fps = mParent->getFps();
     secondRangeChanged({qFloor(range.fMin/fps), qCeil(range.fMax/fps)});
+}
+
+// normalized [-1,1] value of one sample of a cached Samples block,
+// idx relative to the block start (format-aware, float/int/planar)
+static qreal sampleValueNorm(const Samples &s, const uint ch,
+                             const int idx) {
+    const auto nCh = s.fNChannels;
+    if(idx < 0 || idx >= s.fSampleRange.span()) return 0.;
+    switch(s.fFormat) {
+    case AV_SAMPLE_FMT_FLT:
+        return reinterpret_cast<const float*>(s.fData[0])[idx*nCh + ch];
+    case AV_SAMPLE_FMT_FLTP:
+        return reinterpret_cast<const float*>(s.fData[ch])[idx];
+    case AV_SAMPLE_FMT_DBL:
+        return static_cast<qreal>(
+                    reinterpret_cast<const double*>(s.fData[0])[idx*nCh + ch]);
+    case AV_SAMPLE_FMT_DBLP:
+        return reinterpret_cast<const double*>(s.fData[ch])[idx];
+    case AV_SAMPLE_FMT_S16:
+        return reinterpret_cast<const qint16*>(s.fData[0])[idx*nCh + ch]
+                / 32768.;
+    case AV_SAMPLE_FMT_S16P:
+        return reinterpret_cast<const qint16*>(s.fData[ch])[idx] / 32768.;
+    case AV_SAMPLE_FMT_S32:
+        return reinterpret_cast<const qint32*>(s.fData[0])[idx*nCh + ch]
+                / 2147483648.;
+    case AV_SAMPLE_FMT_S32P:
+        return reinterpret_cast<const qint32*>(s.fData[ch])[idx]
+                / 2147483648.;
+    default:
+        return 0.;
+    }
+}
+
+// 混音器电平表：当前播放采样位置上，某音频轨所有可闻声源的
+// 窗口 RMS（含块音量关键帧与轨道推子）。未播放或无数据 = 0。
+// 过滤镜像 scheduleSecond（可见性/宿主盒/solo），与实际出声一致
+qreal SoundComposition::trackLevelAt(const int trackId) {
+    if(!isOpen() || trackId < 0) return 0.;
+    if(mSettings.fSampleRate <= 0) return 0.;
+    const qint64 pos = mPos;
+    const int absSec = static_cast<int>(pos/mSettings.fSampleRate
+                                        + (pos >= 0 ? 0 : -1));
+    bool anySolo = false;
+    for(const auto &sound : mSounds) {
+        if(sound->isSolo()) { anySolo = true; break; }
+    }
+    const qreal trackVol = mParent->trackSpecVolume(trackId);
+    const int halfWin = mSettings.fSampleRate/33; // ~30ms 窗口
+    qreal sumSquares = 0.;
+    for(const auto &sound : mSounds) {
+        if(sound->trackId() != trackId) continue;
+        if(!sound->isVisible()) continue;
+        if(const auto hostBox = sound->getFirstAncestor<BoundingBox>()) {
+            if(!hostBox->isVisible()) continue;
+        }
+        if(anySolo && !sound->isSolo()) continue;
+        const SampleRange absRange = sound->absSampleRange();
+        if(pos < absRange.fMin || pos > absRange.fMax) continue;
+        const auto secs = sound->absSecondToRelSeconds(absSec);
+        const qreal stretch = qMax(sound->getStretch(), 0.0001);
+        // 音量快照按拉伸时间采样单位索引（与 merger 的 volIt 同轴）
+        const qreal vol = sound->getVolumeSnap().getValue(
+                    qreal(pos - sound->getSampleShift())) * trackVol;
+        if(vol <= 0.) continue;
+        for(int i = secs.fMin; i <= secs.fMax; i++) {
+            const auto samples = sound->getSamplesForSecond(i);
+            if(!samples) continue;
+            // abs → 声源自身（未拉伸）相对采样
+            const qreal relPosF =
+                    (qreal(pos) - sound->getSampleShift())/stretch;
+            const int relPos = qRound(relPosF);
+            const SampleRange block = samples->fSampleRange;
+            const int winMin = qMax(block.fMin, relPos - halfWin);
+            const int winMax = qMin(block.fMax, relPos + halfWin);
+            if(winMax < winMin) continue;
+            qreal sSum = 0.;
+            int n = 0;
+            for(int j = winMin; j <= winMax; j++) {
+                for(uint c = 0; c < samples->fNChannels; c++) {
+                    const qreal v = sampleValueNorm(*samples, c,
+                                                    j - block.fMin)*vol;
+                    sSum += v*v;
+                    n++;
+                }
+            }
+            if(n > 0) { sumSquares += sSum/n; }
+        }
+    }
+    return std::sqrt(sumSquares);
 }
 
 qint64 SoundComposition::readData(char *data, qint64 maxLen) {

@@ -14,6 +14,7 @@ class CORE_EXPORT SoundReaderForMerger : public SoundReader {
         SampleRange fSamplesRange;
         QrealSnapshot fVolume;
         qreal fSpeed;
+        qreal fTrackVolume = 1.;
     };
 protected:
     SoundReaderForMerger(SoundHandler * const cacheHandler,
@@ -26,7 +27,8 @@ public:
                         const int sampleShift,
                         const SampleRange& absRange,
                         const QrealSnapshot& volume,
-                        const qreal speed);
+                        const qreal speed,
+                        const qreal trackVolume = 1.);
 
     void addMerger(SoundMerger * const merger);
 private:

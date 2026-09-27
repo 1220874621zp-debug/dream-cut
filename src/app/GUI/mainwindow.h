@@ -295,6 +295,8 @@ private:
     EffectsPresetsPanel *mEffectsPresetsPanel = nullptr;
     QDockWidget *mSoundBrowserDock = nullptr;
     class SoundBrowserPanel *mSoundBrowserPanel = nullptr;
+    QDockWidget *mMixerDock = nullptr;
+    class MixerPanel *mMixerPanel = nullptr;
     QuickEffectSearchDialog *mQuickEffectSearch = nullptr;
     // JS plugin system (Scripts menu + console dock)
     ScriptManager *mScriptManager = nullptr;

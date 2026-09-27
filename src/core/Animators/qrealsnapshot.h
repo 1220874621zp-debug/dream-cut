@@ -81,6 +81,18 @@ public:
                    const qreal c1Frame, const qreal c1Value);
 
     qreal getValue(const qreal relFrame) const;
+
+    // multiply every value the snapshot can hand out (current value
+    // plus all baked key values); used to fold a per-track fader
+    // factor into a sound's volume snapshot before merging
+    void scaleValues(const qreal factor) {
+        mCurrentValue *= factor;
+        for(auto &k : mKeys) {
+            k.fValue *= factor;
+            k.fC0Value *= factor;
+            k.fC1Value *= factor;
+        }
+    }
 protected:
     void getPrevAndNextKey(const qreal relFrame,
                            KeySnaphot const *& prevKey,

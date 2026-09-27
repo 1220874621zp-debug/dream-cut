@@ -98,6 +98,9 @@ struct eTrackSpec {
     bool mMain = false;
     // 剪映式独奏：同类任一轨独奏时，未独奏轨的成员层被压制隐藏
     bool mSolo = false;
+    // 混音器推子（1 = 原声 0dB）：合并时乘进该轨每个声源的
+    // 音量快照；只存数值，静音/独奏仍走可见性语义
+    qreal mVolume = 1.;
 };
 
 class CORE_EXPORT Canvas : public CanvasBase
@@ -375,6 +378,10 @@ public:
     void setTrackSpecLocked(const int id, const bool locked);
     void setTrackSpecSolo(const int id, const bool solo);
     void setTrackSpecHeight(const int id, const int height);
+    // 混音器推子写口：改值即作废混音秒缓存（改完立刻可听），
+    // 平凡写不进撤销栈（与锁定/独奏同策略）
+    void setTrackSpecVolume(const int id, const qreal volume);
+    qreal trackSpecVolume(const int id) const;
     // main-track designation (plain UI-state property, deliberately
     // not undoable - it survives lane adds/removes untouched)
     void setTrackSpecMain(const int id, const bool main);

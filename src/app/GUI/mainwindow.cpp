@@ -76,6 +76,7 @@
 #include "projectpanel.h"
 #include "clipmonitorwidget.h"
 #include "soundbrowserpanel.h"
+#include "mixerpanel.h"
 #include <QShortcut>
 #include "textanimpresetpanel.h"
 #include "scriptmanager.h"
@@ -1573,6 +1574,9 @@ void MainWindow::rebuildWorkspaceMenu()
     if (mSoundBrowserDock) {
         panelsMenu->addAction(mSoundBrowserDock->toggleViewAction());
     }
+    if (mMixerDock) {
+        panelsMenu->addAction(mMixerDock->toggleViewAction());
+    }
     // the script console toggle lives in the Scripts menu only;
     // listing it here too showed the same entry twice
 
@@ -1888,6 +1892,18 @@ void MainWindow::setupLayout()
                                  QStringLiteral("dockSoundBrowser"),
                                  mSoundBrowserPanel);
 
+    // 混音器面板（kdenlive 式）：每条音频轨推子+电平表+静音/独奏；
+    // 推子写轨道 spec 音量（混音时乘进音量快照），M/S 走时间轴
+    // 模型现成语义，电平轮询播放位置窗口 RMS
+    mMixerPanel = new MixerPanel(this);
+    connect(mMixerPanel, &MixerPanel::logMessage, this,
+            [this](const QString& msg) {
+        statusBar()->showMessage(msg, 4000);
+    });
+    mMixerDock = makeDock(tr("混音器"),
+                          QStringLiteral("dockMixer"),
+                          mMixerPanel);
+
     setCentralWidget(mStackWidget);
     addDockWidget(Qt::RightDockWidgetArea, mFillStrokeDock);
     addDockWidget(Qt::RightDockWidgetArea, mPropertiesDock);
@@ -1899,11 +1915,13 @@ void MainWindow::setupLayout()
     addDockWidget(Qt::RightDockWidgetArea, mTextAnimDock);
     addDockWidget(Qt::RightDockWidgetArea, mClipMonitorDock);
     addDockWidget(Qt::RightDockWidgetArea, mSoundBrowserDock);
+    addDockWidget(Qt::RightDockWidgetArea, mMixerDock);
 
     // hidden by default, can be opened from the Panels menu
     mEasingDock->hide();
     mTextAnimDock->hide();
     mSoundBrowserDock->hide();
+    mMixerDock->hide();
 
 
     // window-level Space shortcut: playback toggles from any focus

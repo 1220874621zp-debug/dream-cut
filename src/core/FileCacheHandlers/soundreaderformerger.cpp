@@ -15,7 +15,8 @@ void SoundReaderForMerger::afterProcessing() {
         for(const auto& ss : mSSAbsRanges) {
             merger->addSoundToMerge({ss.fSampleShift, ss.fSamplesRange,
                                      ss.fVolume, ss.fSpeed,
-                                     enve::make_shared<Samples>(getSamples())});
+                                     enve::make_shared<Samples>(getSamples()),
+                                     ss.fTrackVolume});
         }
     }
     SoundReader::afterProcessing();
@@ -25,11 +26,12 @@ void SoundReaderForMerger::addSingleSound(void* const soundPtr,
                                           const int sampleShift,
                                           const SampleRange& absRange,
                                           const QrealSnapshot& volume,
-                                          const qreal speed) {
+                                          const qreal speed,
+                                          const qreal trackVolume) {
     const bool c = mSoundPtrs.contains(soundPtr);
     if(c) return;
     mSoundPtrs.append(soundPtr);
-    mSSAbsRanges.append({sampleShift, absRange, volume, speed});
+    mSSAbsRanges.append({sampleShift, absRange, volume, speed, trackVolume});
 }
 
 void SoundReaderForMerger::addMerger(SoundMerger* const merger) {

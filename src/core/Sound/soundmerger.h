@@ -40,6 +40,8 @@ struct CORE_EXPORT SingleSoundData {
     QrealSnapshot fVolume;
     qreal fStretch;
     stdsptr<Samples> fSamples;
+    // 混音器轨道推子（1 = 原声）：process 里乘进音量快照拷贝
+    qreal fTrackVolume = 1.;
 };
 
 class CORE_EXPORT SoundMerger : public eCpuTask {

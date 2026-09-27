@@ -419,14 +419,24 @@ int main(int argc, char *argv[])
     // 无头台架：逢模态即关（项目管理面板/预设询问等启动门，
     // 嵌套 exec 循环会处理本定时器，构造链才不会被卡死）
     QTimer* modalCloser = nullptr;
-    if (qEnvironmentVariableIsSet("DREAMCUT_SOUNDBROWSER_AUTOTEST")) {
+    if (qEnvironmentVariableIsSet("DREAMCUT_SOUNDBROWSER_AUTOTEST") ||
+        qEnvironmentVariableIsSet("DREAMCUT_MIXER_AUTOTEST")) {
         modalCloser = new QTimer(&app);
         modalCloser->setInterval(400);
         QObject::connect(modalCloser, &QTimer::timeout, &app, []() {
-            QWidget* mw = QApplication::activeModalWidget();
-            if (mw) {
-                qInfo() << "[AUTOTESTSB] closing modal" << mw;
-                mw->close();
+            // offscreen 下 activeModalWidget/isVisible 均不可靠
+            // （QuickSetup::reject 还会嵌套再开确认框），全量扫
+            // 顶层对话框无差别关闭
+            const auto widgets = QApplication::topLevelWidgets();
+            for (const auto &w : widgets) {
+                auto* const dlg = qobject_cast<QDialog*>(w);
+                // 只关可见或模态的：QuickEffectSearchDialog 等常驻
+                // 隐藏对话框每拍误关刷屏；嵌套确认框是模态的，
+                // offscreen 下 isVisible 不可靠故模态即关
+                if (dlg && (dlg->isModal() || dlg->isVisible())) {
+                    qInfo() << "[AUTOTESTSB] closing modal" << dlg;
+                    dlg->close();
+                }
             }
         });
         modalCloser->start();

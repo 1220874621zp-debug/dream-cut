@@ -350,7 +350,12 @@ void SoundMerger::process() {
         if(!dstRelRange.isValid()) continue;
         if(!srcNeededRelRange.isValid()) continue;
         const int firstVolSample = dstNeededAbsRange.fMin - sound.fSampleShift;
-        QrealSnapshot::Iterator volIt(firstVolSample, 1000, &sound.fVolume);
+        // 轨道推子折进快照拷贝（模板合并函数保持零改动）
+        QrealSnapshot volSnap = sound.fVolume;
+        if(qAbs(sound.fTrackVolume - 1.) > 0.0001) {
+            volSnap.scaleValues(sound.fTrackVolume);
+        }
+        QrealSnapshot::Iterator volIt(firstVolSample, 1000, &volSnap);
         if(isOne4Dec(stretch)) {
             const int nSamples = qMin(srcNeededRelRange.span(), dstRelRange.span());
 

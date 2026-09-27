@@ -148,6 +148,13 @@ namespace EvFormat {
         // misalignment
         switchLayerRestore = 57,
 
+        // per-track fader volume (one qreal appended at the tail of
+        // every track spec entry, after the name); 1 = unity, the
+        // mixer multiplies it into each sound's volume snapshot at
+        // merge time. Files up to 57 carry no value and default to
+        // unity
+        nleTrackVolume = 58,
+
         nextVersion
     };
 

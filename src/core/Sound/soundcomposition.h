@@ -75,6 +75,9 @@ public:
 
     bool hasAnySounds() const { return !mSounds.isEmpty(); }
 
+    // 混音器电平：当前播放位置某轨道的窗口 RMS（0..1+，未播放=0）
+    qreal trackLevelAt(const int trackId);
+
     const ConnContextObjList<qsptr<eSound>>& getSounds() const
     { return mSounds; }
 
