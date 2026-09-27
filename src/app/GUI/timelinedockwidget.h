@@ -113,6 +113,8 @@ public:
 
     // NLE 面板模型访问（特效面板转场卡片应用入口经 MainWindow 转发）
     NleTimelineModel *nleModel() const { return mNleModel; }
+    // 面板跳帧：场景帧与时间轴播放头一起走（字幕/标记列表面板用）
+    void nleSeek(const int frame);
     // NLE 视图播放头（转场卡片"应用"的目标交界判定帧）
     int nlePlayheadFrame() const;
 
@@ -122,6 +124,8 @@ public:
     void shuttleStep(const int dir);
     // 无头台架（env DREAMCUT_JKL_AUTOTEST）
     void jklAutotestStage();
+    // 无头台架（env DREAMCUT_SUBTITLE_AUTOTEST）
+    void subtitleAutotestStage();
 
 private:
     void setLoop(const bool loop);

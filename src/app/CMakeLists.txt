@@ -267,6 +267,7 @@ set(
     GUI/effectspresetspanel.cpp
     GUI/soundbrowserpanel.cpp
     GUI/mixerpanel.cpp
+    GUI/subtitlepanel.cpp
     GUI/quickeffectsearchdialog.cpp
     GUI/scriptmanager.cpp
     GUI/scriptconsole.cpp
@@ -340,6 +341,7 @@ set(
     GUI/effectspresetspanel.h
     GUI/soundbrowserpanel.h
     GUI/mixerpanel.h
+    GUI/subtitlepanel.h
     GUI/quickeffectsearchdialog.h
     GUI/scriptmanager.h
     GUI/scriptconsole.h

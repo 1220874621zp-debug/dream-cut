@@ -76,7 +76,9 @@
 #include "projectpanel.h"
 #include "clipmonitorwidget.h"
 #include "soundbrowserpanel.h"
+#include <QFileDialog>
 #include "mixerpanel.h"
+#include "subtitlepanel.h"
 #include <QShortcut>
 #include "textanimpresetpanel.h"
 #include "scriptmanager.h"
@@ -1577,6 +1579,9 @@ void MainWindow::rebuildWorkspaceMenu()
     if (mMixerDock) {
         panelsMenu->addAction(mMixerDock->toggleViewAction());
     }
+    if (mSubtitleDock) {
+        panelsMenu->addAction(mSubtitleDock->toggleViewAction());
+    }
     // the script console toggle lives in the Scripts menu only;
     // listing it here too showed the same entry twice
 
@@ -1904,6 +1909,16 @@ void MainWindow::setupLayout()
                           QStringLiteral("dockMixer"),
                           mMixerPanel);
 
+    // 字幕面板：字幕轨条目视图 + SRT 导入导出入口
+    mSubtitlePanel = new SubtitlePanel(this);
+    connect(mSubtitlePanel, &SubtitlePanel::logMessage, this,
+            [this](const QString& msg) {
+        statusBar()->showMessage(msg, 4000);
+    });
+    mSubtitleDock = makeDock(tr("字幕"),
+                             QStringLiteral("dockSubtitle"),
+                             mSubtitlePanel);
+
     setCentralWidget(mStackWidget);
     addDockWidget(Qt::RightDockWidgetArea, mFillStrokeDock);
     addDockWidget(Qt::RightDockWidgetArea, mPropertiesDock);
@@ -1916,12 +1931,14 @@ void MainWindow::setupLayout()
     addDockWidget(Qt::RightDockWidgetArea, mClipMonitorDock);
     addDockWidget(Qt::RightDockWidgetArea, mSoundBrowserDock);
     addDockWidget(Qt::RightDockWidgetArea, mMixerDock);
+    addDockWidget(Qt::RightDockWidgetArea, mSubtitleDock);
 
     // hidden by default, can be opened from the Panels menu
     mEasingDock->hide();
     mTextAnimDock->hide();
     mSoundBrowserDock->hide();
     mMixerDock->hide();
+    mSubtitleDock->hide();
 
 
     // window-level Space shortcut: playback toggles from any focus
@@ -2299,6 +2316,37 @@ void MainWindow::importFile()
     }
 }
 
+
+// 字幕（SRT）：文件菜单入口——导入后自动开字幕面板并刷新条目
+void MainWindow::importSubtitles()
+{
+    const QString path = QFileDialog::getOpenFileName(
+                this, tr("导入字幕"), QString(),
+                tr("字幕文件 (*.srt);;所有文件 (*)"));
+    if (path.isEmpty()) { return; }
+    const auto tl = getTimeLineWidget();
+    const auto model = tl ? tl->nleModel() : nullptr;
+    if (!model) {
+        statusBar()->showMessage(tr("时间轴不可用"), 4000);
+        return;
+    }
+    if (model->requestSubtitleImport(path)) {
+        if (mSubtitlePanel) { mSubtitlePanel->refresh(); }
+        if (mSubtitleDock) { mSubtitleDock->show(); }
+    }
+}
+
+void MainWindow::exportSubtitles()
+{
+    const QString path = QFileDialog::getSaveFileName(
+                this, tr("导出字幕"),
+                QStringLiteral("subtitles.srt"),
+                tr("字幕文件 (*.srt)"));
+    if (path.isEmpty()) { return; }
+    const auto tl = getTimeLineWidget();
+    const auto model = tl ? tl->nleModel() : nullptr;
+    if (model) { model->requestSubtitleExport(path); }
+}
 
 void MainWindow::importLinkedProject()
 {

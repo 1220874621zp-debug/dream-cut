@@ -9,6 +9,7 @@
 #include "Sound/esound.h"
 #include "Sound/eindependentsound.h"
 #include "Boxes/videobox.h"
+#include "Boxes/textbox.h"
 #include "Boxes/internallinkcanvasbox.h"
 #include "Sound/evideosound.h"
 #include "Timeline/durationrectangle.h"
@@ -23,6 +24,8 @@
 #include "exceptions.h"
 
 #include <QDebug>
+#include <QFile>
+#include <QRegularExpression>
 #include <QtMath>
 #include <algorithm>
 #include <climits>
@@ -1495,6 +1498,181 @@ bool NleTimelineModel::requestInsertSound(const QString &path,
         emit logMessage(QStringLiteral("已插入音效（%1 秒）")
                                 .arg(QString::number(sec, 'f', 1)));
     }
+    return true;
+}
+
+// ---- 字幕（SRT ↔ "字幕"轨 TextBox 块）----
+
+namespace {
+struct NleSrtEntry {
+    qint64 startMs = 0;
+    qint64 endMs = 0;
+    QString text;
+};
+
+// SubRip 容错解析：BOM/CRLF/逗号或点毫秒/缺失序号/时间行坐标后缀
+bool nleParseSrt(const QString &path, QList<NleSrtEntry> &out)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) { return false; }
+    static const QRegularExpression re(
+                QStringLiteral(
+                    "(\\d+):(\\d+):(\\d+)[,.](\\d+)\\s*-->"
+                    "\\s*(\\d+):(\\d+):(\\d+)[,.](\\d+)"));
+    const auto blocks = QString::fromUtf8(f.readAll()).split(
+                QRegularExpression(QStringLiteral("\\r?\\n\\s*\\r?\\n")));
+    for (const auto &block : blocks) {
+        const auto m = re.match(block);
+        if (!m.hasMatch()) { continue; }
+        const auto ms = [&m](const int o) -> qint64 {
+            return ((m.captured(o).toLongLong()*60
+                     + m.captured(o + 1).toLongLong())*60
+                    + m.captured(o + 2).toLongLong())*1000
+                    + m.captured(o + 3).toLongLong();
+        };
+        NleSrtEntry e;
+        e.startMs = ms(1);
+        e.endMs = ms(5);
+        // 时间行之后到块尾全是正文（换行保留）
+        const auto lines = block.split(
+                    QRegularExpression(QStringLiteral("\\r?\\n")));
+        for (int i = 0; i < lines.size(); i++) {
+            if (re.match(lines.at(i)).hasMatch()) {
+                for (int j = i + 1; j < lines.size(); j++) {
+                    if (!e.text.isEmpty()) { e.text += QLatin1Char('\n'); }
+                    e.text += lines.at(j);
+                }
+                break;
+            }
+        }
+        e.text = e.text.trimmed();
+        if (e.endMs > e.startMs && !e.text.isEmpty()) { out << e; }
+    }
+    return !out.isEmpty();
+}
+}
+
+int NleTimelineModel::subtitleTrackId() const
+{
+    const auto scene = mPanelScene.data();
+    if (!scene) { return -1; }
+    for (const auto &s : scene->getTrackSpecs()) {
+        if (!s.mAudio && s.mName == QStringLiteral("字幕")) {
+            return s.mId;
+        }
+    }
+    return -1;
+}
+
+bool NleTimelineModel::requestSubtitleImport(const QString &path)
+{
+    if (mInWriteback || mGestureActive) { return false; }
+    const auto scene = mPanelScene.data();
+    if (!scene || path.isEmpty()) { return false; }
+    QList<NleSrtEntry> entries;
+    if (!nleParseSrt(path, entries)) {
+        emit logMessage(QStringLiteral("字幕解析失败（未找到有效条目）"));
+        return false;
+    }
+    // 找/建字幕轨：视频型组顶（字幕压画面，CapCut 布局）
+    int tid = subtitleTrackId();
+    if (tid < 0) {
+        tid = requestTrackAdd(false, true);
+        if (tid >= 0) { requestTrackRename(tid, QStringLiteral("字幕")); }
+    }
+    if (tid < 0) {
+        emit logMessage(QStringLiteral("无法创建字幕轨"));
+        return false;
+    }
+    const qreal fps = scene->getFps() > 0 ? scene->getFps() : 24.;
+    const qreal W = scene->getCanvasWidth();
+    const qreal H = scene->getCanvasHeight();
+    mInWriteback = true;
+    {
+        // 批量建层一次事务不进撤销栈（磁吸兜底由 finishAction 压实）
+        const auto undoBlock = scene->blockUndoRedo();
+        for (const auto &e : entries) {
+            const int st = qMax(0, qRound(e.startMs/1000.*fps));
+            const int en = qMax(st + 1, qRound(e.endMs/1000.*fps));
+            const auto box = enve::make_shared<TextBox>();
+#ifdef Q_OS_LINUX
+            box->setFontFamilyAndStyle(QStringLiteral("Noto Sans CJK JP"),
+                                       SkFontStyle());
+#else
+            box->setFontFamilyAndStyle(QStringLiteral("Microsoft YaHei"),
+                                       SkFontStyle());
+#endif
+            box->setFontSize(48);
+            box->setTextHAlignment(Qt::AlignHCenter);
+            box->setTextVAlignment(Qt::AlignCenter);
+            box->setCurrentValue(e.text);
+            const auto dur = enve::make_shared<FixedLenAnimationRect>(*box);
+            dur->setMinAbsFrame(st);
+            dur->setMaxAbsFrame(en - 1);
+            box->setDurationRectangle(dur);
+            box->setTrackId(tid);
+            scene->addContained(box);
+            box->planCenterPivotPosition();
+            box->setAbsolutePos(QPointF(W/2., H - 72.));
+            box->planUpdate(UpdateReason::userChange);
+        }
+    }
+    mInWriteback = false;
+    finishAction();
+    emit logMessage(QStringLiteral("已导入字幕 %1 条").arg(entries.size()));
+    return true;
+}
+
+bool NleTimelineModel::requestSubtitleExport(const QString &path)
+{
+    const auto scene = mPanelScene.data();
+    if (!scene || path.isEmpty()) { return false; }
+    const int tid = subtitleTrackId();
+    if (tid < 0) {
+        emit logMessage(QStringLiteral("没有字幕轨（先导入或新建字幕）"));
+        return false;
+    }
+    struct Item { int st; int en; QString text; };
+    QList<Item> items;
+    for (const auto &c : mClips) {
+        if (c.trackId != tid || !c.layer) { continue; }
+        const auto tb = enve_cast<TextBox*>(c.layer.data());
+        if (!tb) { continue; }
+        items << Item{c.start, c.start + c.duration,
+                      tb->getCurrentValue()};
+    }
+    if (items.isEmpty()) {
+        emit logMessage(QStringLiteral("字幕轨上没有文字块"));
+        return false;
+    }
+    std::sort(items.begin(), items.end(),
+              [](const Item &a, const Item &b) { return a.st < b.st; });
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        emit logMessage(QStringLiteral("字幕文件无法写入"));
+        return false;
+    }
+    const qreal fps = scene->getFps() > 0 ? scene->getFps() : 24.;
+    const auto tc = [fps](const int frame) {
+        qint64 ms = qRound(frame/fps*1000.);
+        const qint64 h = ms/3600000; ms %= 3600000;
+        const qint64 mnt = ms/60000; ms %= 60000;
+        const qint64 s = ms/1000; ms %= 1000;
+        return QStringLiteral("%1:%2:%3,%4")
+                .arg(h, 2, 10, QLatin1Char('0'))
+                .arg(mnt, 2, 10, QLatin1Char('0'))
+                .arg(s, 2, 10, QLatin1Char('0'))
+                .arg(ms, 3, 10, QLatin1Char('0'));
+    };
+    int idx = 1;
+    for (const auto &it : items) {
+        f.write(QStringLiteral("%1\n%2 --> %3\n%4\n\n")
+                .arg(QString::number(idx++),
+                     tc(it.st), tc(it.en), it.text)
+                .toUtf8());
+    }
+    f.close();
+    emit logMessage(QStringLiteral("已导出字幕 %1 条").arg(items.size()));
     return true;
 }
 

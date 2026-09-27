@@ -212,6 +212,14 @@ public:
                             const qreal secHint = -1.0,
                             const qreal inSec = 0.0,
                             const qreal outSec = -1.0);
+    // ---- 字幕（SRT ↔ "字幕"轨 TextBox 块）----
+    // 字幕 = 名"字幕"的视频型轨上的文字层（导入自动建轨，组顶生长）
+    int subtitleTrackId() const;
+    // SRT 导入：逐条建 TextBox（底部居中），durRect 按场景 fps 换算，
+    // 一次事务不进撤销栈；false = 解析失败/无场景
+    bool requestSubtitleImport(const QString &path);
+    // SRT 导出：收集字幕轨 TextBox 按起点排序写 SubRip
+    bool requestSubtitleExport(const QString &path);
     // 项目面板链接场景拖入：在 trackId 的 startFrame 落外部工程场
     // 景的动态链接块（让位插入，requestInsertMedia 同款事务语义）
     bool requestInsertSceneLink(const QString &path, const int sceneDocId,

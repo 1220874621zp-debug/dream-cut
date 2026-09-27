@@ -717,6 +717,92 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
             jklAutotestStage();
         });
     }
+
+    // 无头台架：DREAMCUT_SUBTITLE_AUTOTEST=1 ——SRT 写盘→导入→
+    // 轨/块结构断言→导出→内容断言（[AUTOTESTSUB] 落日志）
+    if (qEnvironmentVariableIsSet("DREAMCUT_SUBTITLE_AUTOTEST")) {
+        QTimer::singleShot(2500, this, [this]() {
+            if (!Document::sInstance->fActiveScene) {
+                mDocument.createNewScene();
+                QTimer::singleShot(600, this, [this]() {
+                    subtitleAutotestStage();
+                });
+                return;
+            }
+            subtitleAutotestStage();
+        });
+    }
+}
+
+void TimelineDockWidget::subtitleAutotestStage()
+{
+    if (!mNleModel) {
+        qInfo("[AUTOTESTSUB] ABORT no model");
+        return;
+    }
+    // 三条含跨行文本的 SRT（写盘走真实文件路径）
+    const QString srtPath = QStringLiteral(
+                "/tmp/dcsub_%1.srt").arg(
+                QCoreApplication::applicationPid());
+    {
+        QFile f(srtPath);
+        if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            qInfo("[AUTOTESTSUB] ABORT cannot write srt");
+            return;
+        }
+        f.write(QStringLiteral(
+                    "1\n"
+                    "00:00:00,500 --> 00:00:02,000\n"
+                    "你好世界\n\n"
+                    "2\n"
+                    "00:00:02,500 --> 00:00:04,250\n"
+                    "第二行字幕\n"
+                    "跨行文本\n\n"
+                    "3\n"
+                    "00:00:05,000 --> 00:00:06,000\n"
+                    "第三条\n").toUtf8());
+        f.close();
+    }
+    const bool ok = mNleModel->requestSubtitleImport(srtPath);
+    const int tid = mNleModel->subtitleTrackId();
+    int nClips = 0;
+    int firstStart = -1, firstDur = -1;
+    QString firstName;
+    if (tid >= 0) {
+        for (const auto &c : mNleModel->clips()) {
+            if (c.trackId != tid) { continue; }
+            if (nClips == 0) {
+                firstStart = c.start;
+                firstDur = c.duration;
+                firstName = c.name;
+            }
+            nClips++;
+        }
+    }
+    qInfo("[AUTOTESTSUB] import=%d trackId=%d clips=%d firstStart=%d "
+          "firstDur=%d firstName=%s",
+          int(ok), tid, nClips, firstStart, firstDur,
+          qUtf8Printable(firstName));
+    // 导出回读内容断言
+    const QString outPath = srtPath + QStringLiteral(".out");
+    const bool okExport = mNleModel->requestSubtitleExport(outPath);
+    QString outText;
+    {
+        QFile f(outPath);
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            outText = QString::fromUtf8(f.readAll());
+            f.close();
+        }
+    }
+    QFile::remove(srtPath);
+    QFile::remove(outPath);
+    qInfo("[AUTOTESTSUB] export=%d hasText=%d hasTimecode=%d "
+          "hasIndex=%d",
+          int(okExport),
+          int(outText.contains(QStringLiteral("你好世界"))),
+          int(outText.contains(QStringLiteral("-->"))),
+          int(outText.startsWith(QLatin1Char('1'))));
+    qInfo("[AUTOTESTSUB] DONE");
 }
 
 void TimelineDockWidget::jklAutotestStage()
@@ -1232,6 +1318,12 @@ void TimelineDockWidget::snapshotCurrentFrame()
 int TimelineDockWidget::nlePlayheadFrame() const
 {
     return mNleView ? mNleView->playheadFrame() : 0;
+}
+
+void TimelineDockWidget::nleSeek(const int frame)
+{
+    mDocument.setActiveSceneFrame(frame);
+    if (mNleView) { mNleView->setPlayheadFrame(frame); }
 }
 
 // JKL 梭动步进：同向连按翻倍（封顶 8x），跨向保持当前 |速率|，

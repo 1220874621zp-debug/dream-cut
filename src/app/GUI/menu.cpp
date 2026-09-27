@@ -95,6 +95,15 @@ void MainWindow::setupMenuBar()
     mImportSeqAct->setEnabled(false);
     cmdAddAction(mImportSeqAct);
 
+    const auto importSrtAct = mFileMenu->addAction(
+                QIcon::fromTheme("file_import"),
+                tr("导入字幕(SRT)…"), this, &MainWindow::importSubtitles);
+    cmdAddAction(importSrtAct);
+    const auto exportSrtAct = mFileMenu->addAction(
+                QIcon::fromTheme("file_export"),
+                tr("导出字幕(SRT)…"), this, &MainWindow::exportSubtitles);
+    cmdAddAction(exportSrtAct);
+
     mRevertAct = mFileMenu->addAction(QIcon::fromTheme("loop_back"),
                                       tr("Revert", "MenuBar_File"),
                                       this, &MainWindow::revert);

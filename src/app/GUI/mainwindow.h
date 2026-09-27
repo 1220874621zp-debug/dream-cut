@@ -214,6 +214,9 @@ public:
     void importImageSequence();
     void importFile();
     void importLinkedProject();
+    // 字幕（SRT）：文件菜单入口，面板同款逻辑
+    void importSubtitles();
+    void exportSubtitles();
     void openSammieRoto();
     void traceSelectedImage();
     void revert();
@@ -297,6 +300,8 @@ private:
     class SoundBrowserPanel *mSoundBrowserPanel = nullptr;
     QDockWidget *mMixerDock = nullptr;
     class MixerPanel *mMixerPanel = nullptr;
+    QDockWidget *mSubtitleDock = nullptr;
+    class SubtitlePanel *mSubtitlePanel = nullptr;
     QuickEffectSearchDialog *mQuickEffectSearch = nullptr;
     // JS plugin system (Scripts menu + console dock)
     ScriptManager *mScriptManager = nullptr;
