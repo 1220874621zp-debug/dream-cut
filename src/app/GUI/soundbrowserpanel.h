@@ -34,6 +34,7 @@ class QLineEdit;
 class QScrollArea;
 class QSlider;
 class QToolButton;
+class QKeyEvent;
 class QMediaPlayer;
 class QAudioOutput;
 class QTimer;
@@ -94,7 +95,8 @@ private:
     struct Entry {
         QString path;
         QString title;
-        QString category;
+        QString category; // 所属文件夹分类（一级子目录名）
+        QString ucsRoot;  // 文件名 UCS 根码（空=未命名 UCS）
     };
 
     void setupUi();
@@ -104,6 +106,14 @@ private:
     void rebuildCategoryPills();
     void applyFilter();
 
+    // ---- 键盘流翻听（Soundminer 式：翻到即听）
+    void setKeyIndex(const int index, const bool play);
+    void ensureVisibleIndex(const int index);
+    int indexForCard(SoundCardWidget* card) const;
+    void pushRecent(const QString& path);
+    // 文件重命名/移动后同步收藏/颜色/最近表路径
+    void refileMeta(const QString& oldPath, const QString& newPath);
+
     // ---- 视口虚拟网格（固定尺寸离线算位，按需建/毁卡片）
     void updateVirtualGrid();
     void clearGridCards();
@@ -111,6 +121,7 @@ private:
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
+    void keyPressEvent(QKeyEvent* e) override;
 
     // ---- 波形解码（异步开流 + LRU 池 + 逐秒并行）
     void requestDecode(SoundCardWidget* card);
@@ -132,8 +143,10 @@ protected:
     void loadFavorites();
     void saveFavorites();
     void toggleFavorite(SoundCardWidget* card, bool on);
-    // 文件重命名/移动后同步收藏表路径
-    void refileFavorite(const QString& oldPath, const QString& newPath);
+    // ---- 颜色标签（1..5，0=无）
+    void loadColorTags();
+    void saveColorTags();
+    void setColorTag(SoundCardWidget* card, const int tag);
 
     // ---- UI
     QToolButton* mDirButton = nullptr;
@@ -148,12 +161,17 @@ protected:
 
     // ---- 数据
     QString mRootDir;
-    QString mCategory; // 空=全部
+    // 分类 pill 键空间：""=全部 "\x01fav"=收藏 "\x01recent"=最近使用
+    // "\x03ucs:<CODE>"=UCS 根类 "\x04color:<N>"=颜色标签
+    QString mCategory;
     QString mFilter;
     QStringList mFavorites;
+    QHash<QString, int> mColorTags;   // 路径 -> 颜色标签 1..5
+    QStringList mRecent;              // 最近使用（新的在前）
     QList<Entry> mAllEntries;
     QList<Entry> mShown;
-    QSet<QString> mCategories;
+    QSet<QString> mCategories;        // 文件夹分类
+    QMap<QString, QString> mUcsRoots; // UCS 根码 -> 中文名（库中实际出现）
     QFileSystemWatcher* mWatcher = nullptr;
     QTimer* mRescanTimer = nullptr;
 
@@ -161,6 +179,7 @@ protected:
     QHash<int, SoundCardWidget*> mIndexCards; // 条目索引 -> 卡片
     int mCols = 0;                            // 当前网格列数
     qreal mCardScale = 1.0;                   // 卡片缩放（缩放滑杆）
+    int mKeyIndex = -1;                       // 键盘游标（mShown 索引）
 
     // ---- 悬停试听
     QMediaPlayer* mPlayer = nullptr;
@@ -168,7 +187,6 @@ protected:
     QTimer* mHoverTimer = nullptr;
     QPointer<SoundCardWidget> mHoverCard;
     QPointer<SoundCardWidget> mPlayingCard;
-    bool mPlaybackSuppressed = false;
 
     // ---- 波形解码激活池（front = newest）
     static constexpr int kMaxActive = 24;
@@ -207,6 +225,11 @@ public:
     void setPlayProgress(const qreal frac);
     void setFavorite(const bool on);
     bool isFavorite() const { return mFavorite; }
+    // 颜色标签（0=无）：卡片左上角色点
+    void setColorTag(const int tag);
+    int colorTag() const { return mColorTag; }
+    // 键盘游标选中：强调色粗边框
+    void setKeySelected(const bool on);
     bool hasEnvelope() const { return mFilled > 0; }
     bool isDecodeError() const { return mError; }
     // 激活池淘汰：停掉序列，已绘包络保留（再激活时缓存秒秒回）
@@ -219,6 +242,8 @@ signals:
     void doubleClicked(SoundCardWidget* card);
     // 单击（未成拖拽的按下-释放）= 装载到片段监视器
     void clicked(SoundCardWidget* card);
+    // 拖出使用（拖入时间轴）：最近使用记账
+    void used(SoundCardWidget* card);
     void contextRequested(SoundCardWidget* card, const QPoint& globalPos);
 
 protected:
@@ -244,6 +269,8 @@ private:
     bool mDragging = false;
     bool mFavorite = false;
     bool mDecodable = true; // 尚未判定失败
+    int mColorTag = 0;      // 颜色标签 0=无 1..5
+    bool mKeySel = false;   // 键盘游标选中
     qreal mPlayFrac = -1;   // 试听进度（已播占比），<0 = 无
     int mTotalCols = 0;
     int mFilled = 0;

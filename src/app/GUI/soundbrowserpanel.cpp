@@ -23,7 +23,6 @@
 #include "appsupport.h"
 #include "exceptions.h"
 #include "filesourcescache.h"
-#include "renderhandler.h"
 #include "themesupport.h"
 
 #include "CacheHandlers/soundcachehandler.h"
@@ -39,6 +38,7 @@
 #include <QFileSystemWatcher>
 #include <QHBoxLayout>
 #include <QInputDialog>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMediaPlayer>
@@ -116,6 +116,67 @@ protected:
         p.drawPolygon(star);
     }
 };
+
+// UCS（Universal Category System）根码表：专业音效库（BOOM、
+// Sonniss、Pro Sound Effects 等）文件名按 `CatID_名称_作者_来源`
+// 命名，CatID 首词即根类码——识别后归并成虚拟分类，零成本接入
+// 行业标准分类体系（v8.2 根类，公有领域）
+struct UcsRootInfo { const char* code; const char* zh; };
+const UcsRootInfo kUcsRoots[] = {
+    {"AMBI", "环境"}, {"ANML", "动物"}, {"APPL", "家电"},
+    {"BELL", "铃钟"}, {"BGTS", "背景"}, {"BODY", "身体"},
+    {"BUSN", "商务"}, {"CARS", "汽车"}, {"CITY", "城市"},
+    {"CNCT", "碰撞"}, {"CONS", "施工"}, {"DESG", "设计元素"},
+    {"DOME", "居家"}, {"ELEC", "电子"}, {"EMBR", "应急"},
+    {"EXPL", "爆炸"}, {"FARM", "农场"}, {"FFF", "火布水"},
+    {"FOOD", "食物"}, {"FOLEY", "拟音"}, {"GUNS", "枪械"},
+    {"HORSE", "马"}, {"HUMN", "人声"}, {"INDS", "工业"},
+    {"MEDI", "医疗"}, {"MIL", "军事"}, {"MUSI", "音乐"},
+    {"OFFC", "办公"}, {"PBUS", "公交"}, {"PEOPLE", "人群"},
+    {"PORT", "便携设备"}, {"RAIL", "轨道"}, {"SCIFI", "科幻"},
+    {"SEA", "海洋"}, {"SPORT", "运动"}, {"SUB", "冲击"},
+    {"TECH", "机械"}, {"TOYS", "玩具"}, {"TRAF", "交通"},
+    {"TRAIN", "火车"}, {"UTIL", "工具"}, {"WATER", "水"},
+    {"WEATHER", "天气"}, {"WIND", "风"}, {"WRKSHOP", "车间"},
+    {"WWEL", "摔角"}, {"WWI", "野外生物"},
+};
+
+// 文件名（不含扩展名）→ UCS 根码：CatID 首词全大写字母且在表内
+QString ucsRootFor(const QString& title)
+{
+    const QString first = title.section('_', 0, 0)
+                              .section(' ', 0, 0);
+    if (first.size() < 2 || first.size() > 7) { return QString(); }
+    for (const auto c : first) {
+        if (!c.isLetter() || !c.isUpper()) { return QString(); }
+    }
+    for (const auto& r : kUcsRoots) {
+        if (first == QLatin1String(r.code)) {
+            return QString::fromUtf8(r.code);
+        }
+    }
+    return QString();
+}
+
+// 颜色标签五色（刻意避开收藏星标金黄）：红/橙/绿/青/紫
+QColor tagColor(const int tag)
+{
+    switch (tag) {
+    case 1: return QColor(229, 57, 53);
+    case 2: return QColor(251, 140, 0);
+    case 3: return QColor(67, 160, 71);
+    case 4: return QColor(0, 172, 193);
+    case 5: return QColor(142, 36, 170);
+    default: return QColor();
+    }
+}
+
+// 分类 pill 特殊键（相邻字面量拼接：\x 后直接跟 hex 字母会被
+// 贪婪并进转义——"\x04color" 实为 0x4C+"olor"，两案实证）
+const QString kCatFav = QStringLiteral("\x01" "fav");
+const QString kCatRecent = QStringLiteral("\x01" "recent");
+const QString kCatUcsPrefix = QStringLiteral("\x03" "ucs:");
+const QString kCatColorPrefix = QStringLiteral("\x04" "color:");
 } // namespace
 
 SoundCardWidget::SoundCardWidget(const QString& path, const QString& title,
@@ -217,6 +278,20 @@ void SoundCardWidget::setFavorite(const bool on)
     update();
 }
 
+void SoundCardWidget::setColorTag(const int tag)
+{
+    if (mColorTag == tag) { return; }
+    mColorTag = tag;
+    update();
+}
+
+void SoundCardWidget::setKeySelected(const bool on)
+{
+    if (mKeySel == on) { return; }
+    mKeySel = on;
+    update();
+}
+
 void SoundCardWidget::paintEvent(QPaintEvent* e)
 {
     Q_UNUSED(e)
@@ -231,7 +306,12 @@ void SoundCardWidget::paintEvent(QPaintEvent* e)
     QPainterPath framePath;
     framePath.addRoundedRect(r, 6, 6);
     p.fillPath(framePath, bg);
-    p.setPen(QPen(border, 1));
+    // 键盘游标选中：强调色粗边框（播放态最优先）
+    if (mKeySel) {
+        p.setPen(QPen(ThemeSupport::getThemeHighlightColor(), 2));
+    } else {
+        p.setPen(QPen(border, 1));
+    }
     p.drawPath(framePath);
 
     // 波形包络区（高度随卡片缩放）
@@ -290,6 +370,13 @@ void SoundCardWidget::paintEvent(QPaintEvent* e)
         const QRectF durRect(width() - 56, height() - 26, 48, 18);
         p.drawText(durRect, Qt::AlignVCenter | Qt::AlignRight,
                    durationLabel(mDurationSec));
+    }
+
+    // 颜色标签：左上角色点（星标在右上，互不遮挡）
+    if (mColorTag > 0) {
+        p.setPen(QPen(QColor(0, 0, 0, 140), 1));
+        p.setBrush(tagColor(mColorTag));
+        p.drawEllipse(QPointF(12, 12), 5.5, 5.5);
     }
 }
 
@@ -352,6 +439,8 @@ void SoundCardWidget::contextMenuEvent(QContextMenuEvent* e)
 
 void SoundCardWidget::startDrag()
 {
+    // 拖出 = 使用（最近使用记账在面板侧）
+    emit used(this);
     auto mime = new QMimeData;
     // 与片段监视器同款 clip-path 键：时间轴拖放零改动接受；
     // 秒数键供音频块长度换算（视图按场景 fps 取整）；
@@ -390,9 +479,12 @@ QString SoundCardWidget::durationLabel(const qreal sec)
 SoundBrowserPanel::SoundBrowserPanel(QWidget* const parent)
     : QWidget(parent)
 {
+    // 键盘流翻听：面板可聚焦（点击卡片/程序设焦后 ↑↓←→ 翻听）
+    setFocusPolicy(Qt::StrongFocus);
     setupUi();
     setupPlayback();
     loadFavorites();
+    loadColorTags();
 
     mWatcher = new QFileSystemWatcher(this);
     mRescanTimer = new QTimer(this);
@@ -414,6 +506,7 @@ SoundBrowserPanel::SoundBrowserPanel(QWidget* const parent)
 
     // 布局落定后再刷可视集（首帧 + 视口尺寸变化都可能改几何）
     mGridScroll->viewport()->installEventFilter(this);
+
 }
 
 bool SoundBrowserPanel::eventFilter(QObject* watched, QEvent* event)
@@ -558,17 +651,9 @@ void SoundBrowserPanel::setupPlayback()
         if (status == QMediaPlayer::EndOfMedia) { stopPreview(); }
     });
 
-    // 与工程播放互斥：工程播放期间悬停试听不起播，
-    // 播放开始时掐掉已在放的试听（防两路叠音）
-    connect(RenderHandler::sInstance, &RenderHandler::previewBeingPlayed,
-            this, [this]() {
-        mPlaybackSuppressed = true;
-        stopPreview();
-    });
-    connect(RenderHandler::sInstance, &RenderHandler::previewPaused,
-            this, [this]() { mPlaybackSuppressed = false; });
-    connect(RenderHandler::sInstance, &RenderHandler::previewFinished,
-            this, [this]() { mPlaybackSuppressed = false; });
+    // 对播放头试听（Soundly/Soundminer 工作流）：工程播放与卡片
+    // 试听两路并行混音——边播时间轴边翻卡试听，对比声音与画面；
+    // 两路独立音频通道由 Qt 自动混音（旧版互斥闸已按本需求移除）
 }
 
 bool SoundBrowserPanel::isSoundFile(const QString& path)
@@ -605,12 +690,34 @@ void SoundBrowserPanel::rescan()
 {
     rebuildWatcher();
     mCategories.clear();
+    mUcsRoots.clear();
     mAllEntries.clear();
     if (mRootDir.isEmpty() || !QDir(mRootDir).exists()) {
         rebuildCategoryPills();
         applyFilter();
         return;
     }
+
+    const auto appendEntry = [this](const QString& path,
+                                    const QString& title,
+                                    const QString& category) {
+        Entry e;
+        e.path = path;
+        e.title = title;
+        e.category = category;
+        e.ucsRoot = ucsRootFor(title);
+        if (!e.ucsRoot.isEmpty()) {
+            // 根码 -> 中文名（只记库中实际出现的根类）
+            for (const auto& r : kUcsRoots) {
+                if (e.ucsRoot == QLatin1String(r.code)) {
+                    mUcsRoots.insert(e.ucsRoot,
+                                     QString::fromUtf8(r.zh));
+                    break;
+                }
+            }
+        }
+        mAllEntries.append(e);
+    };
 
     QDir root(mRootDir);
     // 分类 = 一级子目录；根级散文件归"未分类"
@@ -621,29 +728,36 @@ void SoundBrowserPanel::rescan()
         const auto files = subDir.entryList(QDir::Files, QDir::Name);
         for (const auto& f : files) {
             if (!isSoundFile(f)) { continue; }
-            Entry e;
-            e.path = subDir.absoluteFilePath(f);
-            e.title = QFileInfo(f).completeBaseName();
-            e.category = sub;
-            mAllEntries.append(e);
+            appendEntry(subDir.absoluteFilePath(f),
+                        QFileInfo(f).completeBaseName(), sub);
         }
         mCategories.insert(sub);
     }
     const auto rootFiles = root.entryList(QDir::Files, QDir::Name);
     for (const auto& f : rootFiles) {
         if (!isSoundFile(f)) { continue; }
-        Entry e;
-        e.path = root.absoluteFilePath(f);
-        e.title = QFileInfo(f).completeBaseName();
-        e.category = QString::fromUtf8("未分类");
-        mAllEntries.append(e);
-        mCategories.insert(e.category);
+        appendEntry(root.absoluteFilePath(f),
+                    QFileInfo(f).completeBaseName(),
+                    QString::fromUtf8("未分类"));
+        mCategories.insert(QString::fromUtf8("未分类"));
     }
+
+    // 最近使用表清理失效路径（收藏表保留——收藏的文件可能是
+    // 临时移出，回来星标还在）
+    QSet<QString> live;
+    live.reserve(mAllEntries.size());
+    for (const auto& e : mAllEntries) { live.insert(e.path); }
+    mRecent.erase(std::remove_if(mRecent.begin(), mRecent.end(),
+                                 [&live](const QString& p) {
+                                     return !live.contains(p);
+                                 }),
+                  mRecent.end());
 
     rebuildCategoryPills();
     applyFilter();
     qInfo() << "[SOUNDBROWSER] rescan" << mRootDir
             << "categories" << mCategories.size()
+            << "ucs" << mUcsRoots.size()
             << "entries" << mAllEntries.size();
 }
 
@@ -654,12 +768,14 @@ void SoundBrowserPanel::rebuildCategoryPills()
         if (auto w = it->widget()) { w->deleteLater(); }
         delete it;
     }
-    const auto addPill = [this](const QString& text, const QString& cat) {
+    const auto addPill = [this](const QString& text, const QString& cat,
+                                const QString& tooltip = QString()) {
         const auto btn = new QToolButton(mCategoryHost);
         btn->setText(text);
         btn->setCheckable(true);
         btn->setCursor(Qt::PointingHandCursor);
         btn->setChecked(mCategory == cat);
+        if (!tooltip.isEmpty()) { btn->setToolTip(tooltip); }
         connect(btn, &QToolButton::clicked, this, [this, cat]() {
             if (mCategory == cat) { return; }
             mCategory = cat;
@@ -667,12 +783,46 @@ void SoundBrowserPanel::rebuildCategoryPills()
             applyFilter();
         });
         mCategoryLayout->addWidget(btn);
+        return btn;
     };
 
-    addPill(QString::fromUtf8("全部"), QString());
-    addPill(QString::fromUtf8("★ 收藏"), QStringLiteral("\x01fav"));
+    addPill(QString::fromUtf8("全部"), QString(),
+            QString::fromUtf8("键盘：↑↓←→ 选择并试听，空格 播放/暂停，"
+                              "回车 装载监视器；工程播放时可叠听对比"));
+    addPill(QString::fromUtf8("★ 收藏"), kCatFav);
+    if (!mRecent.isEmpty()) {
+        addPill(QString::fromUtf8("最近使用"), kCatRecent);
+    }
     for (const auto& cat : mCategories.values()) {
         addPill(cat, cat);
+    }
+    // UCS 根类（专业库文件名前缀归并，只显示库中实际出现的）
+    for (auto it = mUcsRoots.constBegin(); it != mUcsRoots.constEnd();
+         ++it) {
+        addPill(QString::fromUtf8("%1 · %2").arg(it.value(), it.key()),
+                kCatUcsPrefix + it.key(),
+                QString::fromUtf8("UCS 标准分类（按文件名前缀归并）"));
+    }
+    // 颜色标签过滤（色块 pill，只显示库中实际出现的颜色）
+    QSet<int> liveTags;
+    for (auto it = mColorTags.constBegin(); it != mColorTags.constEnd();
+         ++it) {
+        if (it.value() > 0) { liveTags.insert(it.value()); }
+    }
+    for (const int tag : qAsConst(liveTags)) {
+        const auto btn = addPill(QString(),
+                                 kCatColorPrefix + QStringLiteral("%1").arg(tag),
+                                 QString::fromUtf8("按颜色标记过滤"));
+        btn->setObjectName(QStringLiteral("sbColorPill_%1").arg(tag));
+        btn->setFixedSize(26, 16);
+        const QColor c = tagColor(tag);
+        btn->setStyleSheet(QStringLiteral(
+                    "QToolButton { background: %1;"
+                    " border-radius: 5px; border: 1px solid rgba(0,0,0,90);"
+                    " } QToolButton:checked {"
+                    " border: 2px solid %2; }")
+                .arg(c.name(),
+                     ThemeSupport::getThemeHighlightColor().name()));
     }
     mCategoryHost->setVisible(mCategoryLayout->count() > 2 ||
                               !mFavorites.isEmpty());
@@ -681,20 +831,48 @@ void SoundBrowserPanel::rebuildCategoryPills()
 
 void SoundBrowserPanel::applyFilter()
 {
-    const bool favOnly = mCategory == QStringLiteral("\x01fav");
     mShown.clear();
-    for (const auto& e : mAllEntries) {
-        if (!mFilter.isEmpty() &&
-                !e.title.contains(mFilter, Qt::CaseInsensitive)) {
-            continue;
-        }
-        if (favOnly) {
-            if (!mFavorites.contains(e.path)) { continue; }
-        } else if (!mCategory.isEmpty() && e.category != mCategory) {
-            continue;
-        }
-        mShown.append(e);
+    const bool favOnly = mCategory == kCatFav;
+    const bool recentOnly = mCategory == kCatRecent;
+    const QString ucsCat = mCategory.startsWith(kCatUcsPrefix)
+            ? mCategory.mid(5) : QString();
+    int colorCat = -1;
+    if (mCategory.startsWith(kCatColorPrefix)) {
+        colorCat = mCategory.mid(7).toInt();
     }
+    // 最近使用：按最近序（新的在前）而非目录序
+    if (recentOnly) {
+        for (const auto& path : mRecent) {
+            for (const auto& e : mAllEntries) {
+                if (e.path != path) { continue; }
+                if (!mFilter.isEmpty() &&
+                        !e.title.contains(mFilter, Qt::CaseInsensitive)) {
+                    continue;
+                }
+                mShown.append(e);
+                break;
+            }
+        }
+    } else {
+        for (const auto& e : mAllEntries) {
+            if (!mFilter.isEmpty() &&
+                    !e.title.contains(mFilter, Qt::CaseInsensitive)) {
+                continue;
+            }
+            if (favOnly) {
+                if (!mFavorites.contains(e.path)) { continue; }
+            } else if (colorCat > 0) {
+                if (mColorTags.value(e.path) != colorCat) { continue; }
+            } else if (!ucsCat.isEmpty()) {
+                if (e.ucsRoot != ucsCat) { continue; }
+            } else if (!mCategory.isEmpty() && e.category != mCategory) {
+                continue;
+            }
+            mShown.append(e);
+        }
+    }
+    // 过滤结果变了：键盘游标回首条（不自动播）
+    mKeyIndex = mShown.isEmpty() ? -1 : 0;
     clearGridCards();
     updateVirtualGrid();
     if (mShown.isEmpty()) {
@@ -726,6 +904,8 @@ SoundCardWidget* SoundBrowserPanel::createCard(const int index)
     const Entry& e = mShown.at(index);
     const auto card = new SoundCardWidget(e.path, e.title, mGridHost);
     card->setFavorite(mFavorites.contains(e.path));
+    card->setColorTag(mColorTags.value(e.path, 0));
+    card->setKeySelected(index == mKeyIndex);
     connect(card, &SoundCardWidget::hoverEntered, this,
             [this](SoundCardWidget* c) {
         mHoverCard = c;
@@ -744,16 +924,31 @@ SoundCardWidget* SoundBrowserPanel::createCard(const int index)
     // 单击 = 装载到片段监视器（kdenlive 同语义：预览窗口 I/O
     // 精确选段后拖入时间轴）；双击不再重复发装载（单击已装载，
     // 双击二次触发会造成媒体重载/波形重启抖动）；右键 = 音效管理
+    // 装载与拖出都记"最近使用"
     connect(card, &SoundCardWidget::clicked, this, [this](
                 SoundCardWidget* c) {
+        setKeyIndex(indexForCard(c), false);
+        setFocus(Qt::MouseFocusReason);
+        pushRecent(c->path());
         emit monitorRequested(c->path());
     });
+    connect(card, &SoundCardWidget::used, this,
+            [this](SoundCardWidget* c) { pushRecent(c->path()); });
     connect(card, &SoundCardWidget::contextRequested, this,
             [this](SoundCardWidget* c, const QPoint& gp) {
         showCardMenu(c, gp);
     });
     mIndexCards.insert(index, card);
     return card;
+}
+
+int SoundBrowserPanel::indexForCard(SoundCardWidget* const card) const
+{
+    for (auto it = mIndexCards.constBegin();
+         it != mIndexCards.constEnd(); ++it) {
+        if (it.value() == card) { return it.key(); }
+    }
+    return -1;
 }
 
 void SoundBrowserPanel::updateVirtualGrid()
@@ -994,7 +1189,7 @@ void SoundBrowserPanel::deliverPeaks(const QString& path,
 
 void SoundBrowserPanel::playHovered()
 {
-    if (!mHoverCard || mPlaybackSuppressed) { return; }
+    if (!mHoverCard) { return; }
     if (mPlayingCard == mHoverCard) { return; }
     stopPreview();
     mPlayer->setSource(QUrl::fromLocalFile(mHoverCard->path()));
@@ -1022,15 +1217,188 @@ bool SoundBrowserPanel::isPreviewPlaying() const
            mPlayer->playbackState() == QMediaPlayer::PlayingState;
 }
 
+// ---------------------------------------------------------------
+// 键盘流翻听（Soundminer 式：翻到即听）
+// ---------------------------------------------------------------
+
+void SoundBrowserPanel::keyPressEvent(QKeyEvent* e)
+{
+    const int n = mShown.size();
+    switch (e->key()) {
+    case Qt::Key_Up:
+    case Qt::Key_Down:
+    case Qt::Key_Left:
+    case Qt::Key_Right:
+    case Qt::Key_Home:
+    case Qt::Key_End: {
+        if (n == 0) { break; }
+        int idx = mKeyIndex < 0 ? 0 : mKeyIndex;
+        switch (e->key()) {
+        case Qt::Key_Up: idx -= qMax(1, mCols); break;
+        case Qt::Key_Down: idx += qMax(1, mCols); break;
+        case Qt::Key_Left: idx -= 1; break;
+        case Qt::Key_Right: idx += 1; break;
+        case Qt::Key_Home: idx = 0; break;
+        case Qt::Key_End: idx = n - 1; break;
+        default: break;
+        }
+        // 钳界（Up/Left 越顶回首条之后保持 0；End 落末条）
+        idx = qBound(0, idx, n - 1);
+        // 翻到即听（Soundminer 肌肉记忆）：停止旧试听起新条目
+        setKeyIndex(idx, true);
+        return;
+    }
+    case Qt::Key_Space:
+        if (n > 0) {
+            if (mKeyIndex < 0) {
+                setKeyIndex(0, true);
+            } else if (auto card = mIndexCards.value(mKeyIndex)) {
+                togglePreview(card);
+            }
+            return;
+        }
+        break;
+    case Qt::Key_Return:
+    case Qt::Key_Enter:
+        if (n > 0 && mKeyIndex >= 0) {
+            setKeyIndex(mKeyIndex, false);
+            if (auto card = mIndexCards.value(mKeyIndex)) {
+                pushRecent(card->path());
+                emit monitorRequested(card->path());
+                return;
+            }
+        }
+        break;
+    default:
+        break;
+    }
+    QWidget::keyPressEvent(e);
+}
+
+void SoundBrowserPanel::setKeyIndex(const int index, const bool play)
+{
+    const int idx = qBound(-1, index, mShown.size() - 1);
+    if (idx < 0) { return; }
+    mKeyIndex = idx;
+    // 游标旧卡清态 + 新卡立卡（滚出视口的卡片按需重建）
+    for (auto it = mIndexCards.constBegin();
+         it != mIndexCards.constEnd(); ++it) {
+        if (it.value()) { it.value()->setKeySelected(it.key() == idx); }
+    }
+    ensureVisibleIndex(idx);
+    auto card = mIndexCards.value(idx);
+    if (!card) { updateVirtualGrid(); card = mIndexCards.value(idx); }
+    // 翻到即听（同条目再按方向键不重启播放）
+    if (card && play && mPlayingCard != card) { togglePreview(card); }
+}
+
+void SoundBrowserPanel::ensureVisibleIndex(const int index)
+{
+    if (!mGridScroll || mCols <= 0) { return; }
+    const int cardH = qRound(CARD_H * mCardScale);
+    const int pitchH = cardH + GRID_GAP;
+    const int row = index / mCols;
+    const int top = GRID_MARGIN + row * pitchH;
+    const int bottom = top + pitchH;
+    const auto bar = mGridScroll->verticalScrollBar();
+    if (top < bar->value()) {
+        bar->setValue(qMax(0, top - GRID_GAP));
+    } else if (bottom > bar->value() + mGridScroll->viewport()->height()) {
+        bar->setValue(bottom - mGridScroll->viewport()->height()
+                      + GRID_GAP);
+    }
+}
+
+// ---------------------------------------------------------------
+// 最近使用（装载监视器 / 拖出 = 使用事件源）
+// ---------------------------------------------------------------
+
+void SoundBrowserPanel::pushRecent(const QString& path)
+{
+    const bool wasEmpty = mRecent.isEmpty();
+    mRecent.removeAll(path);
+    mRecent.prepend(path);
+    static constexpr int kMaxRecent = 24;
+    while (mRecent.size() > kMaxRecent) { mRecent.removeLast(); }
+    AppSupport::setSettings(QStringLiteral("SoundBrowser"),
+                            QStringLiteral("recent"), mRecent);
+    // 首次使用后"最近使用"入口才该出现（否则要等下次 rescan）
+    if (wasEmpty) { rebuildCategoryPills(); }
+}
+
+// ---------------------------------------------------------------
+// 颜色标签（与收藏星标互补：收藏=好，颜色=用途/状态）
+// ---------------------------------------------------------------
+
+void SoundBrowserPanel::loadColorTags()
+{
+    const auto paths = AppSupport::getSettings(
+                QStringLiteral("SoundBrowser"),
+                QStringLiteral("colorTagPaths")).toStringList();
+    const auto tags = AppSupport::getSettings(
+                QStringLiteral("SoundBrowser"),
+                QStringLiteral("colorTagVals")).toStringList();
+    const int n = qMin(paths.size(), tags.size());
+    for (int i = 0; i < n; i++) {
+        const int t = tags.at(i).toInt();
+        if (t > 0) { mColorTags.insert(paths.at(i), t); }
+    }
+}
+
+void SoundBrowserPanel::saveColorTags()
+{
+    QStringList paths, tags;
+    for (auto it = mColorTags.constBegin();
+         it != mColorTags.constEnd(); ++it) {
+        paths.append(it.key());
+        tags.append(QString::number(it.value()));
+    }
+    AppSupport::setSettings(QStringLiteral("SoundBrowser"),
+                            QStringLiteral("colorTagPaths"), paths);
+    AppSupport::setSettings(QStringLiteral("SoundBrowser"),
+                            QStringLiteral("colorTagVals"), tags);
+}
+
+void SoundBrowserPanel::setColorTag(SoundCardWidget* card, const int tag)
+{
+    if (!card) { return; }
+    const QString path = card->path();
+    if (tag <= 0) { mColorTags.remove(path); }
+    else { mColorTags.insert(path, tag); }
+    saveColorTags();
+    card->setColorTag(tag);
+    rebuildCategoryPills();
+    if (mCategory.startsWith(kCatColorPrefix) &&
+        mColorTags.value(path) != mCategory.mid(7).toInt()) {
+        applyFilter();
+    }
+}
+
+// 文件重命名/移动后同步收藏/颜色/最近三表路径（防标失联）
+void SoundBrowserPanel::refileMeta(const QString& oldPath,
+                                   const QString& newPath)
+{
+    const int i = mFavorites.indexOf(oldPath);
+    if (i >= 0) { mFavorites[i] = newPath; saveFavorites(); }
+    const int t = mColorTags.value(oldPath, 0);
+    if (t > 0) {
+        mColorTags.remove(oldPath);
+        mColorTags.insert(newPath, t);
+        saveColorTags();
+    }
+    const int r = mRecent.indexOf(oldPath);
+    if (r >= 0) {
+        mRecent[r] = newPath;
+        AppSupport::setSettings(QStringLiteral("SoundBrowser"),
+                                QStringLiteral("recent"), mRecent);
+    }
+}
+
 void SoundBrowserPanel::togglePreview(SoundCardWidget* card)
 {
     if (!card) { return; }
     if (mPlayingCard == card) { stopPreview(); return; }
     stopPreview();
-    if (mPlaybackSuppressed) {
-        emit logMessage(QString::fromUtf8("工程播放中，暂停后可试听"));
-        return;
-    }
     mPlayer->setSource(QUrl::fromLocalFile(card->path()));
     mPlayer->play();
     mPlayingCard = card;
@@ -1065,16 +1433,7 @@ void SoundBrowserPanel::toggleFavorite(SoundCardWidget* card, const bool on)
         mFavorites.removeAll(path);
     }
     saveFavorites();
-    if (mCategory == QStringLiteral("\x01fav")) { applyFilter(); }
-}
-
-void SoundBrowserPanel::refileFavorite(const QString& oldPath,
-                                       const QString& newPath)
-{
-    const int i = mFavorites.indexOf(oldPath);
-    if (i < 0) { return; }
-    mFavorites[i] = newPath;
-    saveFavorites();
+    if (mCategory == kCatFav) { applyFilter(); }
 }
 
 // ---------------------------------------------------------------
@@ -1101,7 +1460,7 @@ void SoundBrowserPanel::renameCard(SoundCardWidget* card,
         emit logMessage(QString::fromUtf8("重命名失败"));
         return;
     }
-    refileFavorite(card->path(), newPath);
+    refileMeta(card->path(), newPath);
     emit logMessage(QString::fromUtf8("已重命名为 %1").arg(fileName));
     rescan();
 }
@@ -1120,7 +1479,7 @@ void SoundBrowserPanel::moveCardTo(SoundCardWidget* card, const QString& dir)
         emit logMessage(QString::fromUtf8("移动失败"));
         return;
     }
-    refileFavorite(card->path(), newPath);
+    refileMeta(card->path(), newPath);
     emit logMessage(QString::fromUtf8("已移动到分类「%1」")
                             .arg(QFileInfo(dir).fileName()));
     rescan();
@@ -1136,6 +1495,11 @@ void SoundBrowserPanel::trashCard(SoundCardWidget* card)
     }
     mFavorites.removeAll(path);
     saveFavorites();
+    mColorTags.remove(path);
+    saveColorTags();
+    mRecent.removeAll(path);
+    AppSupport::setSettings(QStringLiteral("SoundBrowser"),
+                            QStringLiteral("recent"), mRecent);
     emit logMessage(QString::fromUtf8("已移入回收站：%1")
                             .arg(QFileInfo(path).fileName()));
     rescan();
@@ -1154,6 +1518,30 @@ void SoundBrowserPanel::showCardMenu(SoundCardWidget* card,
     menu.addAction(QString::fromUtf8("打开所在文件夹"), this, [fi]() {
         QDesktopServices::openUrl(QUrl::fromLocalFile(fi.absolutePath()));
     });
+    // 颜色标记（BaseHead/Soundminer label 同款：与收藏互补，
+    // 收藏=好，颜色=用途/状态）
+    auto* const colors = menu.addMenu(QString::fromUtf8("颜色标记"));
+    const int curTag = mColorTags.value(path, 0);
+    const auto addTagAct = [&](const int tag, const QString& name) {
+        auto* act = colors->addAction(name, this, [this, card, tag]() {
+            setColorTag(card, tag);
+        });
+        act->setCheckable(true);
+        act->setChecked(curTag == tag);
+    };
+    addTagAct(0, QString::fromUtf8("无颜色"));
+    static const char* tagNames[] = {"", "红", "橙", "绿", "青", "紫"};
+    for (int t = 1; t <= 5; t++) {
+        QPixmap dot(12, 12);
+        dot.fill(Qt::transparent);
+        QPainter dp(&dot);
+        dp.setRenderHint(QPainter::Antialiasing);
+        dp.setPen(QPen(QColor(0, 0, 0, 140), 1));
+        dp.setBrush(tagColor(t));
+        dp.drawEllipse(1, 1, 10, 10);
+        addTagAct(t, QString::fromUtf8(tagNames[t]));
+        colors->actions().constLast()->setIcon(QIcon(dot));
+    }
     menu.addAction(QString::fromUtf8("重命名…"), this,
                    [this, card, fi]() {
         bool ok = false;
