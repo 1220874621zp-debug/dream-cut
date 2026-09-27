@@ -243,23 +243,45 @@ protected:
         if (e->button() != Qt::LeftButton) { return; }
         mPressPos = e->pos();
         mDragging = false;
-        // 铺开模式：按下即定位（可拖动刮擦，超过拖出阈值转拖拽）
+        // 铺开模式三手势：选区边=修剪，选区带=拖出入时间轴（松手
+        // 未拖=定位），选区外=刮擦定位
         if (mMon->mWaveSpread && mMon->mFrameCount > 0) {
-            const int frame = qBound(0, int(qreal(e->pos().x())
-                    / width() * mMon->mFrameCount), mMon->mFrameCount - 1);
+            const int x = e->pos().x();
+            const int frame = spreadFrameAt(x);
+            if (mMon->mZoneOut >= mMon->mZoneIn) {
+                const int ix = spreadXOf(mMon->mZoneIn);
+                const int ox = spreadXOf(mMon->mZoneOut);
+                if (qAbs(x - ix) <= 7) { mSpreadGrab = 1; return; }
+                if (qAbs(x - ox) <= 7) { mSpreadGrab = 2; return; }
+                if (frame >= mMon->mZoneIn && frame <= mMon->mZoneOut) {
+                    mSpreadGrab = 3; // 选区带：武装拖出，松手未拖=定位
+                    mSpreadDragged = false;
+                    return;
+                }
+            }
+            mSpreadGrab = 4;
             mMon->seekTo(frame);
+            return;
         }
     }
 
     void mouseMoveEvent(QMouseEvent *e) override {
         if (!(e->buttons() & Qt::LeftButton) || mDragging) { return; }
-        // 铺开模式：全程刮擦定位（不与拖出入时间轴抢手势——
-        // 拖拽走音效库卡片或关闭铺开后从预览画面拖）
-        if (mMon->mWaveSpread) {
-            if (mMon->mFrameCount > 0) {
-                const int frame = qBound(0, int(qreal(e->pos().x())
-                        / width() * mMon->mFrameCount),
-                        mMon->mFrameCount - 1);
+        // 铺开模式三手势续行
+        if (mMon->mWaveSpread && mMon->mFrameCount > 0) {
+            const int frame = spreadFrameAt(e->pos().x());
+            if (mSpreadGrab == 1) {
+                mMon->setZoneIn(frame);
+                if (e->modifiers() & Qt::ShiftModifier) { mMon->seekTo(frame); }
+            } else if (mSpreadGrab == 2) {
+                mMon->setZoneOut(frame);
+                if (e->modifiers() & Qt::ShiftModifier) { mMon->seekTo(frame); }
+            } else if (mSpreadGrab == 3) {
+                if ((e->pos() - mPressPos).manhattanLength() >= 12) {
+                    mSpreadDragged = true;
+                    startClipDrag();
+                }
+            } else if (mSpreadGrab == 4) {
                 mMon->seekTo(frame);
             }
             return;
@@ -268,9 +290,15 @@ protected:
         if ((e->pos() - mPressPos).manhattanLength() < 12) { return; }
         if (mMon->path().isEmpty()) { return; }
         mDragging = true;
+        startClipDrag();
+        mDragging = false;
+    }
+
+    // 拖出片段（预览画面与铺开选区带共用）：zone 未设 = 全片段；
+    // path/inout/iosec 分键携带，时间轴按文件类型分轨落块
+    void startClipDrag() {
         auto * const drag = new QDrag(this);
         auto * const mime = new QMimeData;
-        // zone 未设 = 全片段；path 与出入点分键携带
         const int in = mMon->hasZone() ? mMon->zoneIn() : 0;
         const int out = mMon->hasZone() ? mMon->zoneOut()
                                         : mMon->frameCount() - 1;
@@ -300,13 +328,44 @@ protected:
             drag->setPixmap(QPixmap::fromImage(
                                 mFrame.scaled(96, 54,
                                               Qt::KeepAspectRatio)));
+        } else {
+            // 铺开波形（无视频帧）：截当前视图为拖拽缩略图
+            const QPixmap pm = grab();
+            if (!pm.isNull()) {
+                drag->setPixmap(pm.scaled(96, 54, Qt::KeepAspectRatio,
+                                          Qt::SmoothTransformation));
+            }
         }
         drag->exec(Qt::CopyAction);
-        mDragging = false;
+    }
+
+    void mouseReleaseEvent(QMouseEvent *e) override {
+        // 铺开选区带：松手未拖 = 定位到点击帧（拖出则已被 QDrag 接管）
+        if (mSpreadGrab == 3 && !mSpreadDragged
+                && mMon->mWaveSpread && mMon->mFrameCount > 0
+                && e->button() == Qt::LeftButton) {
+            mMon->seekTo(spreadFrameAt(e->pos().x()));
+        }
+        mSpreadGrab = 0;
+        mSpreadDragged = false;
     }
 
 private:
     ClipMonitorWidget * const mMon;
+    // 铺开模式手势状态：0=无 1=拖选区边(入) 2=拖选区边(出)
+    // 3=选区带拖出武装 4=刮擦
+    int mSpreadGrab = 0;
+    bool mSpreadDragged = false;
+
+    int spreadFrameAt(const int x) const {
+        return qBound(0, int(qreal(x) / qMax(1, width())
+                                 * mMon->mFrameCount),
+                      mMon->mFrameCount - 1);
+    }
+    int spreadXOf(const int frame) const {
+        return qBound(0, int(qreal(frame) / mMon->mFrameCount * width()),
+                      width());
+    }
 public:
     QString mOverlayFile;
     QString mOverlayTc;
