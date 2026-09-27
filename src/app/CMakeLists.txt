@@ -268,6 +268,9 @@ set(
     GUI/soundbrowserpanel.cpp
     GUI/mixerpanel.cpp
     GUI/subtitlepanel.cpp
+    GUI/nletaskmanager.cpp
+    GUI/nletaskpanel.cpp
+    GUI/nleproxytask.cpp
     GUI/quickeffectsearchdialog.cpp
     GUI/scriptmanager.cpp
     GUI/scriptconsole.cpp
@@ -342,6 +345,9 @@ set(
     GUI/soundbrowserpanel.h
     GUI/mixerpanel.h
     GUI/subtitlepanel.h
+    GUI/nletaskmanager.h
+    GUI/nletaskpanel.h
+    GUI/nleproxytask.h
     GUI/quickeffectsearchdialog.h
     GUI/scriptmanager.h
     GUI/scriptconsole.h

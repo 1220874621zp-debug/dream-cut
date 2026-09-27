@@ -79,6 +79,7 @@
 #include <QFileDialog>
 #include "mixerpanel.h"
 #include "subtitlepanel.h"
+#include "nletaskpanel.h"
 #include <QShortcut>
 #include "textanimpresetpanel.h"
 #include "scriptmanager.h"
@@ -1582,6 +1583,9 @@ void MainWindow::rebuildWorkspaceMenu()
     if (mSubtitleDock) {
         panelsMenu->addAction(mSubtitleDock->toggleViewAction());
     }
+    if (mTaskDock) {
+        panelsMenu->addAction(mTaskDock->toggleViewAction());
+    }
     // the script console toggle lives in the Scripts menu only;
     // listing it here too showed the same entry twice
 
@@ -1919,6 +1923,12 @@ void MainWindow::setupLayout()
                              QStringLiteral("dockSubtitle"),
                              mSubtitlePanel);
 
+    // 任务面板：后台任务（代理转码/预渲染等）的进度与取消
+    mTaskPanel = new NleTaskPanel(this);
+    mTaskDock = makeDock(tr("任务"),
+                         QStringLiteral("dockTasks"),
+                         mTaskPanel);
+
     setCentralWidget(mStackWidget);
     addDockWidget(Qt::RightDockWidgetArea, mFillStrokeDock);
     addDockWidget(Qt::RightDockWidgetArea, mPropertiesDock);
@@ -1932,6 +1942,7 @@ void MainWindow::setupLayout()
     addDockWidget(Qt::RightDockWidgetArea, mSoundBrowserDock);
     addDockWidget(Qt::RightDockWidgetArea, mMixerDock);
     addDockWidget(Qt::RightDockWidgetArea, mSubtitleDock);
+    addDockWidget(Qt::RightDockWidgetArea, mTaskDock);
 
     // hidden by default, can be opened from the Panels menu
     mEasingDock->hide();
@@ -1939,6 +1950,7 @@ void MainWindow::setupLayout()
     mSoundBrowserDock->hide();
     mMixerDock->hide();
     mSubtitleDock->hide();
+    mTaskDock->hide();
 
 
     // window-level Space shortcut: playback toggles from any focus

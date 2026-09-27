@@ -40,6 +40,8 @@
 #include "Sound/eindependentsound.h"
 #include "Animators/qrealkey.h"
 #include "Animators/transformanimator.h"
+#include "GUI/nletaskmanager.h"
+#include "GUI/nleproxytask.h"
 #include <QFileInfo>
 
 static const int SNAP_PX = 8;
@@ -3271,6 +3273,44 @@ private:
     int mCurrent = -1;
 };
 
+// 代理剪辑：选中集的视频块逐个排队转码（同源去重；就绪的重判
+// 即刻可接管），完成后自动重判接线
+void NleTimelineView::generateProxies()
+{
+    int queued = 0;
+    int ready = 0;
+    QSet<QString> seen;
+    for (const auto& id : mModel->selection()) {
+        const auto cc = mModel->clip(id);
+        const auto vb = cc
+                ? enve_cast<VideoBox*>(cc->layer.data()) : nullptr;
+        if (!vb) { continue; }
+        const QString src = vb->getFilePath();
+        if (seen.contains(src)) { continue; }
+        seen.insert(src);
+        if (VideoBox::proxyFileReady(src)) {
+            vb->updateProxyWiring();
+            ready++;
+            continue;
+        }
+        const QPointer<VideoBox> boxPtr(vb);
+        const auto task = NleTaskPtr(new NleProxyTask(
+                    src, VideoBox::proxyPathFor(src)));
+        connect(task.data(), &NleTask::finished,
+                this, [boxPtr](const int state, const QString&) {
+            if (state == int(NleTask::State::Done) && boxPtr) {
+                boxPtr->updateProxyWiring();
+            }
+        });
+        NleTaskManager::instance()->submit(task);
+        queued++;
+    }
+    emit logMessage(queued > 0
+            ? QStringLiteral("已排队生成代理 %1 个（任务面板看进度）")
+              .arg(queued)
+            : QStringLiteral("选中块代理均已就绪 %1").arg(ready));
+}
+
 void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
 {
     // 转场块右键：替换类型 / 删除
@@ -3421,6 +3461,19 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
     QAction *splitHere = menu.addAction(tr("在此处分割"));
     QAction *freeze = menu.addAction(tr("从此处定格到块尾"));
     QAction *speed = menu.addAction(tr("变速…"));
+    // 代理剪辑：选中集里有视频块即给入口（kdenlive 同款）
+    QAction *proxy = nullptr;
+    bool anyVideo = false;
+    for (const auto id : mModel->selection()) {
+        const auto cc = mModel->clip(id);
+        if (cc && enve_cast<VideoBox*>(cc->layer.data())) {
+            anyVideo = true;
+            break;
+        }
+    }
+    if (anyVideo) {
+        proxy = menu.addAction(tr("生成代理（低清预览）"));
+    }
     // kdenlive detach-audio: only video-family clips with a live
     // embedded sound offer it
     const auto vidBox = enve_cast<VideoBox*>(c->layer.data());
@@ -3488,6 +3541,8 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
     } else if (act == disableAct) {
         mModel->requestSetDisabled(mModel->selection(),
                                    disableAct->isChecked());
+    } else if (proxy && act == proxy) {
+        generateProxies();
     } else if (act == speed) {
         bool ok = false;
         const double rate = QInputDialog::getDouble(

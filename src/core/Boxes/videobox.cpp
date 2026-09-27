@@ -43,6 +43,12 @@ extern "C" {
 #include "fileshandler.h"
 #include "typemenu.h"
 #include "appsupport.h"
+#include "Private/document.h"
+
+#include <QCryptographicHash>
+#include <QDir>
+#include <QFileInfo>
+#include <QStandardPaths>
 
 VideoFileHandler* videoFileHandlerGetter(const QString& path) {
     return FilesHandler::sInstance->getFileHandler<VideoFileHandler>(path);
@@ -58,7 +64,14 @@ VideoBox::VideoBox() : AnimationBox("Video", eBoxType::video),
                  },
                  [this](ConnContext& conn, VideoFileHandler* obj) {
                      fileHandlerConnector(conn, obj);
-                 }) {
+                 }),
+    mProxyHandler(this,
+                  [](const QString& path) {
+                      return videoFileHandlerGetter(path);
+                  },
+                  [this](VideoFileHandler* obj) {
+                      proxyAfterAssigned(obj);
+                  }) {
     const auto flar = getDurationRectangle()->ref<FixedLenAnimationRect>();
     mSound = enve::make_shared<eVideoSound>(flar);
     ca_addChild(mSound);
@@ -69,6 +82,15 @@ VideoBox::VideoBox() : AnimationBox("Video", eBoxType::video),
             mSound.get(), &eBoxOrSound::setParentGroup);
     connect(this, &eBoxOrSound::parentChanged,
             this, &VideoBox::setCorrectFps);
+    // 代理接管判定的两个触发源：场景分辨率（播放↔静止）与换父
+    connect(this, &eBoxOrSound::parentChanged, this, [this]() {
+        const auto scene = getParentScene();
+        if (!scene) { return; }
+        connect(scene, &Canvas::resolutionChanged,
+                this, &VideoBox::updateProxyWiring,
+                Qt::UniqueConnection);
+        updateProxyWiring();
+    });
 }
 
 void VideoBox::fileHandlerConnector(ConnContext &conn, VideoFileHandler *obj) {
@@ -127,7 +149,103 @@ void VideoBox::setCorrectFps()
     dataHandler->setFrameCount(vframeHandler->videoStreamFrameCount() * newmod);
     vframeHandler->setVideoStreamFrameCount(vframeHandler->videoStreamFrameCount() * newmod);
 
-    setAnimationFramesHandler(vframeHandler);
+    // fps 校正照做（原件 handler 状态），但代理激活时接线归代理
+    if (!mProxyActive) {
+        setAnimationFramesHandler(vframeHandler);
+    }
+    animationDataChanged();
+}
+
+// ---- 代理剪辑 ----
+
+QString VideoBox::proxyPathFor(const QString& srcPath)
+{
+    const QString key = QString::fromLatin1(
+                QCryptographicHash::hash(
+                    QFileInfo(srcPath).absoluteFilePath().toUtf8(),
+                    QCryptographicHash::Sha1).toHex().left(16));
+    return QStandardPaths::writableLocation(
+                QStandardPaths::CacheLocation)
+            + QStringLiteral("/proxies/%1_p540.mp4").arg(key);
+}
+
+bool VideoBox::proxyFileReady(const QString& srcPath)
+{
+    const QFileInfo src(srcPath);
+    const QFileInfo proxy(proxyPathFor(srcPath));
+    return src.exists() && proxy.exists() &&
+            proxy.lastModified() >= src.lastModified();
+}
+
+bool VideoBox::proxyPreviewEnabled()
+{
+    return AppSupport::getSettings(QStringLiteral("nle"),
+                                   QStringLiteral("proxyPreview"),
+                                   false).toBool();
+}
+
+void VideoBox::setProxyPreviewEnabled(const bool on)
+{
+    AppSupport::setSettings(QStringLiteral("nle"),
+                            QStringLiteral("proxyPreview"), on);
+    // 广播重判：全部场景的全部 VideoBox（NLE 不变量=块是场景直接
+    // 子层，一层遍历即可）
+    if (!Document::sInstance) { return; }
+    for (const auto& scene : Document::sInstance->fScenes) {
+        if (!scene) { continue; }
+        for (const auto& box : scene->getContained()) {
+            const auto vb = enve_cast<VideoBox*>(box.data());
+            if (vb) { vb->updateProxyWiring(); }
+        }
+    }
+}
+
+void VideoBox::updateProxyWiring()
+{
+    const auto scene = getParentScene();
+    const bool lowRes = scene && scene->getResolution() < 0.999;
+    const bool want = proxyPreviewEnabled() && lowRes &&
+            proxyFileReady(mFileHandler.path());
+    if (want == mProxyActive) { return; }
+    if (want) {
+        mProxyActive = true;  // 先置位：assign 回调按它分流
+        mProxyHandler.assign(proxyPathFor(mFileHandler.path()));
+    } else {
+        mProxyActive = false;
+        mProxyHandler.assign(QString());  // null → 回原件
+    }
+}
+
+void VideoBox::proxyAfterAssigned(VideoFileHandler* obj)
+{
+    if (!mProxyActive || !obj) {
+        // 去激活/代理缺失：原件重新接管（声音从未离开原件）
+        fileHandlerAfterAssigned(mFileHandler.data());
+        return;
+    }
+    const auto dataHandler = obj->getFrameHandler();
+    if (!dataHandler) {
+        mProxyActive = false;
+        fileHandlerAfterAssigned(mFileHandler.data());
+        return;
+    }
+    const auto frameHandler = enve::make_shared<VideoFrameHandler>(
+                dataHandler);
+    // fps 校正同原件数学（setCorrectFps）：代理与原件流 fps 相同
+    // → 校正后帧数一致，durRect 窗口映射不变
+    const auto pScene = getParentScene();
+    if (pScene) {
+        const qreal newmod = pScene->getFps() / dataHandler->getFps();
+        dataHandler->setFps(dataHandler->getFps() * newmod);
+        frameHandler->setVideoStreamFps(dataHandler->getFps());
+        dataHandler->setFrameCount(
+                    frameHandler->videoStreamFrameCount() * newmod);
+        frameHandler->setVideoStreamFrameCount(
+                    frameHandler->videoStreamFrameCount() * newmod);
+    }
+    setAnimationFramesHandler(frameHandler);
+    getAnimationDurationRect()->setRasterCacheHandler(
+                &dataHandler->getCacheHandler());
     animationDataChanged();
 }
 

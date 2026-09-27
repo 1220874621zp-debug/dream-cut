@@ -126,6 +126,8 @@ public:
     void jklAutotestStage();
     // 无头台架（env DREAMCUT_SUBTITLE_AUTOTEST）
     void subtitleAutotestStage();
+    // 无头台架（env DREAMCUT_PROXY_AUTOTEST）
+    void proxyAutotestStage();
 
 private:
     void setLoop(const bool loop);
@@ -207,6 +209,7 @@ private:
     QAction *mNleUndoAct = nullptr;
     QAction *mNleRedoAct = nullptr;
     QAction *mMagneticAct = nullptr;
+    QAction *mProxyAct = nullptr;
     QAction *mFollowAct = nullptr;
     QAction *mNleZoomFitAct = nullptr;
 

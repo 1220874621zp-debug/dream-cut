@@ -646,6 +646,10 @@ protected:
     void handleLeftButtonMousePress(const eMouseEvent &e);
 
 signals:
+    // 播放/预览分辨率切换（DirectPlayer 起/停）：VideoBox 代理
+    // 接管重判的触发源
+    void resolutionChanged(qreal percent);
+
     void requestUpdate();
     void newFrameRange(FrameRange);
     void currentBoxChanged(BoundingBox*);

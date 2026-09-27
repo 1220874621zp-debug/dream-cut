@@ -173,6 +173,7 @@ void Canvas::setResolution(const qreal percent)
 {
     if (isZero6Dec(mResolution - percent)) { return; }
     mResolution = percent;
+    emit resolutionChanged(percent);
 #ifdef Q_OS_MAC
     invalidateSceneFramesCache();
 #endif

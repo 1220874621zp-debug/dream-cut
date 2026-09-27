@@ -224,6 +224,8 @@ private:
     // clip context menu)
     void razorCutAt(const QPoint &pos, const int clipId,
                     const bool allTracks);
+    // 代理剪辑：选中集视频块排队转码（右键菜单入口）
+    void generateProxies();
     void trackSelectAt(const QPoint &pos, const int clipId,
                        const bool backward);
     void pruneMediaCaches();

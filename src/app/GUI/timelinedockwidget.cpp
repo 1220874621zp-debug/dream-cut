@@ -50,6 +50,9 @@
 #include <functional>
 
 #include "Private/document.h"
+#include "Boxes/videobox.h"
+#include "GUI/nletaskmanager.h"
+#include "GUI/nleproxytask.h"
 #include "Private/esettings.h"
 #include "GUI/global.h"
 #include "GUI/BoxesList/boxscrollwidget.h"
@@ -718,6 +721,21 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
         });
     }
 
+    // 无头台架：DREAMCUT_PROXY_AUTOTEST=1 ——真转码+代理接管翻转
+    // 断言（[AUTOTESTPROXY] 落日志）
+    if (qEnvironmentVariableIsSet("DREAMCUT_PROXY_AUTOTEST")) {
+        QTimer::singleShot(2500, this, [this]() {
+            if (!Document::sInstance->fActiveScene) {
+                mDocument.createNewScene();
+                QTimer::singleShot(600, this, [this]() {
+                    proxyAutotestStage();
+                });
+                return;
+            }
+            proxyAutotestStage();
+        });
+    }
+
     // 无头台架：DREAMCUT_SUBTITLE_AUTOTEST=1 ——SRT 写盘→导入→
     // 轨/块结构断言→导出→内容断言（[AUTOTESTSUB] 落日志）
     if (qEnvironmentVariableIsSet("DREAMCUT_SUBTITLE_AUTOTEST")) {
@@ -1133,6 +1151,19 @@ void TimelineDockWidget::setupNleActions()
     });
     insertAct(mMagneticAct);
     mMainWindow->cmdAddAction(mMagneticAct);
+
+    // 代理预览总开关（kdenlive 式）：低分辨率上下文（播放/预览）
+    // 用低清代理解码，静止/快照/导出恒原件；块级代理经右键生成
+    mProxyAct = new QAction(tr("代理"), this);
+    mProxyAct->setCheckable(true);
+    mProxyAct->setChecked(VideoBox::proxyPreviewEnabled());
+    mProxyAct->setToolTip(
+                tr("代理预览：低清预览时代理解码（右键视频块先生成代理）"));
+    connect(mProxyAct, &QAction::toggled, this, [this](const bool on) {
+        VideoBox::setProxyPreviewEnabled(on);
+    });
+    insertAct(mProxyAct);
+    mMainWindow->cmdAddAction(mProxyAct);
 
     // 轨道联动开关（CapCut 覆盖跟随）：覆盖轨的块跟随主轨块的
     // 移动/删除位移；关闭后覆盖块原地不动（默认开=既有行为）
@@ -1863,4 +1894,121 @@ void TimelineDockWidget::setupPropertyShortcuts()
     makeShortcut("showOpacity",  [this]() { showTransformProperty(4); });
     makeShortcut("showAnimated", [this]() { showAnimatedProperties(); });
 
+}
+
+void TimelineDockWidget::proxyAutotestStage()
+{
+    if (!mNleModel) {
+        qInfo("[AUTOTESTPROXY] ABORT no model");
+        return;
+    }
+    const auto scene = mDocument.fActiveScene.data();
+    if (!scene) {
+        qInfo("[AUTOTESTPROXY] ABORT no scene");
+        return;
+    }
+    const QString mp4 = QStringLiteral("/tmp/dcproxy_%1.mp4").arg(
+                QCoreApplication::applicationPid());
+    QProcess::execute(QStringLiteral("ffmpeg"), {
+        QStringLiteral("-y"),
+        QStringLiteral("-f"), QStringLiteral("lavfi"),
+        QStringLiteral("-i"), QStringLiteral(
+                    "testsrc2=duration=4:size=320x180:rate=24"),
+        QStringLiteral("-f"), QStringLiteral("lavfi"),
+        QStringLiteral("-i"), QStringLiteral(
+                    "sine=frequency=440:duration=4"),
+        QStringLiteral("-c:v"), QStringLiteral("libx264"),
+        QStringLiteral("-preset"), QStringLiteral("ultrafast"),
+        QStringLiteral("-pix_fmt"), QStringLiteral("yuv420p"),
+        QStringLiteral("-c:a"), QStringLiteral("aac"), mp4 });
+    if (!QFile::exists(mp4)) {
+        qInfo("[AUTOTESTPROXY] ABORT mp4 gen failed");
+        return;
+    }
+    // 视频块直挂场景（代理接线依赖 parentChanged 已连接）
+    const auto vb = enve::make_shared<VideoBox>();
+    vb->setFilePath(mp4);
+    {
+        const auto dur = enve::make_shared<FixedLenAnimationRect>(*vb);
+        dur->setMinAbsFrame(0);
+        dur->setMaxAbsFrame(95);
+        vb->setDurationRectangle(dur);
+    }
+    scene->addContained(vb);
+    const QPointer<VideoBox> box(vb.get());
+    const QPointer<Canvas> scenePtr(scene);
+    const QString srcPath = vb->getFilePath();
+    const QString dst = VideoBox::proxyPathFor(srcPath);
+    QFile::remove(dst);
+    qInfo("[AUTOTESTPROXY] src=%s readyBefore=%d",
+          qUtf8Printable(srcPath),
+          int(VideoBox::proxyFileReady(srcPath)));
+    const auto task = NleTaskPtr(new NleProxyTask(srcPath, dst));
+    const auto lastProgress = std::make_shared<qreal>(-2.);
+    connect(task.data(), &NleTask::progressChanged, this,
+            [task, lastProgress]() {
+        *lastProgress = qMax(*lastProgress, task->progress());
+    });
+    NleTaskManager::instance()->submit(task);
+    // 轮询任务终态（500ms × 40）
+    struct PollCtx {
+        NleTaskPtr task;
+        QPointer<VideoBox> box;
+        QPointer<Canvas> scene;
+        QString mp4, dst, srcPath;
+        std::shared_ptr<qreal> progress;
+    };
+    const auto ctx = std::make_shared<PollCtx>(PollCtx{
+            task, box, scenePtr, mp4, dst, srcPath, lastProgress});
+    const auto poll = std::make_shared<
+                std::function<void(const int)>>();
+    *poll = [this, poll, ctx](const int tries) -> void {
+        const auto st = ctx->task->state();
+        if (st == NleTask::State::Queued ||
+                st == NleTask::State::Running) {
+            if (tries > 40) {
+                qInfo("[AUTOTESTPROXY] ABORT task timeout");
+                return;
+            }
+            QTimer::singleShot(500, this,
+                               [poll, tries]() { (*poll)(tries + 1); });
+            return;
+        }
+        const bool exists = QFile::exists(ctx->dst);
+        const bool ready = VideoBox::proxyFileReady(ctx->srcPath);
+        qInfo("[AUTOTESTPROXY] taskState=%d exists=%d ready=%d "
+              "progress=%0.2f",
+              int(st), int(exists), int(ready),
+              double(*ctx->progress));
+        const auto cleanup = [ctx]() {
+            QFile::remove(ctx->mp4);
+            QFile::remove(ctx->dst);
+        };
+        if (st != NleTask::State::Done || !ctx->box) {
+            cleanup();
+            qInfo("[AUTOTESTPROXY] DONE(degraded)");
+            return;
+        }
+        VideoBox::setProxyPreviewEnabled(true);
+        if (ctx->scene) { ctx->scene->setResolution(0.5); }
+        QTimer::singleShot(300, this, [this, ctx, cleanup]() {
+            const bool activeLow = ctx->box && ctx->box->proxyActive();
+            const QString pathNow = ctx->box
+                    ? ctx->box->getFilePath() : QString();
+            if (ctx->scene) { ctx->scene->setResolution(1.); }
+            QTimer::singleShot(300, this,
+                               [this, ctx, cleanup, activeLow, pathNow]() {
+                const bool activeFull =
+                        ctx->box && ctx->box->proxyActive();
+                VideoBox::setProxyPreviewEnabled(false);
+                cleanup();
+                qInfo("[AUTOTESTPROXY] activeLowRes=%d activeFullRes=%d "
+                      "pathUnchanged=%d",
+                      int(activeLow), int(activeFull),
+                      int(pathNow == ctx->srcPath));
+                qInfo("[AUTOTESTPROXY] DONE");
+            });
+        });
+    };
+    (*poll)(0);
 }

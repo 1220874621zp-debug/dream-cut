@@ -302,6 +302,8 @@ private:
     class MixerPanel *mMixerPanel = nullptr;
     QDockWidget *mSubtitleDock = nullptr;
     class SubtitlePanel *mSubtitlePanel = nullptr;
+    QDockWidget *mTaskDock = nullptr;
+    class NleTaskPanel *mTaskPanel = nullptr;
     QuickEffectSearchDialog *mQuickEffectSearch = nullptr;
     // JS plugin system (Scripts menu + console dock)
     ScriptManager *mScriptManager = nullptr;
