@@ -741,13 +741,10 @@ SoundCardWidget* SoundBrowserPanel::createCard(const int index)
     });
     connect(card, &SoundCardWidget::favoriteToggled, this,
             &SoundBrowserPanel::toggleFavorite);
-    // 单击/双击 = 装载到片段监视器（kdenlive 同语义：预览窗口
-    // I/O 精确选段后拖入时间轴）；右键 = 音效管理菜单
+    // 单击 = 装载到片段监视器（kdenlive 同语义：预览窗口 I/O
+    // 精确选段后拖入时间轴）；双击不再重复发装载（单击已装载，
+    // 双击二次触发会造成媒体重载/波形重启抖动）；右键 = 音效管理
     connect(card, &SoundCardWidget::clicked, this, [this](
-                SoundCardWidget* c) {
-        emit monitorRequested(c->path());
-    });
-    connect(card, &SoundCardWidget::doubleClicked, this, [this](
                 SoundCardWidget* c) {
         emit monitorRequested(c->path());
     });

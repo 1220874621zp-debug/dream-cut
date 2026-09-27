@@ -632,6 +632,7 @@ ClipMonitorWidget::ClipMonitorWidget(QWidget *parent) : QWidget(parent) {
     connect(mPlayer, &QMediaPlayer::mediaStatusChanged, this,
             [this](const QMediaPlayer::MediaStatus status) {
         if (status != QMediaPlayer::LoadedMedia) { return; }
+        mLoadInFlight = false;
         mDurationMs = mPlayer->duration();
         const auto rate = mPlayer->metaData().value(
                     QMediaMetaData::VideoFrameRate);
@@ -677,6 +678,7 @@ ClipMonitorWidget::ClipMonitorWidget(QWidget *parent) : QWidget(parent) {
     });
     connect(mPlayer, &QMediaPlayer::errorOccurred, this,
             [this](const QMediaPlayer::Error, const QString &msg) {
+        mLoadInFlight = false;
         emit logMessage(QStringLiteral("监视器加载失败：%1").arg(msg));
     });
 
@@ -831,6 +833,10 @@ void ClipMonitorWidget::loadFile(const QString &path) {
     // 同素材重装（双击再导入/再点项目面板条目）：保住用户出入点，
     // kdenlive 的 zone 也是 per-clip 持久不随装载清
     if (path == mPath && mFrameCount > 0) { return; }
+    // 同路径装载中再请求 = 无操作（音效库双击/连点会连发装载，
+    // 重启媒体加载与波形解码纯属抖动）
+    if (path == mPath && mLoadInFlight) { return; }
+    mLoadInFlight = true;
     mPath = path;
     mZoneResetPending = true;
     mZoneIn = 0;

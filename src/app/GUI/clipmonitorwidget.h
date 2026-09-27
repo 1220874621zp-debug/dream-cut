@@ -94,6 +94,9 @@ private:
     int mWavePending = 0;
     qsptr<SoundDataHandler> mWaveDh;
     stdsptr<SoundHandler> mWaveSh;
+    // 装载防重入：同路径装载中再请求 = 无操作（双击/连点不发
+    // 重载，媒体与波形不重启）
+    bool mLoadInFlight = false;
 
     QLabel *mTimeLabel = nullptr;
     QLabel *mFileLabel = nullptr;
