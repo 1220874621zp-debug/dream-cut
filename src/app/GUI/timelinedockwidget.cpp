@@ -702,6 +702,69 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
             fadeAutotestStage();
         });
     }
+
+    // 无头台架：DREAMCUT_JKL_AUTOTEST=1 ——L 起播→L 加速→J 反向→
+    // K 停，逐段断言速率与帧走向（[AUTOTESTJKL] 落日志）
+    if (qEnvironmentVariableIsSet("DREAMCUT_JKL_AUTOTEST")) {
+        QTimer::singleShot(2500, this, [this]() {
+            if (!Document::sInstance->fActiveScene) {
+                mDocument.createNewScene();
+                QTimer::singleShot(600, this, [this]() {
+                    jklAutotestStage();
+                });
+                return;
+            }
+            jklAutotestStage();
+        });
+    }
+}
+
+void TimelineDockWidget::jklAutotestStage()
+{
+    if (!mDirectPlayer) {
+        qInfo("[AUTOTESTJKL] ABORT no player");
+        return;
+    }
+    const auto scene = mDocument.fActiveScene.data();
+    if (!scene) {
+        qInfo("[AUTOTESTJKL] ABORT no scene");
+        return;
+    }
+    // 播放头放中段，倒放有空间
+    scene->anim_setAbsFrame(100);
+    const auto key = [this](const int k, const int m = Qt::NoModifier) {
+        QKeyEvent ev(QEvent::KeyPress, k,
+                     static_cast<Qt::KeyboardModifiers>(m));
+        processKeyPress(&ev);
+    };
+    key(Qt::Key_L);
+    qInfo("[AUTOTESTJKL] L playing=%d rate=%0.1f",
+          int(mDirectPlayer->playing()),
+          double(mDirectPlayer->rate()));
+    QTimer::singleShot(800, this, [this, key]() {
+        const auto sc = mDocument.fActiveScene.data();
+        const int f1 = sc ? sc->anim_getCurrentAbsFrame() : -1;
+        key(Qt::Key_L);
+        qInfo("[AUTOTESTJKL] frameAfter800ms=%d rate2=%0.1f",
+              f1, double(mDirectPlayer->rate()));
+        QTimer::singleShot(800, this, [this, key, f1]() {
+            const auto sc = mDocument.fActiveScene.data();
+            const int f2 = sc ? sc->anim_getCurrentAbsFrame() : -1;
+            key(Qt::Key_J);
+            qInfo("[AUTOTESTJKL] frameAfter2x=%d (>%d) rateJ=%0.1f",
+                  f2, f1, double(mDirectPlayer->rate()));
+            QTimer::singleShot(800, this, [this, key, f2]() {
+                const auto sc = mDocument.fActiveScene.data();
+                const int f3 = sc ? sc->anim_getCurrentAbsFrame() : -1;
+                key(Qt::Key_K);
+                qInfo("[AUTOTESTJKL] frameAfterReverse=%d (<%d) "
+                      "playingAfterK=%d rateAfterK=%0.1f",
+                      f3, f2, int(mDirectPlayer->playing()),
+                      double(mDirectPlayer->rate()));
+                qInfo("[AUTOTESTJKL] DONE");
+            });
+        });
+    });
 }
 
 void TimelineDockWidget::fadeAutotestStage()
@@ -1171,6 +1234,25 @@ int TimelineDockWidget::nlePlayheadFrame() const
     return mNleView ? mNleView->playheadFrame() : 0;
 }
 
+// JKL 梭动步进：同向连按翻倍（封顶 8x），跨向保持当前 |速率|，
+// 停止态首按 = 1x（kdenlive 梭动语义）
+void TimelineDockWidget::shuttleStep(const int dir)
+{
+    if (!mDirectPlayer) { return; }
+    qreal mag = 1.;
+    if (mDirectPlayer->playing()) {
+        const qreal cur = mDirectPlayer->rate();
+        const bool sameDir = (dir > 0) == (cur > 0);
+        mag = sameDir ? qMin(qAbs(cur) * 2., 8.) : qAbs(cur);
+    }
+    mDirectPlayer->shuttle(dir * mag);
+    mMainWindow->statusBar()->showMessage(
+                tr("JKL：%1 %2x").arg(
+                    dir > 0 ? tr("正放") : tr("倒放"))
+                    .arg(QString::number(mag, 'f', mag == qRound(mag) ? 0 : 1)),
+                3000);
+}
+
 void TimelineDockWidget::spaceToggle()
 {
     const auto state = RenderHandler::sInstance->currentPreviewState();
@@ -1247,7 +1329,23 @@ bool TimelineDockWidget::processKeyPress(QKeyEvent *event)
         // keep both Space paths (window shortcut and timeline keys)
         // on the exact same behavior
         spaceToggle();
-    } else if (key == Qt::Key_K && mods == Qt::NoModifier) { // split clip
+    } else if (key == Qt::Key_K && mods == Qt::NoModifier) {
+        // JKL 梭动：K = 停（kdenlive/CapCut 语义）；分割改 Ctrl+K/C
+        if (mDirectPlayer && mDirectPlayer->playing()) {
+            mDirectPlayer->shuttle(0.);
+            mMainWindow->statusBar()->showMessage(tr("JKL：暂停"), 3000);
+        }
+        return true;
+    } else if (key == Qt::Key_J && mods == Qt::NoModifier) {
+        // JKL 梭动：J = 倒放（连按加速）
+        shuttleStep(-1);
+        return true;
+    } else if (key == Qt::Key_L && mods == Qt::NoModifier) {
+        // JKL 梭动：L = 快进（连按加速）
+        shuttleStep(1);
+        return true;
+    } else if ((key == Qt::Key_K && mods == Qt::ControlModifier) ||
+               (key == Qt::Key_C && mods == Qt::NoModifier)) { // split clip
         splitClip();
     } else if (key == Qt::Key_M) { // set marker
         setMarker();

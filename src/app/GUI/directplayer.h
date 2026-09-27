@@ -42,12 +42,18 @@ public:
                  QObject * const parent = nullptr);
 
     bool playing() const { return mPlaying; }
+    // JKL 梭动当前速率（正=正放 负=倒放；停止恢复 1）
+    qreal rate() const { return mRate; }
 
 public slots:
     // start from the scene's current frame (in/out points honored);
     // returns false when playback cannot start (no scene / empty range)
     bool play();
     void stop();
+    // JKL 梭动：设速率换基继续（|rate|<0.01 = 停）；非播放态先起播。
+    // 非整 1x 或倒放时音频静音（SoundComposition 只有 1x 正向流），
+    // 回到 1x 正放从当前帧重启音频
+    void shuttle(const qreal rate);
 
     void setLoop(const bool loop) { mLoop = loop; }
     // preview resolution clamp used while playing (scene value restored)
@@ -58,6 +64,7 @@ signals:
     void finished();
     // per-frame notification for timeline playheads (abs frame)
     void frameChanged(const int frame);
+    void rateChanged(const qreal rate);
 
 private:
     void tick();
@@ -75,6 +82,7 @@ private:
     int mLastSetFrame = -1;
     qreal mSavedResolution = 1.;
     qreal mPlayRes = 0.5;
+    qreal mRate = 1.;   // JKL 梭动速率（play()/stop() 归 1）
     bool mLoop = false;
     bool mPlaying = false;
 };

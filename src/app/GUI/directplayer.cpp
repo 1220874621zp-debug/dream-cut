@@ -82,6 +82,7 @@ bool DirectPlayer::play()
 
     mStartFrame = startFrame;
     mLastSetFrame = startFrame;
+    mRate = 1.;
     mClock.start();
     mPlaying = true;
     mTimer.setInterval(qMax(5, int(1000. / fps)));
@@ -91,10 +92,37 @@ bool DirectPlayer::play()
     return true;
 }
 
+void DirectPlayer::shuttle(const qreal rate)
+{
+    if (qAbs(rate) < 0.01) { stop(); return; }
+    if (!mPlaying) {
+        if (!play()) { return; }
+    }
+    // 换基：从当前显示帧按新速率重新计时（mLastSetFrame 是真当前帧）
+    mStartFrame = mLastSetFrame;
+    mClock.restart();
+    mRate = rate;
+    // 声音只在 1x 正放：变率/倒放静音（混音流无变速能力），回到
+    // 1x 正放从当前帧重启
+    const auto scene = mDocument.fActiveScene.data();
+    const auto comp = scene ? scene->getSoundComposition() : nullptr;
+    if (comp) {
+        if (qAbs(mRate - 1.) < 0.01) {
+            comp->start(mLastSetFrame);
+            scheduleSeconds(comp, mLastSetFrame,
+                            int(2 * scene->getFps()));
+        } else {
+            comp->stop();
+        }
+    }
+    emit rateChanged(mRate);
+}
+
 void DirectPlayer::stop()
 {
     if (!mPlaying) { return; }
     mPlaying = false;
+    mRate = 1.;
     mTimer.stop();
     mAudioTimer.stop();
     const auto scene = mDocument.fActiveScene.data();
@@ -128,11 +156,21 @@ void DirectPlayer::tick()
     if (fps <= 0.) { stop(); return; }
 
     const qreal elapsed = mClock.elapsed() / 1000.;
-    const qreal targetF = mStartFrame + elapsed * fps;
+    const qreal targetF = mStartFrame + elapsed * fps * mRate;
     const auto fIn = scene->getFrameIn();
     const auto fOut = scene->getFrameOut();
     const int minFrame = fIn.enabled ? fIn.frame : scene->getMinFrame();
     const int maxFrame = fOut.enabled ? fOut.frame : scene->getMaxFrame();
+
+    // 倒放到头：停在入点（K 停的同款全停语义）
+    if (mRate < 0 && targetF <= minFrame) {
+        mLastSetFrame = minFrame;
+        scene->anim_setAbsFrame(minFrame);
+        if (Document::sInstance) { Document::sInstance->actionFinished(); }
+        emit frameChanged(minFrame);
+        stop();
+        return;
+    }
 
     if (targetF > maxFrame) {
         if (mLoop) {

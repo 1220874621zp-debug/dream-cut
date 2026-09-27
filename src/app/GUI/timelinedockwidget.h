@@ -118,6 +118,10 @@ public:
 
     // 无头台架（env DREAMCUT_FADE_AUTOTEST）
     void fadeAutotestStage();
+    // JKL 梭动步进（J/L 键）
+    void shuttleStep(const int dir);
+    // 无头台架（env DREAMCUT_JKL_AUTOTEST）
+    void jklAutotestStage();
 
 private:
     void setLoop(const bool loop);
