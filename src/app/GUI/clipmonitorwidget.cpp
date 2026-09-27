@@ -139,6 +139,54 @@ public:
 protected:
     void paintEvent(QPaintEvent *) override {
         QPainter p(this);
+        // 铺开模式：主区域整幅音频波形（纯音频自动开/按钮切换），
+        // 已播段亮白、未播淡蓝，zone 半透明带 + 播放头；点击定位
+        // /拖动刮擦，拖出阈值后仍可拖入时间轴
+        if (mMon->mWaveSpread && mMon->mWaveFilled > 0
+                && mMon->mWaveTotalSecs > 0 && mMon->mFrameCount > 0
+                && mMon->mFps > 0.) {
+            p.fillRect(rect(), QColor(0x0c, 0x0c, 0x0e));
+            const qreal fps = mMon->mFps;
+            const int midY = height() / 2;
+            const int halfH = qMax(12, height() / 2 - 18);
+            const qreal fPerPx = qreal(mMon->mFrameCount) / width();
+            int prevX = -1;
+            for (int x = 0; x < width(); x++) {
+                const int frame = int(x * fPerPx);
+                const int col = qBound(0,
+                        int(frame / fps * kWaveColsPerSec),
+                        int(mMon->mWaveCols.size()) - 1);
+                const qreal v = mMon->mWaveCols.at(size_t(col));
+                if (x == prevX || v < 0.) { continue; }
+                prevX = x;
+                const bool played = frame <= mMon->mCurrentFrame;
+                p.setPen(QPen(played ? QColor(0xff, 0xff, 0xff, 235)
+                                     : QColor(0x7f, 0xa8, 0xd0, 210),
+                              1));
+                p.drawLine(x, midY - int(v * halfH),
+                           x, midY + int(v * halfH));
+            }
+            if (mMon->mZoneOut >= mMon->mZoneIn) {
+                const int zx = int(qreal(mMon->mZoneIn)
+                                           / mMon->mFrameCount * width());
+                const int zo = int(qreal(mMon->mZoneOut)
+                                           / mMon->mFrameCount * width());
+                p.fillRect(QRect(zx, 0, qMax(2, zo - zx), height()),
+                           QColor(0x4b, 0x69, 0x8c, 60));
+                p.setPen(QPen(QColor(0xd0, 0xd0, 0xd4, 160), 1));
+                p.drawLine(zx, 0, zx, height());
+                p.drawLine(zo, 0, zo, height());
+            }
+            const int cx = int(qreal(mMon->mCurrentFrame)
+                                   / mMon->mFrameCount * width());
+            p.setPen(QPen(QColor(0xe8, 0x4c, 0x4c), 1));
+            p.drawLine(cx, 0, cx, height());
+            p.setPen(QColor(0x6e, 0x6e, 0x74));
+            p.drawText(rect().adjusted(6, 4, -6, -4),
+                       Qt::AlignLeft | Qt::AlignTop,
+                       mMon->mPath.section('/', -1));
+            return;
+        }
         p.fillRect(rect(), QColor(0x0c, 0x0c, 0x0e));
         if (mFrame.isNull()) {
             if (!mEmptyText.isEmpty()) {
@@ -195,10 +243,27 @@ protected:
         if (e->button() != Qt::LeftButton) { return; }
         mPressPos = e->pos();
         mDragging = false;
+        // 铺开模式：按下即定位（可拖动刮擦，超过拖出阈值转拖拽）
+        if (mMon->mWaveSpread && mMon->mFrameCount > 0) {
+            const int frame = qBound(0, int(qreal(e->pos().x())
+                    / width() * mMon->mFrameCount), mMon->mFrameCount - 1);
+            mMon->seekTo(frame);
+        }
     }
 
     void mouseMoveEvent(QMouseEvent *e) override {
         if (!(e->buttons() & Qt::LeftButton) || mDragging) { return; }
+        // 铺开模式：全程刮擦定位（不与拖出入时间轴抢手势——
+        // 拖拽走音效库卡片或关闭铺开后从预览画面拖）
+        if (mMon->mWaveSpread) {
+            if (mMon->mFrameCount > 0) {
+                const int frame = qBound(0, int(qreal(e->pos().x())
+                        / width() * mMon->mFrameCount),
+                        mMon->mFrameCount - 1);
+                mMon->seekTo(frame);
+            }
+            return;
+        }
         // 拖拽阈值（kdenlive 同款量级）：纯点击不发起拖出
         if ((e->pos() - mPressPos).manhattanLength() < 12) { return; }
         if (mMon->path().isEmpty()) { return; }
@@ -261,30 +326,6 @@ public:
         setMouseTracking(true);
     }
 
-    // ---- 条带音频波形（槽位制：-1 哨兵 = 该秒未回）
-    void resetWave() {
-        mWaveCols.clear();
-        mWaveTotalSecs = 0;
-        mWaveFilled = 0;
-        update();
-    }
-    void setWaveTotal(const int secs) {
-        mWaveTotalSecs = qMax(0, secs);
-        mWaveCols.assign(size_t(mWaveTotalSecs * kWaveColsPerSec), -1.);
-        mWaveFilled = 0;
-        update();
-    }
-    void putWavePeaks(const int sec, const QVector<qreal> &cols) {
-        if (mWaveTotalSecs <= 0 || cols.isEmpty()) { return; }
-        for (int i = 0; i < cols.size(); i++) {
-            const int idx = sec * kWaveColsPerSec + i;
-            if (idx < 0 || idx >= mWaveCols.size()) { continue; }
-            if (mWaveCols.at(size_t(idx)) < 0.) { mWaveFilled++; }
-            mWaveCols[size_t(idx)] = qBound(0., cols.at(i), 1.);
-        }
-        update();
-    }
-
     int mFrameCount = 0;
     int mCurrent = 0;
     int mZoneIn = 0;
@@ -294,10 +335,6 @@ public:
     // Ctrl+滚轮以鼠标为锚缩放，播放头越窗自动滚动追边
     int mZoomFrom = 0;
     int mZoomFrames = 0; // 0 = 跟随全长（未初始化）
-    // 条带波形槽位
-    QVector<qreal> mWaveCols;
-    int mWaveTotalSecs = 0;
-    int mWaveFilled = 0;
     // 缩放窗口变化通知（面板侧同步滑动条）；内嵌类不走 moc 用回调
     std::function<void()> mOnZoomChanged;
 
@@ -389,7 +426,8 @@ protected:
 
         // 条带音频波形：包络居中，随缩放窗口映射（zone 之上、
         // 刻度/播放头之下）；未回秒留空隙
-        if (mWaveFilled > 0 && !mWaveCols.empty() && mMon->mFps > 0.) {
+        if (mMon->mWaveFilled > 0 && !mMon->mWaveCols.empty()
+                && mMon->mFps > 0.) {
             const qreal fps = mMon->mFps;
             const int halfH = (height() - 6) / 2;
             const int midY = height() / 2;
@@ -400,8 +438,8 @@ protected:
                 const int frame = frameAtX(x);
                 const int col = qBound(0,
                         int(frame / fps * kWaveColsPerSec),
-                        int(mWaveCols.size()) - 1);
-                const qreal v = mWaveCols.at(size_t(col));
+                        int(mMon->mWaveCols.size()) - 1);
+                const qreal v = mMon->mWaveCols.at(size_t(col));
                 if (x == prevX || v < 0.) { continue; }
                 prevX = x;
                 p.drawLine(x, midY - int(v * halfH),
@@ -764,6 +802,19 @@ ClipMonitorWidget::ClipMonitorWidget(QWidget *parent) : QWidget(parent) {
     connect(openBtn, &QToolButton::clicked, this,
             [this]() { emit openRequested(); });
 
+    // 铺开波形开关：主区域整幅显示音频波形（纯音频装载自动开）
+    mWaveBtn = new QToolButton(this);
+    mWaveBtn->setText(QString::fromUtf8("铺开"));
+    mWaveBtn->setToolTip(QString::fromUtf8(
+                "在预览区整幅铺开音频波形（纯音频自动开启）"));
+    mWaveBtn->setCheckable(true);
+    mWaveBtn->setAutoRaise(true);
+    mWaveBtn->setFocusPolicy(Qt::NoFocus);
+    connect(mWaveBtn, &QToolButton::toggled, this, [this](const bool on) {
+        mWaveSpread = on;
+        mView->update();
+    });
+
     mTimeLabel = new QLabel(this);
     {
         QFont f = QFontDatabase::systemFont(QFontDatabase::FixedFont);
@@ -790,6 +841,7 @@ ClipMonitorWidget::ClipMonitorWidget(QWidget *parent) : QWidget(parent) {
     controls->addWidget(zEndBtn);
     controls->addWidget(zClearBtn);
     controls->addStretch(1);
+    controls->addWidget(mWaveBtn);
     controls->addWidget(openBtn);
     controls->addSpacing(6);
     controls->addWidget(mTimeLabel);
@@ -853,6 +905,13 @@ void ClipMonitorWidget::loadFile(const QString &path) {
     mRuler->mZoomFrames = 0;
     mRuler->update();
     mFileLabel->setText(path);
+    // 纯音频自动铺开波形（预览区本无画面），视频默认关（画面优先），
+    // 按钮随时手动切换
+    mWaveSpread = SoundBrowserPanel::isSoundFile(path);
+    if (mWaveBtn) {
+        const QSignalBlocker block(mWaveBtn);
+        mWaveBtn->setChecked(mWaveSpread);
+    }
     mPlayer->setSource(QUrl::fromLocalFile(path));
     mPlayer->pause();
     mPlayer->setPosition(0);
@@ -868,7 +927,9 @@ void ClipMonitorWidget::loadFile(const QString &path) {
 // ---------------------------------------------------------------
 
 void ClipMonitorWidget::startWaveLoad(const QString &path) {
-    mRuler->resetWave();
+    mWaveCols.clear();
+    mWaveTotalSecs = 0;
+    mWaveFilled = 0;
     mWavePath.clear();
     mWavePending = 0;
     mWaveSh.reset();
@@ -903,9 +964,13 @@ void ClipMonitorWidget::waveOpenDone(const QString &path,
     mWaveDh = dh;
     mWaveSh = sh;
     const int secs = qMin(qCeil(dur), kWaveMaxSecs);
-    mRuler->setWaveTotal(secs);
+    mWaveTotalSecs = secs;
+    mWaveCols.assign(size_t(secs * kWaveColsPerSec), -1.);
+    mWaveFilled = 0;
     mWavePending = secs;
     for (int s = 0; s < secs; s++) { queueWaveSecond(sh, s); }
+    mRuler->update();
+    mView->update();
     qInfo() << "[MONWAVE] open" << path << "secs" << secs;
 }
 
@@ -939,9 +1004,16 @@ void ClipMonitorWidget::deliverWaveSecond(const stdsptr<SoundHandler> &sh,
     // 换片守卫：sh 与当前件不同 = 旧件在途回调，丢弃不记账
     if (mWavePending <= 0 || sh != mWaveSh) { return; }
     if (const auto samples = sh->getSamplesForSecond(sec)) {
-        mRuler->putWavePeaks(
-                    sec, SoundPeaks::peaksForSecond(samples,
-                                                    kWaveColsPerSec));
+        const auto peaks = SoundPeaks::peaksForSecond(samples,
+                                                      kWaveColsPerSec);
+        for (int i = 0; i < peaks.size(); i++) {
+            const int idx = sec * kWaveColsPerSec + i;
+            if (idx < 0 || idx >= mWaveCols.size()) { continue; }
+            if (mWaveCols.at(size_t(idx)) < 0.) { mWaveFilled++; }
+            mWaveCols[size_t(idx)] = qBound(0., peaks.at(i), 1.);
+        }
+        mRuler->update();
+        mView->update();
     } // 失败秒：槽位留空隙
     if (--mWavePending <= 0) {
         // 解码完成：释放解复用上下文（fd），已解秒留在共享缓存

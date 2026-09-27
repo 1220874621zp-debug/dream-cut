@@ -94,6 +94,14 @@ private:
     int mWavePending = 0;
     qsptr<SoundDataHandler> mWaveDh;
     stdsptr<SoundHandler> mWaveSh;
+    // 波形槽位（64 列/秒，-1 哨兵 = 未回）：条带与铺开视图共用，
+    // MonitorView/MonitorRuler 皆 friend 直读
+    QVector<qreal> mWaveCols;
+    int mWaveTotalSecs = 0;
+    int mWaveFilled = 0;
+    // 铺开模式：主区域整幅显示音频波形（纯音频自动开，可手动切换）
+    bool mWaveSpread = false;
+    QToolButton *mWaveBtn = nullptr;
     // 装载防重入：同路径装载中再请求 = 无操作（双击/连点不发
     // 重载，媒体与波形不重启）
     bool mLoadInFlight = false;
