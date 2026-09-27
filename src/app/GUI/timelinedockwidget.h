@@ -122,6 +122,10 @@ public:
     void fadeAutotestStage();
     // JKL 梭动步进（J/L 键）
     void shuttleStep(const int dir);
+    // 预渲染区域（Shift+R，不自动播放）
+    void preRenderZone();
+    // 无头台架（env DREAMCUT_PRERENDER_AUTOTEST）
+    void prerenderAutotestStage();
     // 无头台架（env DREAMCUT_JKL_AUTOTEST）
     void jklAutotestStage();
     // 无头台架（env DREAMCUT_SUBTITLE_AUTOTEST）

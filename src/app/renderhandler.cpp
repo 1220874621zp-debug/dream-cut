@@ -219,7 +219,10 @@ void RenderHandler::setPreviewState(const PreviewState state)
     mPreviewState = state;
 }
 
-void RenderHandler::renderPreview() {
+void RenderHandler::renderPreview(const bool autoPlayAfter) {
+    // 意图跟随请求；文档变更链的同步重启由 dock stopPreview 读
+    // preRenderActive() 透传（那里的默认参覆盖会吞掉预渲染语义）
+    mAutoPlayAfterRender = autoPlayAfter;
     setCurrentScene(mDocument.fActiveScene);
     if(!mCurrentScene) return;
     mSavedCurrentFrame = mCurrentScene->getCurrentFrame();
@@ -314,7 +317,18 @@ void RenderHandler::pipelineTick() {
                     mCurrentRenderFrame + 1);
         if(nextFrame > mMaxRenderFrame) {
             mPipelineTimer->stop();
-            playPreviewAfterAllTasksCompleted();
+            if(mAutoPlayAfterRender) {
+                playPreviewAfterAllTasksCompleted();
+            } else {
+                // 预渲染区域完成：不接管播放，停在 stopped
+                qInfo("[PRR] completed-noAutoplay branch");
+                mAutoPlayAfterRender = true;
+                TaskScheduler::sSetTaskUnderflowFunc(nullptr);
+                Document::sInstance->actionFinished();
+                setRenderingPreview(false);
+                setPreviewState(PreviewState::stopped);
+                emit previewFinished();
+            }
         }
     }
 }
@@ -435,6 +449,8 @@ void RenderHandler::resumePreview() {
 }
 
 void RenderHandler::playPreviewAfterAllTasksCompleted() {
+    qInfo("[PRR] allTasksCompleted autoplayFlag=%d",
+          int(mAutoPlayAfterRender));
     if(mRenderingPreview) {
         TaskScheduler::sSetTaskUnderflowFunc(nullptr);
         Document::sInstance->actionFinished();
@@ -457,6 +473,8 @@ void RenderHandler::playPreviewAfterAllTasksCompleted() {
 }
 
 bool RenderHandler::playPreview() {
+    // 播放开始即消费预渲染意图（后续重启恢复默认自动播）
+    mAutoPlayAfterRender = true;
     // the warm-cache path (spaceToggle) calls playPreview directly,
     // bypassing renderPreview - mCurrentScene may still point at the
     // scene previewed BEFORE a scene switch, advancing that scene

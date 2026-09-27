@@ -60,7 +60,12 @@ public:
     void stopPreview();
     void pausePreview();
     void resumePreview();
-    void renderPreview();
+    // autoPlayAfter=false = kdenlive 预渲染区域语义：渲完停在
+    // stopped（不接管播放，Space 随时从缓存起播）
+    void renderPreview(const bool autoPlayAfter = true);
+    // 当前/最近一次渲染请求是否为"完成后不自动播放"（未消费），
+    // dock stopPreview 的文档变更重启链据此透传
+    bool preRenderActive() const { return !mAutoPlayAfterRender; }
     void renderFromSettings(RenderInstanceSettings * const settings);
 
     void setPreviewFrame(const int &frame);
@@ -152,6 +157,7 @@ private:
     bool mPreviewing = false;
     //! @brief true if currently preview is being rendered
     bool mRenderingPreview = false;
+    bool mAutoPlayAfterRender = true;
 
     int mCurrentEncodeFrame;
     int mCurrentEncodeSoundSecond;

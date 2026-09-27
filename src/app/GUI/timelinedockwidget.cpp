@@ -51,6 +51,7 @@
 
 #include "Private/document.h"
 #include "Boxes/videobox.h"
+#include "Boxes/rectangle.h"
 #include "GUI/nletaskmanager.h"
 #include "GUI/nleproxytask.h"
 #include "Private/esettings.h"
@@ -736,6 +737,21 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
         });
     }
 
+    // 无头台架：DREAMCUT_PRERENDER_AUTOTEST=1 ——矩形块+入出点
+    // 0..20 预渲染，断言状态停在 stopped 不 playing 且帧已入缓存
+    if (qEnvironmentVariableIsSet("DREAMCUT_PRERENDER_AUTOTEST")) {
+        QTimer::singleShot(2500, this, [this]() {
+            if (!Document::sInstance->fActiveScene) {
+                mDocument.createNewScene();
+                QTimer::singleShot(600, this, [this]() {
+                    prerenderAutotestStage();
+                });
+                return;
+            }
+            prerenderAutotestStage();
+        });
+    }
+
     // 无头台架：DREAMCUT_SUBTITLE_AUTOTEST=1 ——SRT 写盘→导入→
     // 轨/块结构断言→导出→内容断言（[AUTOTESTSUB] 落日志）
     if (qEnvironmentVariableIsSet("DREAMCUT_SUBTITLE_AUTOTEST")) {
@@ -1351,6 +1367,20 @@ int TimelineDockWidget::nlePlayheadFrame() const
     return mNleView ? mNleView->playheadFrame() : 0;
 }
 
+// kdenlive 预渲染区域：入出点区间后台渲染进预览缓存，完成不
+// 自动播放（Space 随时从缓存起播），Esc 中断
+void TimelineDockWidget::preRenderZone()
+{
+    if (!eSettings::instance().fPreviewCache) {
+        mMainWindow->statusBar()->showMessage(
+                    tr("预渲染需开启预览缓存（设置→预览缓存）"), 5000);
+        return;
+    }
+    RenderHandler::sInstance->renderPreview(false);
+    mMainWindow->statusBar()->showMessage(
+                tr("预渲染区域中——完成不自动播放，Esc 可中断"), 5000);
+}
+
 void TimelineDockWidget::nleSeek(const int frame)
 {
     mDocument.setActiveSceneFrame(frame);
@@ -1466,6 +1496,10 @@ bool TimelineDockWidget::processKeyPress(QKeyEvent *event)
     } else if (key == Qt::Key_L && mods == Qt::NoModifier) {
         // JKL 梭动：L = 快进（连按加速）
         shuttleStep(1);
+        return true;
+    } else if (key == Qt::Key_R &&
+               mods == Qt::ShiftModifier) { // 预渲染区域（不播放）
+        preRenderZone();
         return true;
     } else if ((key == Qt::Key_K && mods == Qt::ControlModifier) ||
                (key == Qt::Key_C && mods == Qt::NoModifier)) { // split clip
@@ -1735,8 +1769,13 @@ void TimelineDockWidget::stopPreview()
         break;
     case PreviewState::playing:
     case PreviewState::rendering:
-        interruptPreview();
-        renderPreview();
+        // 预渲染意图透传：文档变更链（actionFinished→documentChanged）
+        // 的重启若按默认参覆盖，预渲染完成会错误接管播放
+        {
+            const bool keepPre = RenderHandler::sInstance->preRenderActive();
+            interruptPreview();
+            RenderHandler::sInstance->renderPreview(!keepPre);
+        }
         break;
     default:;
     }
@@ -2009,6 +2048,52 @@ void TimelineDockWidget::proxyAutotestStage()
                 qInfo("[AUTOTESTPROXY] DONE");
             });
         });
+    };
+    (*poll)(0);
+}
+
+
+void TimelineDockWidget::prerenderAutotestStage()
+{
+    const auto scene = mDocument.fActiveScene.data();
+    if (!scene) {
+        qInfo("[AUTOTESTPRR] ABORT no scene");
+        return;
+    }
+    // 矩形块（内容存在才渲得出帧）
+    const auto rect = enve::make_shared<RectangleBox>();
+    rect->setTopLeftPos(QPointF(100, 100));
+    rect->setBottomRightPos(QPointF(400, 300));
+    scene->addContained(rect);
+    scene->setFrameIn(true, 0);
+    scene->setFrameOut(true, 20);
+    const bool savedCache = eSettings::instance().fPreviewCache;
+    eSettings::sInstance->fPreviewCache = true;
+    qInfo("[AUTOTESTPRR] start state=%d",
+          int(RenderHandler::sInstance->currentPreviewState()));
+    RenderHandler::sInstance->renderPreview(false);
+    // 轮询状态（300ms × 40），记录是否出现过 playing
+    const auto sawPlaying = std::make_shared<bool>(false);
+    const auto poll = std::make_shared<std::function<void(int)>>();
+    *poll = [this, poll, scene, sawPlaying, savedCache](const int tries) -> void {
+        const auto st = RenderHandler::sInstance->currentPreviewState();
+        if (st == PreviewState::playing) { *sawPlaying = true; }
+        const bool cached = scene->getSceneFramesHandler().atFrame(10)
+                != nullptr;
+        if (st == PreviewState::rendering && tries < 40) {
+            QTimer::singleShot(100, this,
+                               [poll, tries]() { (*poll)(tries + 1); });
+            return;
+        }
+        eSettings::sInstance->fPreviewCache = savedCache;
+        int nCached = 0;
+        for (int f = 0; f <= 20; f++) {
+            if (scene->getSceneFramesHandler().atFrame(f)) { nCached++; }
+        }
+        qInfo("[AUTOTESTPRR] endState=%d sawPlaying=%d frame10=%d "
+              "cachedFrames=%d",
+              int(st), int(*sawPlaying), int(cached), nCached);
+        qInfo("[AUTOTESTPRR] DONE");
     };
     (*poll)(0);
 }
