@@ -463,6 +463,9 @@ protected:
             const qreal fps = mMon->mFps;
             const int midY = height() / 2;
             const int halfH = qMax(12, height() / 2 - 18);
+            // 波形全程统一色：播放头只是一条线，画面上唯一的
+            // "区域"=出入点选区带（用户反馈分色区与选区难分清）
+            p.setPen(QPen(QColor(0x9f, 0xc0, 0xe8, 210), 1));
             int prevX = -1;
             for (int x = 0; x < width(); x++) {
                 const int frame = spreadFrameAt(x);
@@ -472,10 +475,6 @@ protected:
                 const qreal v = mMon->mWaveCols.at(size_t(col));
                 if (x == prevX || v < 0.) { continue; }
                 prevX = x;
-                const bool played = frame <= mMon->mCurrentFrame;
-                p.setPen(QPen(played ? QColor(0xff, 0xff, 0xff, 235)
-                                     : QColor(0x7f, 0xa8, 0xd0, 210),
-                              1));
                 p.drawLine(x, midY - int(v * halfH),
                            x, midY + int(v * halfH));
             }
