@@ -124,260 +124,12 @@ QPixmap glyphPixmap(const char *svg, const QColor &color,
 
 // 预览画面：QVideoSink 帧黑底 letterbox；叠层=左上文件名+右下时间码；
 // 按住拖动 = 拖出片段（zone 或全片段）进时间轴
-class MonitorView : public QWidget {
-public:
-    explicit MonitorView(ClipMonitorWidget *parent)
-        : QWidget(parent), mMon(parent) {
-        setMinimumHeight(140);
-    }
-
-    QImage mFrame;
-    QString mEmptyText;
-    QPoint mPressPos;
-    bool mDragging = false;
-
-protected:
-    void paintEvent(QPaintEvent *) override {
-        QPainter p(this);
-        // 铺开模式：主区域整幅音频波形（纯音频自动开/按钮切换），
-        // 已播段亮白、未播淡蓝，zone 半透明带 + 播放头；点击定位
-        // /拖动刮擦，拖出阈值后仍可拖入时间轴
-        if (mMon->mWaveSpread && mMon->mWaveFilled > 0
-                && mMon->mWaveTotalSecs > 0 && mMon->mFrameCount > 0
-                && mMon->mFps > 0.) {
-            p.fillRect(rect(), QColor(0x0c, 0x0c, 0x0e));
-            const qreal fps = mMon->mFps;
-            const int midY = height() / 2;
-            const int halfH = qMax(12, height() / 2 - 18);
-            const qreal fPerPx = qreal(mMon->mFrameCount) / width();
-            int prevX = -1;
-            for (int x = 0; x < width(); x++) {
-                const int frame = int(x * fPerPx);
-                const int col = qBound(0,
-                        int(frame / fps * kWaveColsPerSec),
-                        int(mMon->mWaveCols.size()) - 1);
-                const qreal v = mMon->mWaveCols.at(size_t(col));
-                if (x == prevX || v < 0.) { continue; }
-                prevX = x;
-                const bool played = frame <= mMon->mCurrentFrame;
-                p.setPen(QPen(played ? QColor(0xff, 0xff, 0xff, 235)
-                                     : QColor(0x7f, 0xa8, 0xd0, 210),
-                              1));
-                p.drawLine(x, midY - int(v * halfH),
-                           x, midY + int(v * halfH));
-            }
-            if (mMon->mZoneOut >= mMon->mZoneIn) {
-                const int zx = int(qreal(mMon->mZoneIn)
-                                           / mMon->mFrameCount * width());
-                const int zo = int(qreal(mMon->mZoneOut)
-                                           / mMon->mFrameCount * width());
-                p.fillRect(QRect(zx, 0, qMax(2, zo - zx), height()),
-                           QColor(0x4b, 0x69, 0x8c, 60));
-                p.setPen(QPen(QColor(0xd0, 0xd0, 0xd4, 160), 1));
-                p.drawLine(zx, 0, zx, height());
-                p.drawLine(zo, 0, zo, height());
-            }
-            const int cx = int(qreal(mMon->mCurrentFrame)
-                                   / mMon->mFrameCount * width());
-            p.setPen(QPen(QColor(0xe8, 0x4c, 0x4c), 1));
-            p.drawLine(cx, 0, cx, height());
-            p.setPen(QColor(0x6e, 0x6e, 0x74));
-            p.drawText(rect().adjusted(6, 4, -6, -4),
-                       Qt::AlignLeft | Qt::AlignTop,
-                       mMon->mPath.section('/', -1));
-            return;
-        }
-        p.fillRect(rect(), QColor(0x0c, 0x0c, 0x0e));
-        if (mFrame.isNull()) {
-            if (!mEmptyText.isEmpty()) {
-                p.setPen(QColor(0x6e, 0x6e, 0x74));
-                p.drawText(rect(), Qt::AlignCenter, mEmptyText);
-            }
-            return;
-        }
-        const qreal dpr = devicePixelRatioF();
-        auto scaled = mFrame.scaled(
-                    QSize(int(width() * dpr), int(height() * dpr)),
-                    Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        scaled.setDevicePixelRatio(dpr);
-        const int x = (width() - int(scaled.width() / dpr)) / 2;
-        const int y = (height() - int(scaled.height() / dpr)) / 2;
-        p.drawImage(QPoint(x, y), scaled);
-
-        // 左上文件名叠层（半透明底）
-        if (!mOverlayFile.isEmpty()) {
-            QFont f = font();
-            f.setPixelSize(10);
-            p.setFont(f);
-            const QFontMetrics fm(f);
-            const QString label = fm.elidedText(
-                        mOverlayFile, Qt::ElideMiddle, width() - 16);
-            const QRect r(6, 6, fm.horizontalAdvance(label) + 10,
-                          fm.height() + 4);
-            p.fillRect(r, QColor(0, 0, 0, 130));
-            p.setPen(QColor(0xd8, 0xd8, 0xdc));
-            p.drawText(r.adjusted(5, 2, -5, -2), Qt::AlignVCenter, label);
-        }
-        // 右下时间码叠层（等宽字体半透明底）
-        if (!mOverlayTc.isEmpty()) {
-            QFont f = QFontDatabase::systemFont(
-                        QFontDatabase::FixedFont);
-            f.setPixelSize(11);
-            p.setFont(f);
-            const QFontMetrics fm(f);
-            const QRect r(width() - fm.horizontalAdvance(mOverlayTc) - 16,
-                          height() - fm.height() - 10,
-                          fm.horizontalAdvance(mOverlayTc) + 10,
-                          fm.height() + 4);
-            p.fillRect(r, QColor(0, 0, 0, 130));
-            p.setPen(QColor(0xf2, 0xf2, 0xf4));
-            p.drawText(r.adjusted(5, 2, -5, -2), Qt::AlignVCenter,
-                       mOverlayTc);
-        }
-    }
-
-    void mousePressEvent(QMouseEvent *e) override {
-        // 面板拿焦点：I/O/空格才能路由进监视器（否则被时间轴 dock
-        // 的 processKeyPress 抢走设了场景入出点，监视器毫无反应）
-        mMon->setFocus(Qt::MouseFocusReason);
-        if (e->button() != Qt::LeftButton) { return; }
-        mPressPos = e->pos();
-        mDragging = false;
-        // 铺开模式三手势：选区边=修剪，选区带=拖出入时间轴（松手
-        // 未拖=定位），选区外=刮擦定位
-        if (mMon->mWaveSpread && mMon->mFrameCount > 0) {
-            const int x = e->pos().x();
-            const int frame = spreadFrameAt(x);
-            if (mMon->mZoneOut >= mMon->mZoneIn) {
-                const int ix = spreadXOf(mMon->mZoneIn);
-                const int ox = spreadXOf(mMon->mZoneOut);
-                if (qAbs(x - ix) <= 7) { mSpreadGrab = 1; return; }
-                if (qAbs(x - ox) <= 7) { mSpreadGrab = 2; return; }
-                if (frame >= mMon->mZoneIn && frame <= mMon->mZoneOut) {
-                    mSpreadGrab = 3; // 选区带：武装拖出，松手未拖=定位
-                    mSpreadDragged = false;
-                    return;
-                }
-            }
-            mSpreadGrab = 4;
-            mMon->seekTo(frame);
-            return;
-        }
-    }
-
-    void mouseMoveEvent(QMouseEvent *e) override {
-        if (!(e->buttons() & Qt::LeftButton) || mDragging) { return; }
-        // 铺开模式三手势续行
-        if (mMon->mWaveSpread && mMon->mFrameCount > 0) {
-            const int frame = spreadFrameAt(e->pos().x());
-            if (mSpreadGrab == 1) {
-                mMon->setZoneIn(frame);
-                if (e->modifiers() & Qt::ShiftModifier) { mMon->seekTo(frame); }
-            } else if (mSpreadGrab == 2) {
-                mMon->setZoneOut(frame);
-                if (e->modifiers() & Qt::ShiftModifier) { mMon->seekTo(frame); }
-            } else if (mSpreadGrab == 3) {
-                if ((e->pos() - mPressPos).manhattanLength() >= 12) {
-                    mSpreadDragged = true;
-                    startClipDrag();
-                }
-            } else if (mSpreadGrab == 4) {
-                mMon->seekTo(frame);
-            }
-            return;
-        }
-        // 拖拽阈值（kdenlive 同款量级）：纯点击不发起拖出
-        if ((e->pos() - mPressPos).manhattanLength() < 12) { return; }
-        if (mMon->path().isEmpty()) { return; }
-        mDragging = true;
-        startClipDrag();
-        mDragging = false;
-    }
-
-    // 拖出片段（预览画面与铺开选区带共用）：zone 未设 = 全片段；
-    // path/inout/iosec 分键携带，时间轴按文件类型分轨落块
-    void startClipDrag() {
-        auto * const drag = new QDrag(this);
-        auto * const mime = new QMimeData;
-        const int in = mMon->hasZone() ? mMon->zoneIn() : 0;
-        const int out = mMon->hasZone() ? mMon->zoneOut()
-                                        : mMon->frameCount() - 1;
-        mime->setData(QStringLiteral("application/x-dreamcut-clip-path"),
-                      mMon->path().toUtf8());
-        mime->setData(QStringLiteral("application/x-dreamcut-clip-inout"),
-                      QStringLiteral("%1,%2").arg(in).arg(out)
-                              .toUtf8());
-        // 纯音频额外携带秒数出入点：音频块长度按场景 fps 换算
-        // （监视器帧基准取媒体帧率/30 默认，与场景 fps 不保证一致）
-        if (SoundBrowserPanel::isSoundFile(mMon->path())) {
-            const qreal fpsM = mMon->mFps > 1. ? mMon->mFps : 30.;
-            const qreal inSec = mMon->hasZone()
-                                        ? mMon->zoneIn() / fpsM : 0.;
-            const qreal outSec = mMon->hasZone()
-                                         ? mMon->zoneOut() / fpsM
-                                         : mMon->mDurationMs / 1000.;
-            mime->setData(QStringLiteral(
-                              "application/x-dreamcut-clip-iosec"),
-                          QStringLiteral("%1,%2")
-                                  .arg(QString::number(inSec, 'f', 3),
-                                       QString::number(outSec, 'f', 3))
-                                  .toUtf8());
-        }
-        drag->setMimeData(mime);
-        if (!mFrame.isNull()) {
-            drag->setPixmap(QPixmap::fromImage(
-                                mFrame.scaled(96, 54,
-                                              Qt::KeepAspectRatio)));
-        } else {
-            // 铺开波形（无视频帧）：截当前视图为拖拽缩略图
-            const QPixmap pm = grab();
-            if (!pm.isNull()) {
-                drag->setPixmap(pm.scaled(96, 54, Qt::KeepAspectRatio,
-                                          Qt::SmoothTransformation));
-            }
-        }
-        drag->exec(Qt::CopyAction);
-    }
-
-    void mouseReleaseEvent(QMouseEvent *e) override {
-        // 铺开选区带：松手未拖 = 定位到点击帧（拖出则已被 QDrag 接管）
-        if (mSpreadGrab == 3 && !mSpreadDragged
-                && mMon->mWaveSpread && mMon->mFrameCount > 0
-                && e->button() == Qt::LeftButton) {
-            mMon->seekTo(spreadFrameAt(e->pos().x()));
-        }
-        mSpreadGrab = 0;
-        mSpreadDragged = false;
-    }
-
-private:
-    ClipMonitorWidget * const mMon;
-    // 铺开模式手势状态：0=无 1=拖选区边(入) 2=拖选区边(出)
-    // 3=选区带拖出武装 4=刮擦
-    int mSpreadGrab = 0;
-    bool mSpreadDragged = false;
-
-    int spreadFrameAt(const int x) const {
-        return qBound(0, int(qreal(x) / qMax(1, width())
-                                 * mMon->mFrameCount),
-                      mMon->mFrameCount - 1);
-    }
-    int spreadXOf(const int frame) const {
-        return qBound(0, int(qreal(frame) / mMon->mFrameCount * width()),
-                      width());
-    }
-public:
-    QString mOverlayFile;
-    QString mOverlayTc;
-};
-
-// ---------------------------------------------------------------- ruler
-
 // kdenlive MonitorRuler 对齐：自适应刻度阶梯（1帧→30分）、主刻度半高
 // 次刻度 1/4 高、zone=底部半高高亮+左右把手（Shift 拖动同步定位）、
 // 时长气泡（拖 in 显示 入>长 / 拖 out 显示 长<出）、播放头=顶部下指
 // 三角；点击/拖动=定位
 class MonitorRuler : public QWidget {
+    friend class MonitorView; // 铺开视图共用缩放窗口坐标
 public:
     explicit MonitorRuler(ClipMonitorWidget *parent)
         : QWidget(parent), mMon(parent) {
@@ -638,24 +390,28 @@ protected:
         update();
     }
 
-    void wheelEvent(QWheelEvent *e) override {
-        if (mFrameCount <= 0) { return; }
-        if (!(e->modifiers() & Qt::ControlModifier)) { return; }
-        // kdenlive zoomIn/OutRuler：1.2 步进；以鼠标位置为锚（锚帧
-        // 在窗口内的比例缩放前后不变），窗口最小 8 帧、最大全长
+    // 锚点缩放（kdenlive zoomIn/OutRuler）：1.25 步进，锚帧在窗口
+    // 内的比例缩放前后不变，窗口最小 8 帧、最大全长。条带 Ctrl+滚轮
+    // 与铺开视图滚轮共用
+    void zoomAt(const int anchorFrame, const qreal factor) {
         const int zf = zoomFrames();
-        if (zf <= 0) { return; }
-        const qreal factor = e->angleDelta().y() > 0 ? 1 / 1.25 : 1.25;
+        if (zf <= 0 || mFrameCount <= 0) { return; }
         int nz = qMax(8, qMin(mFrameCount, int(qRound(zf * factor))));
         if (nz == zf) { return; }
-        const int anchor = frameAtX(int(e->position().x()));
-        const qreal r = qBound(0., qreal(anchor - mZoomFrom) / zf, 1.);
-        int from = qRound(anchor - r * nz);
+        const qreal r = qBound(0., qreal(anchorFrame - mZoomFrom) / zf, 1.);
+        int from = qRound(anchorFrame - r * nz);
         from = qBound(0, from, qMax(0, mFrameCount - nz));
         mZoomFrom = from;
         mZoomFrames = nz;
         update();
         notifyZoom();
+    }
+
+    void wheelEvent(QWheelEvent *e) override {
+        if (mFrameCount <= 0) { return; }
+        if (!(e->modifiers() & Qt::ControlModifier)) { return; }
+        const qreal factor = e->angleDelta().y() > 0 ? 1 / 1.25 : 1.25;
+        zoomAt(frameAtX(int(e->position().x())), factor);
         e->accept();
     }
 
@@ -677,24 +433,319 @@ protected:
     // 播放头更新入口：越窗时自动滚动追边（kdenlive 的 seekOffset
     // 逻辑——播放头贴边留 8% 余量再滚，避免频繁跳动）
 public:
-    void setCurrent(const int f) {
-        mCurrent = f;
-        const int zf = zoomFrames();
-        if (!zoomed() || zf <= 0 || width() <= 0) { return; }
-        const int edge = qMax(1, width() / 12);
-        const int px = (mCurrent - mZoomFrom) * width() / zf;
-        const int oldFrom = mZoomFrom;
-        if (px < edge && mZoomFrom > 0) {
-            mZoomFrom = qMax(0, mCurrent - edge * zf / width());
-        } else if (px > width() - edge) {
-            mZoomFrom = qMin(qMax(0, mFrameCount - zf),
-                             mCurrent - (width() - edge) * zf / width());
-        }
-        if (mZoomFrom != oldFrom) { notifyZoom(); }
-    }
+    void setCurrent(const int f); // 体在 MonitorView 完整型之后
 };
 
 // ---------------------------------------------------------------- panel
+
+class MonitorView : public QWidget {
+public:
+    explicit MonitorView(ClipMonitorWidget *parent)
+        : QWidget(parent), mMon(parent) {
+        setMinimumHeight(140);
+    }
+
+    QImage mFrame;
+    QString mEmptyText;
+    QPoint mPressPos;
+    bool mDragging = false;
+
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter p(this);
+        // 铺开模式：主区域整幅音频波形（纯音频自动开/按钮切换），
+        // 已播段亮白、未播淡蓝，zone 半透明带 + 播放头；点击定位
+        // /拖动刮擦，拖出阈值后仍可拖入时间轴
+        if (mMon->mWaveSpread && mMon->mWaveFilled > 0
+                && mMon->mWaveTotalSecs > 0 && mMon->mFrameCount > 0
+                && mMon->mFps > 0.) {
+            p.fillRect(rect(), QColor(0x0c, 0x0c, 0x0e));
+            const qreal fps = mMon->mFps;
+            const int midY = height() / 2;
+            const int halfH = qMax(12, height() / 2 - 18);
+            int prevX = -1;
+            for (int x = 0; x < width(); x++) {
+                const int frame = spreadFrameAt(x);
+                const int col = qBound(0,
+                        int(frame / fps * kWaveColsPerSec),
+                        int(mMon->mWaveCols.size()) - 1);
+                const qreal v = mMon->mWaveCols.at(size_t(col));
+                if (x == prevX || v < 0.) { continue; }
+                prevX = x;
+                const bool played = frame <= mMon->mCurrentFrame;
+                p.setPen(QPen(played ? QColor(0xff, 0xff, 0xff, 235)
+                                     : QColor(0x7f, 0xa8, 0xd0, 210),
+                              1));
+                p.drawLine(x, midY - int(v * halfH),
+                           x, midY + int(v * halfH));
+            }
+            if (mMon->mZoneOut >= mMon->mZoneIn) {
+                const int zx = int(qreal(mMon->mZoneIn)
+                                           / mMon->mFrameCount * width());
+                const int zo = int(qreal(mMon->mZoneOut)
+                                           / mMon->mFrameCount * width());
+                p.fillRect(QRect(zx, 0, qMax(2, zo - zx), height()),
+                           QColor(0x4b, 0x69, 0x8c, 60));
+                p.setPen(QPen(QColor(0xd0, 0xd0, 0xd4, 160), 1));
+                p.drawLine(zx, 0, zx, height());
+                p.drawLine(zo, 0, zo, height());
+            }
+            const int cx = int(qreal(mMon->mCurrentFrame)
+                                   / mMon->mFrameCount * width());
+            p.setPen(QPen(QColor(0xe8, 0x4c, 0x4c), 1));
+            p.drawLine(cx, 0, cx, height());
+            p.setPen(QColor(0x6e, 0x6e, 0x74));
+            p.drawText(rect().adjusted(6, 4, -6, -4),
+                       Qt::AlignLeft | Qt::AlignTop,
+                       mMon->mPath.section('/', -1));
+            return;
+        }
+        p.fillRect(rect(), QColor(0x0c, 0x0c, 0x0e));
+        if (mFrame.isNull()) {
+            if (!mEmptyText.isEmpty()) {
+                p.setPen(QColor(0x6e, 0x6e, 0x74));
+                p.drawText(rect(), Qt::AlignCenter, mEmptyText);
+            }
+            return;
+        }
+        const qreal dpr = devicePixelRatioF();
+        auto scaled = mFrame.scaled(
+                    QSize(int(width() * dpr), int(height() * dpr)),
+                    Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        scaled.setDevicePixelRatio(dpr);
+        const int x = (width() - int(scaled.width() / dpr)) / 2;
+        const int y = (height() - int(scaled.height() / dpr)) / 2;
+        p.drawImage(QPoint(x, y), scaled);
+
+        // 左上文件名叠层（半透明底）
+        if (!mOverlayFile.isEmpty()) {
+            QFont f = font();
+            f.setPixelSize(10);
+            p.setFont(f);
+            const QFontMetrics fm(f);
+            const QString label = fm.elidedText(
+                        mOverlayFile, Qt::ElideMiddle, width() - 16);
+            const QRect r(6, 6, fm.horizontalAdvance(label) + 10,
+                          fm.height() + 4);
+            p.fillRect(r, QColor(0, 0, 0, 130));
+            p.setPen(QColor(0xd8, 0xd8, 0xdc));
+            p.drawText(r.adjusted(5, 2, -5, -2), Qt::AlignVCenter, label);
+        }
+        // 右下时间码叠层（等宽字体半透明底）
+        if (!mOverlayTc.isEmpty()) {
+            QFont f = QFontDatabase::systemFont(
+                        QFontDatabase::FixedFont);
+            f.setPixelSize(11);
+            p.setFont(f);
+            const QFontMetrics fm(f);
+            const QRect r(width() - fm.horizontalAdvance(mOverlayTc) - 16,
+                          height() - fm.height() - 10,
+                          fm.horizontalAdvance(mOverlayTc) + 10,
+                          fm.height() + 4);
+            p.fillRect(r, QColor(0, 0, 0, 130));
+            p.setPen(QColor(0xf2, 0xf2, 0xf4));
+            p.drawText(r.adjusted(5, 2, -5, -2), Qt::AlignVCenter,
+                       mOverlayTc);
+        }
+    }
+
+    void mousePressEvent(QMouseEvent *e) override {
+        // 面板拿焦点：I/O/空格才能路由进监视器（否则被时间轴 dock
+        // 的 processKeyPress 抢走设了场景入出点，监视器毫无反应）
+        mMon->setFocus(Qt::MouseFocusReason);
+        // 中键拖动 = 平移缩放窗口（铺开模式）
+        if (e->button() == Qt::MiddleButton && mMon->mWaveSpread
+                && mMon->mFrameCount > 0) {
+            mMidPan = true;
+            mMidStartX = e->pos().x();
+            mMidFrom = mMon->mRuler->mZoomFrom;
+            return;
+        }
+        if (e->button() != Qt::LeftButton) { return; }
+        mPressPos = e->pos();
+        mDragging = false;
+        // 铺开模式三手势：选区边=修剪，选区带=拖出入时间轴（松手
+        // 未拖=定位），选区外=刮擦定位
+        if (mMon->mWaveSpread && mMon->mFrameCount > 0) {
+            const int x = e->pos().x();
+            const int frame = spreadFrameAt(x);
+            if (mMon->mZoneOut >= mMon->mZoneIn) {
+                const int ix = spreadXOf(mMon->mZoneIn);
+                const int ox = spreadXOf(mMon->mZoneOut);
+                if (qAbs(x - ix) <= 7) { mSpreadGrab = 1; return; }
+                if (qAbs(x - ox) <= 7) { mSpreadGrab = 2; return; }
+                if (frame >= mMon->mZoneIn && frame <= mMon->mZoneOut) {
+                    mSpreadGrab = 3; // 选区带：武装拖出，松手未拖=定位
+                    mSpreadDragged = false;
+                    return;
+                }
+            }
+            mSpreadGrab = 4;
+            mMon->seekTo(frame);
+            return;
+        }
+    }
+
+    void mouseMoveEvent(QMouseEvent *e) override {
+        // 中键平移
+        if (mMidPan && (e->buttons() & Qt::MiddleButton)) {
+            const int zf = mMon->mRuler->zoomFrames();
+            const int dx = e->pos().x() - mMidStartX;
+            const int from = mMidFrom
+                    - int(qreal(dx) * zf / qMax(1, width()));
+            mMon->mRuler->mZoomFrom = qBound(0, from,
+                    qMax(0, mMon->mFrameCount - zf));
+            mMon->mRuler->update();
+            mMon->mRuler->notifyZoom();
+            return;
+        }
+        if (!(e->buttons() & Qt::LeftButton) || mDragging) { return; }
+        // 铺开模式三手势续行
+        if (mMon->mWaveSpread && mMon->mFrameCount > 0) {
+            const int frame = spreadFrameAt(e->pos().x());
+            if (mSpreadGrab == 1) {
+                mMon->setZoneIn(frame);
+                if (e->modifiers() & Qt::ShiftModifier) { mMon->seekTo(frame); }
+            } else if (mSpreadGrab == 2) {
+                mMon->setZoneOut(frame);
+                if (e->modifiers() & Qt::ShiftModifier) { mMon->seekTo(frame); }
+            } else if (mSpreadGrab == 3) {
+                if ((e->pos() - mPressPos).manhattanLength() >= 12) {
+                    mSpreadDragged = true;
+                    startClipDrag();
+                }
+            } else if (mSpreadGrab == 4) {
+                mMon->seekTo(frame);
+            }
+            return;
+        }
+        // 拖拽阈值（kdenlive 同款量级）：纯点击不发起拖出
+        if ((e->pos() - mPressPos).manhattanLength() < 12) { return; }
+        if (mMon->path().isEmpty()) { return; }
+        mDragging = true;
+        startClipDrag();
+        mDragging = false;
+    }
+
+    // 拖出片段（预览画面与铺开选区带共用）：zone 未设 = 全片段；
+    // path/inout/iosec 分键携带，时间轴按文件类型分轨落块
+    void startClipDrag() {
+        auto * const drag = new QDrag(this);
+        auto * const mime = new QMimeData;
+        const int in = mMon->hasZone() ? mMon->zoneIn() : 0;
+        const int out = mMon->hasZone() ? mMon->zoneOut()
+                                        : mMon->frameCount() - 1;
+        mime->setData(QStringLiteral("application/x-dreamcut-clip-path"),
+                      mMon->path().toUtf8());
+        mime->setData(QStringLiteral("application/x-dreamcut-clip-inout"),
+                      QStringLiteral("%1,%2").arg(in).arg(out)
+                              .toUtf8());
+        // 纯音频额外携带秒数出入点：音频块长度按场景 fps 换算
+        // （监视器帧基准取媒体帧率/30 默认，与场景 fps 不保证一致）
+        if (SoundBrowserPanel::isSoundFile(mMon->path())) {
+            const qreal fpsM = mMon->mFps > 1. ? mMon->mFps : 30.;
+            const qreal inSec = mMon->hasZone()
+                                        ? mMon->zoneIn() / fpsM : 0.;
+            const qreal outSec = mMon->hasZone()
+                                         ? mMon->zoneOut() / fpsM
+                                         : mMon->mDurationMs / 1000.;
+            mime->setData(QStringLiteral(
+                              "application/x-dreamcut-clip-iosec"),
+                          QStringLiteral("%1,%2")
+                                  .arg(QString::number(inSec, 'f', 3),
+                                       QString::number(outSec, 'f', 3))
+                                  .toUtf8());
+        }
+        drag->setMimeData(mime);
+        if (!mFrame.isNull()) {
+            drag->setPixmap(QPixmap::fromImage(
+                                mFrame.scaled(96, 54,
+                                              Qt::KeepAspectRatio)));
+        } else {
+            // 铺开波形（无视频帧）：截当前视图为拖拽缩略图
+            const QPixmap pm = grab();
+            if (!pm.isNull()) {
+                drag->setPixmap(pm.scaled(96, 54, Qt::KeepAspectRatio,
+                                          Qt::SmoothTransformation));
+            }
+        }
+        drag->exec(Qt::CopyAction);
+    }
+
+    void mouseReleaseEvent(QMouseEvent *e) override {
+        // 铺开选区带：松手未拖 = 定位到点击帧（拖出则已被 QDrag 接管）
+        if (mSpreadGrab == 3 && !mSpreadDragged
+                && mMon->mWaveSpread && mMon->mFrameCount > 0
+                && e->button() == Qt::LeftButton) {
+            mMon->seekTo(spreadFrameAt(e->pos().x()));
+        }
+        if (e->button() == Qt::MiddleButton) { mMidPan = false; }
+        mSpreadGrab = 0;
+        mSpreadDragged = false;
+    }
+
+    // 铺开模式缩放：滚轮=锚点缩放（与条带 Ctrl+滚轮同一窗口），
+    // 中键拖动=平移窗口，双击=回全宽
+    void wheelEvent(QWheelEvent *e) override {
+        if (!(mMon->mWaveSpread && mMon->mFrameCount > 0)) { return; }
+        const qreal factor = e->angleDelta().y() > 0 ? 1 / 1.25 : 1.25;
+        mMon->mRuler->zoomAt(spreadFrameAt(int(e->position().x())),
+                             factor);
+        e->accept();
+    }
+
+    void mouseDoubleClickEvent(QMouseEvent *e) override {
+        QWidget::mouseDoubleClickEvent(e);
+        if (mMon->mWaveSpread && mMon->mRuler->zoomed()) {
+            mMon->mRuler->resetZoom();
+        }
+    }
+
+private:
+    ClipMonitorWidget * const mMon;
+    // 铺开模式手势状态：0=无 1=拖选区边(入) 2=拖选区边(出)
+    // 3=选区带拖出武装 4=刮擦
+    int mSpreadGrab = 0;
+    bool mSpreadDragged = false;
+    bool mMidPan = false;
+    int mMidStartX = 0;
+    int mMidFrom = 0;
+
+    // 铺开视图坐标 = 条带缩放窗口坐标（同窗共缩放）
+    // 铺开视图坐标 = 条带缩放窗口坐标；体在 MonitorRuler 完整型之后
+    int spreadFrameAt(const int x) const;
+    int spreadXOf(const int frame) const;
+public:
+    QString mOverlayFile;
+    QString mOverlayTc;
+};
+
+// ---------------------------------------------------------------- ruler
+
+// MonitorView 铺开坐标（MonitorRuler 完整型之后可解析）
+int MonitorView::spreadFrameAt(const int x) const {
+    return mMon->mRuler->frameAtX(x);
+}
+int MonitorView::spreadXOf(const int frame) const {
+    return mMon->mRuler->xOfFrame(frame);
+}
+
+void MonitorRuler::setCurrent(const int f) {
+    mCurrent = f;
+    mMon->mView->update(); // 铺开视图播放头/已播高亮跟随
+    const int zf = zoomFrames();
+    if (!zoomed() || zf <= 0 || width() <= 0) { return; }
+    const int edge = qMax(1, width() / 12);
+    const int px = (mCurrent - mZoomFrom) * width() / zf;
+    const int oldFrom = mZoomFrom;
+    if (px < edge && mZoomFrom > 0) {
+        mZoomFrom = qMax(0, mCurrent - edge * zf / width());
+    } else if (px > width() - edge) {
+        mZoomFrom = qMin(qMax(0, mFrameCount - zf),
+                         mCurrent - (width() - edge) * zf / width());
+    }
+    if (mZoomFrom != oldFrom) { notifyZoom(); }
+}
 
 ClipMonitorWidget::ClipMonitorWidget(QWidget *parent) : QWidget(parent) {
     mPlayer = new QMediaPlayer(this);
@@ -811,6 +862,7 @@ ClipMonitorWidget::ClipMonitorWidget(QWidget *parent) : QWidget(parent) {
         mZoomScroll->setPageStep(qMax(1, zf));
         mZoomScroll->setValue(mRuler->mZoomFrom);
         mZoomScroll->setVisible(zoomed);
+        mView->update(); // 铺开视图跟随缩放窗口
     };
 
     // ---- 控制栏（kdenlive 布局：左=走带，右=zone）----
