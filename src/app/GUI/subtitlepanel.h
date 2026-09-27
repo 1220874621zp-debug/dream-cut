@@ -38,8 +38,20 @@ public:
 signals:
     void logMessage(const QString& msg);
 private:
+    void openSpeechDialog();
     MainWindow* const mMainWindow;
     QListWidget* mList;
+};
+
+// 语音转字幕管线工具（whisper.cpp 外挂进程编排）
+class SpeechToText {
+public:
+    // PATH 探测 whisper-cli 可执行（whisper-cli / whisper-cli-main /
+    // whisper-cpp / main 四个常见构建名）
+    static QString findWhisperBinary();
+    // ffmpeg 抽 16kHz 单声道 wav（whisper 输入格式）；失败给 errOut
+    static bool extractWav(const QString& media, const QString& wavOut,
+                           QString* errOut = nullptr);
 };
 
 #endif // SUBTITLEPANEL_H
