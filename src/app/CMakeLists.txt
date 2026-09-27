@@ -271,6 +271,8 @@ set(
     GUI/nletaskmanager.cpp
     GUI/nletaskpanel.cpp
     GUI/nleproxytask.cpp
+    GUI/nlescenedetecttask.cpp
+    GUI/nleloudnesstask.cpp
     GUI/quickeffectsearchdialog.cpp
     GUI/scriptmanager.cpp
     GUI/scriptconsole.cpp
@@ -348,6 +350,8 @@ set(
     GUI/nletaskmanager.h
     GUI/nletaskpanel.h
     GUI/nleproxytask.h
+    GUI/nlescenedetecttask.h
+    GUI/nleloudnesstask.h
     GUI/quickeffectsearchdialog.h
     GUI/scriptmanager.h
     GUI/scriptconsole.h

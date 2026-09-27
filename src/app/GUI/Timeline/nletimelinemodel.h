@@ -270,6 +270,14 @@ public:
     // ---- guides ----
     void requestMarkerAdd(const int frame);
     void requestMarkerRemove(const int frame);
+    // 标记注释编辑（canvas 撤销链 + guides 重推）
+    bool requestMarkerRename(const int frame, const QString& title);
+    // 场景检测分割：cutSecs = 源文件切点秒（ffmpeg scene 滤镜），
+    // srcFps = 源流帧率（<=0 回退场景 fps）；逐刀走 requestRazorCut
+    // 守卫（严格块内 + 转场禁区），返回实际完成的刀数
+    int requestSceneDetectSplits(const int clipId,
+                                 const QVector<double>& cutSecs,
+                                 const qreal srcFps);
 
     // ---- magnetic mode ----
     bool magnetic() const { return mMagnetic; }

@@ -2527,6 +2527,68 @@ void NleTimelineModel::requestMarkerRemove(const int frame)
     if (scene->removeMarker(frame)) { refreshFromDocument(); }
 }
 
+bool NleTimelineModel::requestMarkerRename(const int frame,
+                                           const QString& title)
+{
+    const auto scene = mPanelScene.data();
+    if (!scene) { return false; }
+    if (!scene->editMarker(frame, title, true)) { return false; }
+    // editMarker 只 emit newFrameRange，不重推 guides，手动补一发
+    emit guidesChanged();
+    return true;
+}
+
+int NleTimelineModel::requestSceneDetectSplits(
+        const int clipId, const QVector<double>& cutSecs,
+        const qreal srcFps)
+{
+    if (mInWriteback || mGestureActive) { return 0; }
+    const auto c0 = clip(clipId);
+    if (!c0 || !c0->layer || cutSecs.isEmpty()) { return 0; }
+    const auto box = enve_cast<BoundingBox*>(c0->layer.data());
+    if (!box) { return 0; }
+    const auto dur = box->getDurationRectangle();
+    const auto flar = dur ? dur->ref<FixedLenAnimationRect>() : nullptr;
+    if (!dur || !flar) { return 0; }
+    // 源映射锚（铁律 1：入口快照，中途任何刀都会重建 mClips，
+    // c0 指针跨刀即悬垂）：inFrame = 块首显示帧对应的源帧，
+    // 显示帧 = st + (源帧 - inFrame) / speed
+    const int trackId = c0->trackId;
+    const int st = c0->start;
+    const qreal speed = c0->speed > 0 ? c0->speed : 1.;
+    const int inFrame = st - flar->getMinAnimRelFrame();
+    const qreal srcFpsEff = srcFps > 0 ? srcFps : mFps;
+    int cuts = 0;
+    for (const double sec : cutSecs) {
+        if (mGestureActive) { break; }
+        const int sf = qRound(sec * srcFpsEff);
+        // 切变帧 = 新镜头首帧，须归右块；干净分割约定切点帧 F 归
+        // 左块（拷贝 [min..F] / 原件 [F+1..max]），故请求切割在
+        // 切变帧的前一帧
+        const int f = st + qRound((sf - 1 - inFrame) / speed);
+        // 每刀后表重建：覆盖块解析是纯读，切在解析循环外
+        int covId = -1;
+        int covStart = 0;
+        int covDur = 0;
+        for (const auto& cc : mClips) {
+            if (cc.trackId != trackId) { continue; }
+            if (cc.start <= f && f < cc.start + cc.duration) {
+                covId = cc.clipId;
+                covStart = cc.start;
+                covDur = cc.duration;
+                break;
+            }
+        }
+        if (covId < 0) { continue; }
+        // 严格块内（同 requestRazorCut 守卫：边缘帧跳过）
+        if (!(covStart < f && f < covStart + covDur - 1)) { continue; }
+        if (requestRazorCut({covId}, f)) { cuts++; }
+    }
+    qInfo("[NLE] scene detect clip=%d cuts=%d/%d srcFps=%.3f",
+          clipId, cuts, cutSecs.count(), srcFpsEff);
+    return cuts;
+}
+
 // ---------------------------------------------------------------- magnetic
 
 void NleTimelineModel::setMagnetic(const bool on, const bool compact)

@@ -1,6 +1,8 @@
 #include "nletimelineview.h"
 #include "nletimelinemodel.h"
 #include "GUI/soundbrowserpanel.h"
+#include "GUI/nlescenedetecttask.h"
+#include "GUI/nleloudnesstask.h"
 
 #include <QPainter>
 #include <QPainterPath>
@@ -3311,6 +3313,127 @@ void NleTimelineView::generateProxies()
             : QStringLiteral("选中块代理均已就绪 %1").arg(ready));
 }
 
+// 达芬奇场景检测：选中集视频块逐个排队扫描，完成后换算显示帧
+// 逐刀分割（源帧锚 inFrame = st - animMin，变速块按 speed 折算）
+void NleTimelineView::sceneDetectSelected()
+{
+    int queued = 0;
+    for (const auto id : mModel->selection()) {
+        const auto cc = mModel->clip(id);
+        const auto vb = cc
+                ? enve_cast<VideoBox*>(cc->layer.data()) : nullptr;
+        if (!vb) { continue; }
+        const QString src = vb->getFilePath();
+        if (src.isEmpty()) { continue; }
+        const QPointer<VideoBox> boxPtr(vb);
+        auto* const detectTask = new NleSceneDetectTask(src);
+        const NleTaskPtr task(detectTask);
+        connect(task.data(), &NleTask::finished, this,
+                [this, boxPtr, detectTask, task, id](const int state,
+                                                     const QString& err) {
+            if (state != int(NleTask::State::Done)) {
+                if (state != int(NleTask::State::Canceled) && !err.isEmpty()) {
+                    emit logMessage(QStringLiteral("场景检测失败：%1").arg(err));
+                }
+                return;
+            }
+            // 块在扫描期间可能被删/分割：层指针失配即放弃
+            const auto c = mModel->clip(id);
+            if (!c || c->layer.data() != boxPtr.data()) {
+                emit logMessage(QStringLiteral("场景检测完成，但块已变动，未应用切点"));
+                return;
+            }
+            const int cuts = mModel->requestSceneDetectSplits(
+                        id, detectTask->cutSecs(), detectTask->srcFps());
+            emit logMessage(cuts > 0
+                    ? QStringLiteral("场景检测完成：切 %1 刀").arg(cuts)
+                    : QStringLiteral("场景检测完成：未发现镜头切变"));
+        });
+        NleTaskManager::instance()->submit(task);
+        queued++;
+    }
+    emit logMessage(queued > 0
+            ? QStringLiteral("已排队场景检测 %1 个（任务面板看进度）").arg(queued)
+            : QStringLiteral("选中的块中没有可检测的视频块"));
+}
+
+// 达芬奇 Fairlight 响度标准化：独立声音块按块内段精确分析（帧域
+// = 场景帧），视频内嵌音频按整源分析（源帧域需要流帧率，v1 回退）
+void NleTimelineView::normalizeLoudnessSelected()
+{
+    int queued = 0;
+    const qreal sceneFps = mModel->fps();
+    for (const auto id : mModel->selection()) {
+        const auto cc = mModel->clip(id);
+        if (!cc || !cc->layer) { continue; }
+        QString src;
+        qreal inSec = -1.;   // >= 0 = 按段分析；< 0 = 整源
+        qreal durSec = -1.;
+        if (const auto snd = enve_cast<eIndependentSound*>(cc->layer.data())) {
+            src = snd->getFilePath();
+            if (src.isEmpty()) { continue; }
+            // 声音块帧域 = 场景帧：锚 animMin 后即块内源段偏移
+            const auto dur = snd->getDurationRectangle();
+            const auto flar = dur
+                    ? dur->ref<FixedLenAnimationRect>() : nullptr;
+            const int animMin = flar ? flar->getMinAnimRelFrame() : 0;
+            inSec = qMax(0., (cc->start - animMin) / sceneFps);
+            durSec = cc->duration / sceneFps;
+        } else if (const auto vb = enve_cast<VideoBox*>(cc->layer.data())) {
+            if (!vb->sound()) { continue; }
+            src = vb->getFilePath();
+            if (src.isEmpty()) { continue; }
+        } else { continue; }
+
+        const QPointer<eBoxOrSound> layerPtr(cc->layer.data());
+        auto* const loudTask = new NleLoudnessTask(src, -14., inSec, durSec);
+        const NleTaskPtr task(loudTask);
+        connect(task.data(), &NleTask::finished, this,
+                [this, layerPtr, loudTask, task](const int state,
+                                                 const QString& err) {
+            if (state != int(NleTask::State::Done)) {
+                if (state != int(NleTask::State::Canceled) && !err.isEmpty()) {
+                    emit logMessage(QStringLiteral("响度分析失败：%1").arg(err));
+                }
+                return;
+            }
+            const auto sound = enve_cast<eSound*>(layerPtr.data());
+            auto* const anim = sound ? sound->volumeAnimator() : nullptr;
+            if (!anim) {
+                emit logMessage(QStringLiteral("响度分析完成，但块已不存在"));
+                return;
+            }
+            const qreal mean = loudTask->meanDb();
+            const qreal target = loudTask->targetDb();
+            const qreal vol = NleLoudness::volumeForTarget(
+                        mean, loudTask->maxDb(), target);
+            const qreal base = qBound(0., anim->getCurrentBaseValue(), 200.);
+            if (qAbs(vol - base) < 1.) {
+                emit logMessage(QStringLiteral("块响度已接近 %1 dB，无需调整")
+                                .arg(QString::number(target, 'f', 0)));
+                return;
+            }
+            const qreal factor = base > 0.5 ? vol / base : vol / 100.;
+            if (!NleLoudness::applyGainToSound(sound, factor)) {
+                emit logMessage(QStringLiteral("响度标准化失败：块无音量动画"));
+                return;
+            }
+            emit logMessage(QStringLiteral("响度标准化完成：%1 dB → %2 dB，"
+                                           "音量 %3% → %4%")
+                            .arg(QString::number(mean, 'f', 1),
+                                 QString::number(target, 'f', 0),
+                                 QString::number(base, 'f', 0),
+                                 QString::number(vol, 'f', 0)));
+        });
+        NleTaskManager::instance()->submit(task);
+        queued++;
+    }
+    emit logMessage(queued > 0
+            ? QStringLiteral("已排队响度标准化 %1 个（任务面板看进度）")
+              .arg(queued)
+            : QStringLiteral("选中的块中没有音频块"));
+}
+
 void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
 {
     // 转场块右键：替换类型 / 删除
@@ -3406,12 +3529,63 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
             const int d = qAbs(mark.first - frame);
             if (d < bestDist) { bestDist = d; nearest = mark.first; }
         }
+        QString nearestTitle;
+        for (const auto &mark : mMarkers) {
+            if (mark.first == nearest) { nearestTitle = mark.second; break; }
+        }
         QAction *remove = menu.addAction(tr("移除最近的标记"));
         remove->setEnabled(nearest >= 0);
+        QAction *rename = menu.addAction(tr("编辑标记注释…"));
+        rename->setEnabled(nearest >= 0);
+        menu.addSeparator();
+        // 播放头跳转导航（kdenlive 引导线语义：上一/下一 + 列表）
+        const int cur = playheadFrame();
+        int prev = -1;
+        int next = -1;
+        for (const auto &mark : mMarkers) {
+            if (mark.first < cur && (prev < 0 || mark.first > prev)) {
+                prev = mark.first;
+            }
+            if (mark.first > cur && (next < 0 || mark.first < next)) {
+                next = mark.first;
+            }
+        }
+        QAction *goPrev = menu.addAction(tr("转到上一标记"));
+        goPrev->setEnabled(prev >= 0);
+        QAction *goNext = menu.addAction(tr("转到下一标记"));
+        goNext->setEnabled(next >= 0);
+        QMenu *listMenu = nullptr;
+        if (!mMarkers.isEmpty()) {
+            listMenu = menu.addMenu(tr("转到标记"));
+            const qreal fps = mModel->fps();
+            int listed = 0;
+            for (const auto &mark : mMarkers) {
+                if (++listed > 50) { break; }
+                const int sec = fps > 0 ? qRound(mark.first / fps) : 0;
+                QString label = QStringLiteral("%1:%2  %3")
+                        .arg(sec / 60).arg(sec % 60, 2, 10, QChar('0'))
+                        .arg(mark.second);
+                QAction *go = listMenu->addAction(label);
+                const int f = mark.first;
+                connect(go, &QAction::triggered, this, [this, f]() {
+                    emit playheadDragged(f);
+                });
+            }
+        }
         QAction *act = menu.exec(e->globalPos());
         if (act == add) { mModel->requestMarkerAdd(frame); }
         else if (act == remove && nearest >= 0) {
             mModel->requestMarkerRemove(nearest);
+        } else if (act == rename && nearest >= 0) {
+            bool ok = false;
+            const QString text = QInputDialog::getText(
+                        this, tr("标记注释"), tr("注释："),
+                        QLineEdit::Normal, nearestTitle, &ok);
+            if (ok) { mModel->requestMarkerRename(nearest, text); }
+        } else if (act == goPrev && prev >= 0) {
+            emit playheadDragged(prev);
+        } else if (act == goNext && next >= 0) {
+            emit playheadDragged(next);
         }
         return;
     }
@@ -3461,8 +3635,9 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
     QAction *splitHere = menu.addAction(tr("在此处分割"));
     QAction *freeze = menu.addAction(tr("从此处定格到块尾"));
     QAction *speed = menu.addAction(tr("变速…"));
-    // 代理剪辑：选中集里有视频块即给入口（kdenlive 同款）
+    // 代理剪辑/场景检测：选中集里有视频块即给入口（kdenlive 同款）
     QAction *proxy = nullptr;
+    QAction *sceneDetect = nullptr;
     bool anyVideo = false;
     for (const auto id : mModel->selection()) {
         const auto cc = mModel->clip(id);
@@ -3471,8 +3646,21 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
             break;
         }
     }
+    // 响度标准化：选中集有声音块或含音频的视频块即给入口
+    QAction *loudness = nullptr;
+    for (const auto id : mModel->selection()) {
+        const auto cc = mModel->clip(id);
+        if (!cc || !cc->layer) { continue; }
+        if (cc->audio ||
+            (enve_cast<VideoBox*>(cc->layer.data()) &&
+             enve_cast<VideoBox*>(cc->layer.data())->sound())) {
+            loudness = menu.addAction(tr("响度标准化(-14 LUFS)"));
+            break;
+        }
+    }
     if (anyVideo) {
         proxy = menu.addAction(tr("生成代理（低清预览）"));
+        sceneDetect = menu.addAction(tr("场景检测分割"));
     }
     // kdenlive detach-audio: only video-family clips with a live
     // embedded sound offer it
@@ -3543,6 +3731,10 @@ void NleTimelineView::contextMenuEvent(QContextMenuEvent *e)
                                    disableAct->isChecked());
     } else if (proxy && act == proxy) {
         generateProxies();
+    } else if (sceneDetect && act == sceneDetect) {
+        sceneDetectSelected();
+    } else if (loudness && act == loudness) {
+        normalizeLoudnessSelected();
     } else if (act == speed) {
         bool ok = false;
         const double rate = QInputDialog::getDouble(

@@ -226,6 +226,12 @@ private:
                     const bool allTracks);
     // 代理剪辑：选中集视频块排队转码（右键菜单入口）
     void generateProxies();
+    // 达芬奇场景检测：选中集视频块排队 ffmpeg scene 扫描，完成
+    // 回调换算时间轴帧逐刀分割
+    void sceneDetectSelected();
+    // 达芬奇 Fairlight 响度标准化：选中集声音块（含内嵌音频的
+    // 视频块）volumedetect 测响度，音量动画器拉到目标值
+    void normalizeLoudnessSelected();
     void trackSelectAt(const QPoint &pos, const int clipId,
                        const bool backward);
     void pruneMediaCaches();

@@ -766,6 +766,9 @@ TimelineDockWidget::TimelineDockWidget(Document& document,
             subtitleAutotestStage();
         });
     }
+
+
+
 }
 
 void TimelineDockWidget::subtitleAutotestStage()
@@ -2097,3 +2100,6 @@ void TimelineDockWidget::prerenderAutotestStage()
     };
     (*poll)(0);
 }
+
+
+
