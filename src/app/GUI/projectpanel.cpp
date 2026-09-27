@@ -25,6 +25,16 @@
 
 #include "projectpanel.h"
 
+#include <QLineEdit>
+#include <QTimer>
+#include <QProcess>
+#include <QFile>
+#include "Sound/eindependentsound.h"
+#include "CacheHandlers/soundcachehandler.h"
+#include <QMessageBox>
+
+#include "Boxes/videobox.h"
+
 #include <QVBoxLayout>
 #include <functional>
 #include <QTreeWidget>
@@ -302,6 +312,13 @@ ProjectPanel::ProjectPanel(Document& doc, QWidget* const parent) :
     const auto layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
+    mSearch = new QLineEdit(this);
+    mSearch->setPlaceholderText(tr("搜索场景/素材"));
+    mSearch->setClearButtonEnabled(true);
+    layout->addWidget(mSearch);
+    connect(mSearch, &QLineEdit::textChanged,
+            this, &ProjectPanel::applySearchFilter);
+
     layout->addWidget(mTree);
 
     connect(mTree, &QTreeWidget::itemDoubleClicked,
@@ -381,6 +398,98 @@ ProjectPanel::ProjectPanel(Document& doc, QWidget* const parent) :
             this, [this](const QString&) { rebuildLinkProjects(); });
 
     rebuild();
+
+    // 无头台架：DREAMCUT_PROJECT_AUTOTEST=1 ——引用计数语义+搜索
+    // 过滤断言（[AUTOTESTPP] 落日志）
+    if (qEnvironmentVariableIsSet("DREAMCUT_PROJECT_AUTOTEST")) {
+        QTimer::singleShot(3000, this, [this]() {
+            if (!Document::sInstance) {
+                qInfo("[AUTOTESTPP] ABORT no document");
+                return;
+            }
+            if (Document::sInstance->fScenes.isEmpty()) {
+                Document::sInstance->createNewScene();
+                QTimer::singleShot(600, this, [this]() {
+                    if (!Document::sInstance->fScenes.isEmpty()) {
+                        // 重入一次（简单递归不做，直接内联判定）
+                    }
+                });
+                qInfo("[AUTOTESTPP] scene created, retry");
+                QTimer::singleShot(900, this, [this]() {
+                    ppAutotestStage();
+                });
+                return;
+            }
+            ppAutotestStage();
+        });
+    }
+}
+
+void ProjectPanel::ppAutotestStage()
+{
+    if (!Document::sInstance ||
+            Document::sInstance->fScenes.isEmpty()) {
+        qInfo("[AUTOTESTPP] ABORT no scene after retry");
+        return;
+    }
+    {
+            const auto scene =
+                    Document::sInstance->fScenes.first().data();
+            if (!scene) {
+                qInfo("[AUTOTESTPP] ABORT null scene");
+                return;
+            }
+            const QString usedF = QStringLiteral(
+                        "/tmp/dcpp_used.wav");
+            const QString unusedF = QStringLiteral(
+                        "/tmp/dcpp_unused.wav");
+            QProcess::execute(QStringLiteral("python3"),
+                {QStringLiteral("-c"),
+                 QStringLiteral(
+                     "import wave,struct;"
+                     "for p in ['/tmp/dcpp_used.wav',"
+                     "'/tmp/dcpp_unused.wav']:"
+                     "w=wave.open(p,'w');w.setnchannels(1);"
+                     "w.setsampwidth(2);w.setframerate(44100);"
+                     "w.writeframes(b''.join(struct.pack('<h',0)"
+                     "for _ in range(4410)));w.close()")});
+            // 未使用：仅注册句柄
+            const auto unusedH =
+                    FilesHandler::sInstance->getFileHandler<
+                        SoundFileHandler>(unusedF);
+            // 使用中：挂进场景（VideoBox 不适合 wav，用独立声音层）
+            const auto snd = enve::make_shared<eIndependentSound>();
+            snd->setFilePath(usedF);
+            scene->addContained(snd);
+            const auto usedH = FilesHandler::sInstance->getFileHandler<
+                        SoundFileHandler>(usedF);
+            QTimer::singleShot(400, this, [this, usedH, unusedH]() {
+                const int rcUsed = usedH ? usedH->refCount() : -1;
+                const int rcUnused = unusedH ? unusedH->refCount() : -1;
+                int rows = 0;
+                for (QTreeWidgetItemIterator it(mTree); *it; ++it) {
+                    if (!(*it)->isHidden()) { rows++; }
+                }
+                // 搜索过滤：只留 used 文件名
+                mSearch->setText(QStringLiteral("dcpp_used"));
+                int filteredRows = 0;
+                for (QTreeWidgetItemIterator it(mTree); *it; ++it) {
+                    if (!(*it)->isHidden()) { filteredRows++; }
+                }
+                mSearch->clear();
+                int restoredRows = 0;
+                for (QTreeWidgetItemIterator it(mTree); *it; ++it) {
+                    if (!(*it)->isHidden()) { restoredRows++; }
+                }
+                qInfo("[AUTOTESTPP] refUsed=%d refUnused=%d rows=%d "
+                      "filtered=%d restored=%d",
+                      rcUsed, rcUnused, rows, filteredRows,
+                      restoredRows);
+                QFile::remove(QStringLiteral("/tmp/dcpp_used.wav"));
+                QFile::remove(QStringLiteral("/tmp/dcpp_unused.wav"));
+                qInfo("[AUTOTESTPP] DONE");
+            });
+    }
 }
 
 void ProjectPanel::showEvent(QShowEvent* const e)
@@ -497,6 +606,44 @@ QString ProjectPanel::sceneInfo(const Canvas* const scene) const
             .arg(range.fMax);
 }
 
+// 搜索过滤：按名过滤行（场景行恒显），文件夹无可见子即藏
+void ProjectPanel::applySearchFilter()
+{
+    const QString needle = mSearch->text().trimmed();
+    const bool empty = needle.isEmpty();
+    // 素材/场景行
+    QTreeWidgetItemIterator it(mTree);
+    while (*it) {
+        auto* const item = *it;
+        const bool isFolder = folderItemAt(item) != nullptr;
+        if (!isFolder) {
+            const bool match = empty ||
+                    item->text(0).contains(needle, Qt::CaseInsensitive);
+            item->setHidden(!match);
+        }
+        ++it;
+    }
+    // 文件夹：全部子行被藏则藏
+    if (!empty) {
+        for (QTreeWidgetItemIterator it2(mTree); *it2; ++it2) {
+            auto* const folder = folderItemAt(*it2);
+            if (!folder) { continue; }
+            bool anyVisible = false;
+            for (int i = 0; i < folder->childCount(); i++) {
+                if (!folder->child(i)->isHidden()) {
+                    anyVisible = true;
+                    break;
+                }
+            }
+            folder->setHidden(!anyVisible);
+        }
+    } else {
+        for (QTreeWidgetItemIterator it2(mTree); *it2; ++it2) {
+            (*it2)->setHidden(false);
+        }
+    }
+}
+
 void ProjectPanel::rebuild()
 {
     for (const auto& conn : mNameConns) { disconnect(conn); }
@@ -570,6 +717,7 @@ void ProjectPanel::rebuild()
     }
     rebuildLinkProjects();
     updateActiveMark();
+    applySearchFilter();
 }
 
 // 链接工程区：每个已缓存的外部工程一行（文件名 + 链环图标），
@@ -719,6 +867,34 @@ void ProjectPanel::showContextMenu(const QPoint& pos)
     }
 
     QMenu menu(this);
+    // 清理未使用素材（kdenlive Remove Unused）：引用计数 0 的文件
+    {
+        QList<FileCacheHandler*> unused;
+        if (FilesHandler::sInstance) {
+            const auto proxyDir = VideoBox::proxyPathFor(
+                        QStringLiteral("/x")).section(
+                        QStringLiteral("/"), 0, -2);
+            for (const auto& fh :
+                 FilesHandler::sInstance->fileHandlers()) {
+                if (!fh || fh->refCount() != 0) { continue; }
+                if (fh->path().startsWith(proxyDir)) { continue; }
+                unused << fh.get();
+            }
+        }
+        const auto cleanAct = menu.addAction(
+                    tr("清理未使用素材（%1 个）").arg(unused.count()));
+        cleanAct->setEnabled(!unused.isEmpty());
+        connect(cleanAct, &QAction::triggered, this, [this, unused]() {
+            if (unused.isEmpty()) { return; }
+            if (QMessageBox::question(this, tr("清理未使用素材"),
+                    tr("从工程移除 %1 个未引用文件？（磁盘文件不受影响）")
+                    .arg(unused.count())) != QMessageBox::Yes) {
+                return;
+            }
+            for (auto* fh : unused) { fh->deleteAction(); }
+            rebuild();
+        });
+    }
     menu.addAction(QIcon::fromTheme("file_new"),
                    tr("新建场景"),
                    this, [this]() {

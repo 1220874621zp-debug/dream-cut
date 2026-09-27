@@ -28,6 +28,7 @@
 
 #include <QWidget>
 
+class QLineEdit;
 class QTreeWidget;
 class QTreeWidgetItem;
 class Canvas;
@@ -101,8 +102,13 @@ private:
     void writeFolderState() const;
     void readFolderState();
 
+    void applySearchFilter();
+    // 无头台架（env DREAMCUT_PROJECT_AUTOTEST）
+    void ppAutotestStage();
+
     Document& mDocument;
     QTreeWidget* mTree = nullptr;
+    QLineEdit* mSearch = nullptr;
     QList<QMetaObject::Connection> mNameConns;
     QList<FolderInfo> mFolders;
     int mNextFolderId = 1;
