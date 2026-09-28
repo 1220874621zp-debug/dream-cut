@@ -20,13 +20,13 @@ namespace EvTail {
     // 返回 ev 流（含 FileFooter）的结束偏移；无有效尾部块时 = src->size()。
     // thumbPng 非空则把探测到的封面 PNG 原始字节收入其中。
     // 校验失败（长度越界/magic 不符/非 PNG 头）一律按"无尾部块"处理，不抛。
-    qint64 probe(QIODevice* src, QByteArray* thumbPng = nullptr);
+    CORE_EXPORT qint64 probe(QIODevice* src, QByteArray* thumbPng = nullptr);
 
     // 打开工程文件只读并 probe 的便捷封装；失败返回 -1。
-    qint64 probePath(const QString& path, QByteArray* thumbPng = nullptr);
+    CORE_EXPORT qint64 probePath(const QString& path, QByteArray* thumbPng = nullptr);
 
     // 在流末尾（FileFooter 之后）追加尾部块；png 为空返回 false 不写。
-    bool append(QIODevice* dst, const QByteArray& thumbPng);
+    CORE_EXPORT bool append(QIODevice* dst, const QByteArray& thumbPng);
 }
 
 #endif // EVTAIL_H

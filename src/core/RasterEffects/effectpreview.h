@@ -30,6 +30,8 @@ enum class RasterEffectType : short;
 #include <QImage>
 #include <QSize>
 
+#include "core_global.h"
+
 // 可视化特效面板的预览帧生成器：为一个内置光栅特效渲染循环
 // 播放的演示帧序列。全部在 CPU 上离屏完成（效果Caller 的
 // processCpu 通道），不依赖场景、画布、GUI 或 GL 上下文，
@@ -38,13 +40,13 @@ namespace EffectPreview {
 
 // 该特效类型是否支持离屏预览（backdrop 采样型特效需要下方
 // 画布合成内容，无法在单图层预览中表达）
-bool canPreview(const RasterEffectType type);
+CORE_EXPORT bool canPreview(const RasterEffectType type);
 
 // 渲染 nFrames 帧循环演示动画；失败时返回空列表（调用方显示
 // 占位图）。imgSize 建议 160x160 上下。
 // onlyFrame >= 0 时只渲染该下标的一帧（静态海报：面板卡片默认
 // 静态展示、悬停才播动画的懒加载模式），返回单元素列表。
-QList<QImage> renderEffectFrames(const RasterEffectType type,
+CORE_EXPORT QList<QImage> renderEffectFrames(const RasterEffectType type,
                                  const int nFrames,
                                  const QSize& imgSize,
                                  const int onlyFrame = -1);

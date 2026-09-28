@@ -16,7 +16,7 @@
 
 #include "smartPointers/ememory.h"
 
-class Samples;
+struct Samples;
 
 // Shared absolute-peak extractor for timeline waveforms (and anything
 // else that needs loudness columns). The per-second mixing math mirrors

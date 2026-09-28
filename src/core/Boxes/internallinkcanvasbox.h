@@ -34,7 +34,7 @@
 // 内存场景；QFileSystemWatcher 监视源文件，外部编辑器保存后防抖
 // 重解析并广播 projectReloaded，链接盒收到后重绑目标场景（AE→PR
 // 动态链接的进程内实现——下游持活引用，源文件是唯一事实源）
-class ExternalProjectCache : public QObject {
+class CORE_EXPORT ExternalProjectCache : public QObject {
     Q_OBJECT
 public:
     struct Loaded {
