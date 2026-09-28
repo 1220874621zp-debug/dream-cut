@@ -1,3 +1,5 @@
+<img width="2560" height="1413" alt="image" src="https://github.com/user-attachments/assets/e54809e4-110f-492a-8c4b-85995cbc8233" />
+
 # DreamCut
 
 **剪映式桌面视频剪辑软件 · Linux 原生 · Qt6 / C++ / Skia**
