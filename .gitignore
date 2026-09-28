@@ -38,3 +38,4 @@ src/scripts/flatpak/remote
 
 *.AppImage
 __pycache__/
+.directory
