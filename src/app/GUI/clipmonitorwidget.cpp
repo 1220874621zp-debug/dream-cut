@@ -478,19 +478,19 @@ protected:
                 p.drawLine(x, midY - int(v * halfH),
                            x, midY + int(v * halfH));
             }
+            // 选区带/播放头与波形同走缩放窗口坐标（spreadXOf）：
+            // f9a65883c 只把波形循环接了窗口，这两处漏改残留全长映射，
+            // 缩放/平移后选区带压错音频、播放头与条带指针分家
             if (mMon->mZoneOut >= mMon->mZoneIn) {
-                const int zx = int(qreal(mMon->mZoneIn)
-                                           / mMon->mFrameCount * width());
-                const int zo = int(qreal(mMon->mZoneOut)
-                                           / mMon->mFrameCount * width());
+                const int zx = spreadXOf(mMon->mZoneIn);
+                const int zo = spreadXOf(mMon->mZoneOut);
                 p.fillRect(QRect(zx, 0, qMax(2, zo - zx), height()),
                            QColor(0x4b, 0x69, 0x8c, 60));
                 p.setPen(QPen(QColor(0xd0, 0xd0, 0xd4, 160), 1));
                 p.drawLine(zx, 0, zx, height());
                 p.drawLine(zo, 0, zo, height());
             }
-            const int cx = int(qreal(mMon->mCurrentFrame)
-                                   / mMon->mFrameCount * width());
+            const int cx = spreadXOf(mMon->mCurrentFrame);
             p.setPen(QPen(QColor(0xe8, 0x4c, 0x4c), 1));
             p.drawLine(cx, 0, cx, height());
             p.setPen(QColor(0x6e, 0x6e, 0x74));
@@ -1162,6 +1162,7 @@ void ClipMonitorWidget::setZoneIn(const int frame) {
     mRuler->mZoneIn = mZoneIn;
     mRuler->mZoneOut = mZoneOut;
     mRuler->update();
+    mView->update(); // 铺开视图选区带跟随（I/O 键/按钮改 zone 无视图刷新则滞留旧位）
     updateControls();
     emit zoneChanged();
 }
@@ -1173,6 +1174,7 @@ void ClipMonitorWidget::setZoneOut(const int frame) {
     mRuler->mZoneIn = mZoneIn;
     mRuler->mZoneOut = mZoneOut;
     mRuler->update();
+    mView->update(); // 铺开视图选区带跟随（I/O 键/按钮改 zone 无视图刷新则滞留旧位）
     updateControls();
     emit zoneChanged();
 }
@@ -1185,6 +1187,7 @@ void ClipMonitorWidget::setZone(const int in, const int out) {
     mRuler->mZoneIn = mZoneIn;
     mRuler->mZoneOut = mZoneOut;
     mRuler->update();
+    mView->update(); // 铺开视图选区带跟随（I/O 键/按钮改 zone 无视图刷新则滞留旧位）
     updateControls();
     emit zoneChanged();
 }
@@ -1197,6 +1200,7 @@ void ClipMonitorWidget::resetZone() {
     mRuler->mZoneIn = mZoneIn;
     mRuler->mZoneOut = mZoneOut;
     mRuler->update();
+    mView->update(); // 铺开视图选区带跟随（I/O 键/按钮改 zone 无视图刷新则滞留旧位）
     updateControls();
     emit zoneChanged();
 }
